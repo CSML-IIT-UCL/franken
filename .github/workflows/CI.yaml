@@ -43,6 +43,7 @@ jobs:
           environment-file: .github/env-dev.yml
           environment-name: test
           cache-environment: true
+          cache-environment-key: environment-${{ matrix.python-version }}-${{ matrix.pytorch-version }}
           condarc: |
             channels:
               - conda-forge
