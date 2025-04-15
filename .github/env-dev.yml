@@ -1,0 +1,20 @@
+channels:
+- pytorch
+- nvidia
+- conda-forge
+dependencies:
+- pytorch>=2.4
+- ase
+- numpy
+- omegaconf
+- cupy
+- pip
+- requests
+- tqdm
+- pytest
+- pre-commit
+- black
+- ruff
+- psutil
+- tyro
+name: franken
