@@ -1,4 +1,3 @@
-import dataclasses
 import importlib.resources
 import json
 import logging
@@ -8,7 +7,7 @@ from pathlib import Path
 import requests
 import torch
 
-from franken.config import BackboneConfig
+from franken.config import BackboneConfig, asdict_with_classvar
 from franken.utils import distributed
 from franken.utils.file_utils import download_file
 
@@ -163,7 +162,7 @@ def download_checkpoint(gnn_backbone_id: str, cache_dir: str | None = None) -> N
 
 
 def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
-    gnn_config_dict = dataclasses.asdict(gnn_config)
+    gnn_config_dict = asdict_with_classvar(gnn_config)
     gnn_backbone_id = gnn_config_dict.pop("path_or_id")
     backbone_family = gnn_config_dict.pop("family")
     ckpt_path = get_checkpoint_path(gnn_backbone_id)

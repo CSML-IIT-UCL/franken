@@ -236,7 +236,7 @@ class TestSerializeBestModel:
                             )
                             model = FrankenPotential(
                                 gnn_config=MaceBackboneConfig("test"),
-                                rf_config=GaussianRFConfig(1024, 1.0)
+                                rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0)
                             ).to("cpu")
                             all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
                             # 1. best_model_file exists but contains same best model as log_collection

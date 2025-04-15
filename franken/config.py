@@ -1,10 +1,50 @@
 from abc import ABC
 import ast
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
-from typing import Annotated, ClassVar, Literal, Sequence, Union
+from dataclasses import dataclass, field
+from typing import Annotated, Any, ClassVar, Literal, Sequence, Union
 
 import tyro
+
+
+
+def all_fields(class_or_instance):
+    """Return a tuple describing the fields of this dataclass.
+
+    Accepts a dataclass or an instance of one. Tuple elements are of
+    type Field.
+    """
+
+    try:
+        fields = getattr(class_or_instance, "__dataclass_fields__")
+    except AttributeError:
+        raise TypeError('must be called with a dataclass type or instance') from None
+
+    # Exclude pseudo-fields.  Note that fields is sorted by insertion
+    # order, so the order of the tuple is as the fields were defined.
+    return tuple(f for f in fields.values() if f._field_type.name == "_FIELD_CLASSVAR" or f._field_type.name == "_FIELD")
+
+
+def asdict_with_classvar(obj) -> dict[str, Any]:
+    if hasattr(obj, "__dataclass_fields__"):
+        result = []
+        for f in all_fields(obj):
+            value = asdict_with_classvar(getattr(obj, f.name))
+            result.append((f.name, value))
+        return dict(result)
+    elif isinstance(obj, tuple) and hasattr(obj, '_fields'):
+        return type(obj)(*[asdict_with_classvar(v) for v in obj])
+    elif isinstance(obj, (list, tuple)):
+        # Assume we can create an object of this type by passing in a
+        # generator (which is not true for namedtuples, handled
+        # above).
+        return type(obj)(asdict_with_classvar(v) for v in obj)
+    elif isinstance(obj, dict):
+        return type(obj)((asdict_with_classvar(k),
+                          asdict_with_classvar(v))
+                         for k, v in obj.items())
+    else:
+        return deepcopy(obj)
 
 
 @dataclass
@@ -137,7 +177,7 @@ class BackboneConfig(ABC):
     family: ClassVar[str]
 
     def to_ckpt(self):
-        return asdict(self)
+        return asdict_with_classvar(self)
 
     @staticmethod
     def from_ckpt(ckpt):
@@ -150,6 +190,7 @@ class BackboneConfig(ABC):
         else:
             raise ValueError(ckpt["family"])
         init_args = deepcopy(ckpt)
+        init_args.pop("family")
         return cls(**init_args)
 
 
@@ -185,7 +226,7 @@ class RFConfig(ABC):
     rf_type: ClassVar[str]
 
     def to_ckpt(self):
-        return asdict(self)
+        return asdict_with_classvar(self)
 
     @staticmethod
     def from_ckpt(ckpt):
@@ -196,6 +237,7 @@ class RFConfig(ABC):
         else:
             raise ValueError(ckpt["rf_type"])
         init_args = deepcopy(ckpt)
+        init_args.pop("rf_type")
         return cls(**init_args)
 
 
@@ -205,7 +247,7 @@ class GaussianRFConfig(RFConfig):
     num_random_features: int
     """Number of random features"""
 
-    length_scale: HPSearchConfigStringType = field(
+    length_scale: tyro.conf.AvoidSubcommands[HPSearchConfigStringType | list[float] | float] = field(
         default_factory=lambda: HPSearchConfig(start=4, stop=20, num=10, scale="linear")
     )
     """Gaussian length-scale sigma."""
@@ -241,12 +283,12 @@ class MultiscaleGaussianRFConfig(RFConfig):
 
 @dataclass
 class SolverConfig:
-    l2_penalty: HPSearchConfigStringType = field(
+    l2_penalty: tyro.conf.AvoidSubcommands[HPSearchConfigStringType | list[float] | float] = field(
         default_factory=lambda: HPSearchConfig(start=-11, stop=-6, num=6, scale="log")
     )
     """The amount of regularization. Should be a small positive number."""
 
-    force_weight: HPSearchConfigStringType = field(
+    force_weight: tyro.conf.AvoidSubcommands[HPSearchConfigStringType | list[float] | float] = field(
         default_factory=lambda: HPSearchConfig(
             start=0.01, stop=0.99, num=10, scale="linear"
         )

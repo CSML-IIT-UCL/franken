@@ -1,5 +1,4 @@
 import abc
-import dataclasses
 import json
 import logging
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import Tuple, Union
 import torch
 import torch.utils.data
 
+from franken.config import asdict_with_classvar
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics, compute_dataset_statistics
 from franken.trainers.log_utils import (
@@ -54,14 +54,14 @@ class BaseTrainer(abc.ABC):
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
         if self.statistics_ is None or not are_dicts_equal(
-            self.statistics_[1], dataclasses.asdict(model.gnn_config)
+            self.statistics_[1], asdict_with_classvar(model.gnn_config)
         ):
             stat = compute_dataset_statistics(
                 dataset=self.train_dataloader.dataset,  # type: ignore
                 gnn=model.gnn,
                 device=self.device,
             )
-            stat_dict = dataclasses.asdict(model.gnn_config)
+            stat_dict = asdict_with_classvar(model.gnn_config)
             self.statistics_ = (stat, stat_dict)
 
         return self.statistics_

@@ -1,4 +1,3 @@
-import dataclasses
 import logging
 import os
 from typing import Literal, Mapping, Optional, Tuple, Union
@@ -7,21 +6,14 @@ import torch
 
 from franken.config import (
     BackboneConfig,
-    GaussianRFConfig,
-    MultiscaleGaussianRFConfig,
     RFConfig,
 )
 from franken.backbones.utils import load_checkpoint
 from franken.data import Configuration
 from franken.rf.atomic_energies import AtomicEnergiesShift
-from franken.rf.heads import (
-    MultiScaleOrthogonalRFF,
-    OrthogonalRFF,
-    RandomFeaturesHead,
-)
+from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
 from franken.utils.jac import jacfwd, tune_jacfwd_chunksize
-from franken.utils.misc import sanitize_init_dict
 
 logger = logging.getLogger("franken")
 
@@ -69,20 +61,9 @@ class FrankenPotential(torch.nn.Module):
 
         # Initialize `gnn`, `rf`, `input_scaler`, `energy_shift` submodules
         self.gnn = load_checkpoint(gnn_config)
+
         rf_feature_dim = self.gnn.feature_dim()
-
-        rf_cls: type[RandomFeaturesHead]
-        if isinstance(rf_config, GaussianRFConfig):
-            rf_cls = OrthogonalRFF
-        elif isinstance(rf_config, MultiscaleGaussianRFConfig):
-            rf_cls = MultiScaleOrthogonalRFF
-        else:
-            raise ValueError(type(rf_config))
-
-        random_features_params = sanitize_init_dict(
-            rf_cls, dataclasses.asdict(rf_config)
-        )
-        self.rf = rf_cls(input_dim=rf_feature_dim, **random_features_params)
+        self.rf = initialize_rf(rf_config, rf_feature_dim=rf_feature_dim)
 
         self.input_scaler = FeatureScaler(
             input_dim=self.rf.input_dim,

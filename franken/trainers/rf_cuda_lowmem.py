@@ -99,7 +99,6 @@ class RandomFeaturesTrainer(BaseTrainer):
             units="models",
             device=self.device,
         )
-        print(f"{solver_params=}")
 
         local_logs = dict()
         num_failed = torch.zeros((1,), device=self.device, dtype=torch.int)

@@ -17,6 +17,7 @@ from franken.config import (
     HPSearchConfig,
     RFConfig,
     SolverConfig,
+    asdict_with_classvar,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
@@ -86,7 +87,7 @@ def init_loaders(
 
 def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) -> str:
     hp_summary = f"Trial {trial_id + 1:>3} |"
-    for k, v in dataclasses.asdict(rf_params).items():
+    for k, v in rf_params.to_ckpt().items():
         fmt_val = format(v, ".3f" if isinstance(v, float) else "")
         hp_summary += f" {k:^7}: {fmt_val:^7} |"
     try:
@@ -109,6 +110,9 @@ def hps_from_config(cfg):
         hp_def = getattr(cfg, field.name)
         if isinstance(hp_def, HPSearchConfig):
             hp_iterators[field.name] = hp_def.get_vals()
+        else:
+
+            hp_iterators[field.name] = [hp_def]
     return hp_iterators
 
 
@@ -219,7 +223,7 @@ def save_experiment_info(cfg: AutotuneConfig, run_dir: Path):
         "gpu_model": get_device_name("cuda:0"),
         "cpu_model": get_device_name("cpu"),
     }
-    cfg_dict = dataclasses.asdict(cfg)
+    cfg_dict = asdict_with_classvar(cfg)
     assert isinstance(cfg_dict, dict)
     with open(run_dir / "configs.json", "w") as f:
         json.dump(cfg_dict | train_hardware, f, indent=4)
@@ -284,7 +288,7 @@ def autotune(cfg: AutotuneConfig):
     setup_logger(
         level=logging_level, directory=dist_utils.broadcast_obj(run_dir), rank=rank
     )
-    pprint_config(dataclasses.asdict(cfg))
+    pprint_config(asdict_with_classvar(cfg))
 
     # Global try-catch after setup_logger, to log any exceptions.
     try:

@@ -367,10 +367,13 @@ def test_autotune(gnn_cfg, device, atomic_energies):
         test_path=DATASET_REGISTRY.get_path("test", "test", None, False),
         val_path=DATASET_REGISTRY.get_path("test", "val", None, False),
     )
-    rf_cfg = GaussianRFConfig(num_random_features=128, length_scale=[1.0, 2.0])
+    rf_cfg = GaussianRFConfig(
+        num_random_features=128,
+        length_scale=HPSearchConfig(values=[0.5, 1.0]),
+    )
     solver_cfg = SolverConfig(
-        l2_penalty=1e-5,
-        force_weight=HPSearchConfig(0.1, 0.9, 2, scale='linear')
+        l2_penalty=HPSearchConfig(value=1e-4),
+        force_weight=HPSearchConfig(start=0.1, stop=0.9, num=2, scale='linear')
     )
     temp_dir = None
     try:
@@ -392,6 +395,7 @@ def test_autotune(gnn_cfg, device, atomic_energies):
             jac_chunk_size="auto",
             trainer=trainer
         )
+        print(f"{list(temp_dir.glob('*'))}")
         assert (temp_dir / "best.json").is_file()
         assert (temp_dir / "log.json").is_file()
         assert (temp_dir / "best_ckpt.pt").is_file()
