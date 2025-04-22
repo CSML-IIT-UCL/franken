@@ -10,9 +10,11 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
+sys.path.insert(0, os.path.abspath('..'))
+import re
+from docutils import nodes
 from sphinxawesome_theme.postprocess import Icons
 
 html_permalinks_icon = Icons.permalinks_icon  # SVG as a string
@@ -22,7 +24,6 @@ html_permalinks_icon = Icons.permalinks_icon  # SVG as a string
 project = "franken"
 copyright = "2024, franken team"
 author = "franken team"
-
 
 # -- General configuration ---------------------------------------------------
 
@@ -47,17 +48,19 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinxawesome_theme",
     "myst_parser",
+    "sphinxarg.ext",
 ]
 
 myst_enable_extensions = ["amsmath", "dollarmath", "html_image"]
 
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "requirements.txt"]
 
 html_theme = "sphinxawesome_theme"
 autodoc_class_signature = "separated"
 autoclass_content = "class"
+autosummary_generate = False
 
 autodoc_typehints = "signature"
 autodoc_member_order = "groupwise"
@@ -99,4 +102,23 @@ html_theme_options = {
 }
 
 html_static_path = ["_static"]
+html_css_files = ["css/mystyle.css"]
 templates_path = ["_templates"]
+
+## Teletype role
+tt_re = re.compile('^:tt:`(.*)`$')
+def tt_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+    """
+    Can be used as :tt:`SOME_TEXT_HERE`,
+    """
+    result = []
+    m = tt_re.search(rawtext)
+    if m:
+        arg = m.group(1)
+        result = [nodes.literal('', arg)]
+        result[0]['classes'].append('literal-no-code')
+    return result,[]
+
+
+def setup(app):
+    app.add_role('tt', tt_role)

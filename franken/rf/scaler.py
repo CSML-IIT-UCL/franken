@@ -2,7 +2,6 @@ import math
 from typing import Any, Optional
 
 import torch
-import torch.utils.data
 from tqdm.auto import tqdm
 
 import franken.utils.distributed as dist_utils
@@ -11,16 +10,22 @@ from franken.utils.misc import garbage_collection_cuda
 
 
 class Statistics:
-    """Running statistics on a dataset, computing both per-species and global statistics."""
+    """Running statistics of GNN features, computing both per-species and global statistics."""
 
     def __init__(self, input_dim: Optional[int] = None):
+        """Initialize running statistics calculator
+
+        Args:
+            input_dim (Optional[int], optional): Dimension of GNN features. If not specified will
+            be inferred automatically when the first feature is provided. Defaults to None.
+        """
         self.input_dim = input_dim
         self.statistics: dict[int, dict[str, Any]] = {}
         if self.input_dim is not None:
             self._initialize_statistics_for_prefix(0)  # Use 0 for global statistics
 
     def __call__(self, descriptors: torch.Tensor, atomic_numbers: torch.Tensor) -> None:
-        """Call self.update(descriptors, atomic_numbers)"""
+        """Call self.update(descriptors, atomic_numbers) to update running statistics"""
         self.update(descriptors, atomic_numbers)
 
     def update(self, descriptors: torch.Tensor, atomic_numbers: torch.Tensor) -> None:
@@ -28,8 +33,8 @@ class Statistics:
         Update running statistics for both per-species and global features.
 
         Args:
-            descriptors: Input features of shape (n_atoms, input_dim)
-            atomic_numbers: Atomic numbers for each atom
+            descriptors (torch.Tensor): Input features of shape (n_atoms, input_dim)
+            atomic_numbers (torch.Tensor): Atomic numbers for each atom
         """
         if self.input_dim is None:
             self.input_dim = descriptors.shape[1]
@@ -101,10 +106,17 @@ class Statistics:
 
     @property
     def num_species(self):
+        """Get the number of species present in each configuration."""
         return len(self.statistics.keys()) - 1
 
 
 class FeatureScaler(torch.nn.Module):
+    """Mean and standard deviation scaler for GNN features.
+
+    Can be initialized from a :class:`franken.rf.scaler.Statistics` instance, and when called
+    will scale GNN features. Supports both global and per-species normalization.
+    """
+
     def __init__(
         self,
         input_dim: int,
@@ -112,6 +124,17 @@ class FeatureScaler(torch.nn.Module):
         scale_by_Z: bool,
         num_species: int,
     ):
+        """Initialize feature scaler.
+
+        Args:
+            input_dim (int): Dimension of the GNN features
+            statistics (Optional[Statistics]): Instance of :class:`franken.rf.scaler.Statistics`
+                from which the feature mean and standard deviation can be fetched. If set to
+                :code:`None`, the class will be initialized to perform no normalization. You can
+                modify the statistics by calling :meth:`franken.rf.scaler.FeatureScaler.set_from_statistics`.
+            scale_by_Z (bool): Whether to scale per-species or globally.
+            num_species (int): The number of distinct species in the data.
+        """
         super().__init__()
         self.input_dim = input_dim
         self.scale_by_Z = scale_by_Z
@@ -130,6 +153,12 @@ class FeatureScaler(torch.nn.Module):
             self.set_from_statistics(statistics)
 
     def set_from_statistics(self, statistics: Statistics):
+        """Set the mean and standard deviation statistics for scaling.
+
+        Args:
+            statistics (Statistics): Instance of :class:`franken.rf.scaler.Statistics`
+                from which the feature mean and standard deviation can be fetched.
+        """
         assert self.input_dim == statistics.input_dim
         assert self.input_dim is not None
 
@@ -158,6 +187,17 @@ class FeatureScaler(torch.nn.Module):
     def forward(
         self, descriptors: torch.Tensor, atomic_numbers: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
+        """Scale the given features to have zero-mean and unit standard deviation.
+
+        Args:
+            descriptors (torch.Tensor): GNN features
+            atomic_numbers (Optional[torch.Tensor], optional): Atomic numbers for each atom.
+                This can be left to None unless the feature-scaler has been configured
+                to perform per-species normalization. Defaults to None.
+
+        Returns:
+            torch.Tensor: Normalized GNN features
+        """
         assert descriptors.shape[1] == self.input_dim
 
         if not self.scale_by_Z:
@@ -173,9 +213,6 @@ class FeatureScaler(torch.nn.Module):
             )
         return descriptors
 
-    def hyperparameters(self):
-        return self.init_args()
-
     def init_args(self):
         return {"scale_by_Z": self.scale_by_Z}
 
@@ -189,7 +226,6 @@ def compute_dataset_statistics(
     gnn,
     device: torch.device,
 ):
-    # Initialize statistics object
     gnn_features_stats = Statistics()
     pbar = tqdm(
         total=len(dataset),

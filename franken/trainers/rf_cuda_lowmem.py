@@ -3,7 +3,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import List, Literal, Optional, Sequence, Union
+from typing import List, Literal, Sequence
 
 import numpy as np
 import torch
@@ -36,14 +36,42 @@ logger = logging.getLogger("franken")
 
 
 class RandomFeaturesTrainer(BaseTrainer):
+    """Main class which groups training and evaluation functionality for franken models.
+
+    Args:
+        train_dataloader (torch.utils.data.DataLoader):
+            Dataloader which iterates over the training set.
+        random_features_normalization (Literal["leading_eig"] | None, optional):
+            How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
+        log_dir (Path | None, optional):
+            Directory where to save logs and models. If not specified, no logs will be saved.
+            Defaults to None.
+        save_every_model (bool, optional):
+            Model fitting with this class is done simultaneously for a list
+            of solver parameters. This argument controls the behavior of model saving:
+            if set to True, the models corresponding to all solver parameters will be saved,
+            otherwise only the 'best' model among them (according to some validation set) will
+            be saved. Defaults to True.
+        device (_type_, optional):
+            PyTorch device on which computations are performed. Defaults to "cuda:0".
+        dtype (str | torch.dtype, optional):
+            Data-type for solver operations. Random features will be computed in float32, and
+            then converted to float64 if requested. Defaults to torch.float32.
+        save_fmaps (bool, optional):
+            Whether or not to save feature-maps for the training set. Saving them
+            requires extra memory (linear in the training-set size), but speeds up
+            the :meth:`~franken.trainers.FrankenPotential.evaluate` method on training
+            data. Defaults to True.
+    """
+
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
-        random_features_normalization: Optional[Literal["leading_eig"]] = "leading_eig",
-        log_dir: Path | None = None,  # If None, logging is disabled
+        random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
+        log_dir: Path | None = None,
         save_every_model: bool = True,
-        device: Union[torch.device, str, int] = "cuda:0",
-        dtype: Union[str, torch.dtype] = torch.float32,
+        device: torch.device | str | int = "cuda:0",
+        dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
     ):
         super().__init__(

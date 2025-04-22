@@ -1,3 +1,5 @@
+"""Franken model"""
+
 import logging
 import os
 from typing import Literal, Mapping, Optional, Tuple, Union
@@ -29,7 +31,7 @@ class FrankenPotential(torch.nn.Module):
     Args:
         gnn_backbone_id (str):
         kernel_type (str): The kernel type to use. Must be one of :code:`gaussian`, :code:`poly`, or :code:`linear`.
-        random_features_params (dict): A dictionary of parameters for the random features head. For each kernel type the default parameters can be found :ref:`below <random_features_params>`.
+        rf_config (dict): A dictionary of parameters for the random features head. For each kernel type the default parameters can be found :ref:`below <random_features_params>`.
         interaction_block (int): GNN layer used for feature extraction
         jac_chunk_size (int or "auto"):
 
@@ -81,7 +83,7 @@ class FrankenPotential(torch.nn.Module):
         hps = {
             "franken": self.gnn_config.to_ckpt(),
             "random_features": self.rf_config.to_ckpt(),
-            "input_scaler": self.input_scaler.hyperparameters(),
+            "input_scaler": self.input_scaler.init_args(),
         }
         return hps
 

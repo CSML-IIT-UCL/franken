@@ -75,7 +75,9 @@ def run_download_cmd(args):
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="List and download GNN backbones for franken."
+    )
 
     subparsers = parser.add_subparsers(
         required=True,
@@ -105,3 +107,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# For sphinx docs
+get_parser_fn = lambda: build_arg_parser()  # noqa: E731

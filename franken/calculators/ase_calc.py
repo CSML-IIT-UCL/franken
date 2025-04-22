@@ -11,6 +11,13 @@ from franken.utils.misc import get_device_name
 
 
 class FrankenCalculator(Calculator):
+    """Calculator for ASE with franken models
+
+    Attributes:
+        implemented_properties:
+            Lists properties which can be asked from this calculator, notably "energy" and "forces".
+    """
+
     implemented_properties = ["energy", "forces"]
     default_parameters = {}
     nolabel = True  # ??
@@ -23,6 +30,17 @@ class FrankenCalculator(Calculator):
         forces_mode: Literal["torch.func", "torch.autograd"] = "torch.autograd",
         **calc_kwargs,
     ):
+        """Initialize FrankenCalculator class from a franken model.
+
+        Args:
+            franken_ckpt : Path to the franken model.
+                This class accepts pre-loaded models, as well as jitted models (with `torch.jit`).
+            device : PyTorch device specification for where the model should reside
+                (e.g. "cuda:0" for GPU placement or "cpu" for CPU placement).
+            rf_weight_id : ID of the random feature weights.
+                Can generally be left to ``None`` unless the checkpoint contains multiple trained models.
+        """
+        # TODO: Remove forces_mode, torch.autograd is always the right way.
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
         if isinstance(franken_ckpt, torch.nn.Module):

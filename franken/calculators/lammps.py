@@ -14,6 +14,11 @@ class LammpsFrankenCalculator(torch.nn.Module):
         self,
         franken_model: FrankenPotential,
     ):
+        """Initialize LAMMPS Calculator
+
+        Args:
+            franken_model (FrankenPotential): The base franken model used in this MD calculator
+        """
         super().__init__()
 
         self.model = franken_model
@@ -35,6 +40,18 @@ class LammpsFrankenCalculator(torch.nn.Module):
         local_or_ghost: torch.Tensor,
         compute_virials: bool = False,
     ) -> dict[str, torch.Tensor | None]:
+        """Compute energies and forces of a given configuration.
+
+        This module is meant to be used in conjunction with LAMMPS,
+        and this function should not be called directly. The format of
+        the input data is designed to work with the MACE-LAMMPS fork.
+
+        Warning:
+            Stresses and virials are not supported by franken. Since they
+            are required to be set by LAMMPS, this function sets them to tensors
+            of the appropriate shape filled with zeros. Make sure that
+            the chosen MD method does not depend on these quantities.
+        """
         # node_attrs is a one-hot representation of the atom types
         atom_nums = torch.nonzero(data["node_attrs"])[:, 1] + 1
         franken_data = Configuration(
@@ -62,29 +79,42 @@ class LammpsFrankenCalculator(torch.nn.Module):
             "virials": virials,
         }
 
+    @staticmethod
+    def create_lammps_model(model_path: str, rf_weight_id: int | None) -> str:
+        """Compile a franken model into a LAMMPS calculator
 
-def create_lammps_model(model_path: str, rf_weight_id: int | None):
-    franken_model = FrankenPotential.load(
-        model_path,
-        map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-        rf_weight_id=rf_weight_id,
-    )
-    # NOTE:
-    # Kokkos is hardcoded to double and will silently corrupt data if the model
-    # does not use dtype double.
-    franken_model = franken_model.double().to("cpu")
-    lammps_model = LammpsFrankenCalculator(franken_model)
-    lammps_model_compiled = jit.compile(lammps_model)
+        Args:
+            model_path (str):
+                path to the franken model checkpoint.
+            rf_weight_id (int | None):
+                ID of the random feature weights. Can generally be left to ``None`` unless
+                the checkpoint contains multiple trained models.
 
-    save_path = f"{os.path.splitext(model_path)[0]}-lammps.pt"
-    print(f"Saving compiled model to '{save_path}'")
-    lammps_model_compiled.save(save_path)
-    return save_path
+        Returns:
+            str: the path where the LAMMPS-compatible model was saved to.
+        """
+        franken_model = FrankenPotential.load(
+            model_path,
+            map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            rf_weight_id=rf_weight_id,
+        )
+        # NOTE:
+        # Kokkos is hardcoded to double and will silently corrupt data if the model
+        # does not use dtype double.
+        franken_model = franken_model.double().to("cpu")
+        lammps_model = LammpsFrankenCalculator(franken_model)
+        lammps_model_compiled = jit.compile(lammps_model)
+
+        save_path = f"{os.path.splitext(model_path)[0]}-lammps.pt"
+        print(f"Saving compiled model to '{save_path}'")
+        lammps_model_compiled.save(save_path)
+        return save_path
 
 
-def create_lammps_model_cli():
+def build_arg_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Convert a franken model to be able to use it with LAMMPS",
     )
     parser.add_argument(
         "--model_path",
@@ -97,9 +127,18 @@ def create_lammps_model_cli():
         help="Head of the model to be converted to LAMMPS",
         default=None,
     )
+    return parser
+
+
+def create_lammps_model_cli():
+    parser = build_arg_parser()
     args = parser.parse_args()
-    create_lammps_model(args.model_path, args.rf_weight_id)
+    LammpsFrankenCalculator.create_lammps_model(args.model_path, args.rf_weight_id)  # type: ignore
 
 
 if __name__ == "__main__":
     create_lammps_model_cli()
+
+
+# For sphinx docs
+get_parser_fn = lambda: build_arg_parser()  # noqa: E731

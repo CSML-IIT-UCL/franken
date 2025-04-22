@@ -348,9 +348,25 @@ def autotune(cfg: AutotuneConfig):
 
 
 def cli_entry_point():
-    args = tyro.cli(AutotuneConfig, config=(tyro.conf.SuppressFixed,))
+    args = tyro.cli(
+        AutotuneConfig,
+        config=(
+            tyro.conf.SuppressFixed,
+            tyro.conf.FlagConversionOff,
+        ),
+    )
     autotune(args)
 
 
 if __name__ == "__main__":
     cli_entry_point()
+
+
+# For sphinx docs
+get_parser_fn = lambda: tyro.extras.get_parser(  # noqa: E731
+    AutotuneConfig,
+    config=(
+        tyro.conf.SuppressFixed,
+        tyro.conf.FlagConversionOff,
+    ),
+)

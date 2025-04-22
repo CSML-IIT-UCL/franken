@@ -1,8 +1,8 @@
-# Running Franken model with LAMMPS
+# Franken models and LAMMPS
 
-The basic steps required to run a Franken model with LAMMPS are:
+The basic steps required to run a Franken model with [LAMMPS](https://www.lammps.org/) are:
  1. Compile the model using `franken/calculators/lammps.py`:
-    ```
+    ```bash
     python franken/calculators/lammps.py --model_path=<best_ckpt.pt>
     ```
     Note that only models which use the MACE backbone can be compiled and run with LAMMPS. For the other backbones please use the ase MD interface. The compiled model will be saved in the same directory as the original model, with `-lammps` appended to the filename.
@@ -14,12 +14,12 @@ The basic steps required to run a Franken model with LAMMPS are:
  3. Run LAMMPS-Mace. On leonardo you can find it pre-compiled here:
     `/leonardo/pub/userexternal/lbonati1/software/lammps-mace/lammps/build-ampere-plumed/lmp`
 
-### Compiling LAMMPS-Mace
+## Compiling LAMMPS-Mace
 
 This follows the [MACE guide](https://mace-docs.readthedocs.io/en/latest/guide/lammps.html) adapting it to the leonardo cluster.
 This can be useful in case one wants to modify the Mace patch to LAMMPS. In particular, the following two files are important:
- - https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp
- - https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp
+ - [https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp](https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp)
+ - [https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp](https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp)
 
 We will assume to start from directory `$BASE_DIR`
  1. ```git clone --branch=mace --depth=1 https://github.com/ACEsuit/lammps```
@@ -31,7 +31,7 @@ We will assume to start from directory `$BASE_DIR`
     mv libtorch libtorch-gpu
     ```
  3. Get a GPU node for compilation
-    `srun -N 1 --ntasks-per-node=1 --cpus-per-task=8 --gres=gpu:1 -A IscrB_AmmoFeCo -p boost_usr_prod -t 00:30:00 --pty /bin/bash`
+    `srun -N 1 --ntasks-per-node=1 --cpus-per-task=8 --gres=gpu:1 -A <account> -p boost_usr_prod -t 00:30:00 --pty /bin/bash`
  4. Compile:
     1. Load modules
         ```bash
@@ -70,13 +70,13 @@ We will assume to start from directory `$BASE_DIR`
         The compiled binary is then at `$BASE_DIR/lammps/build-ampere/bin/lmp`.
 
 
-### Running LAMMPS-Mace
+## Running LAMMPS-Mace
 
 This is just an example sbatch file which can be used to run LAMMPS-Mace. Edit it according to your needs. It uses the paths to LAMMPS-Mace as available on the leonardo cluster, and we will assume that LAMMPS has been configured in a file named `in.lammps`.
 
 ```bash
 #!/bin/bash
-#SBATCH --account=IscrB_AmmoFeCo
+#SBATCH --account=<account>
 #SBATCH --partition=boost_usr_prod  # partition to be used
 #SBATCH --time 00:30:00             # format: HH:MM:SS
 #SBATCH --qos=boost_qos_dbg

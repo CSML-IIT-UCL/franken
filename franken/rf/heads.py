@@ -1,3 +1,5 @@
+"""Random feature implementations for different kernels"""
+
 import dataclasses
 from math import ceil, sqrt
 
@@ -10,17 +12,7 @@ from franken.utils.misc import sanitize_init_dict
 
 
 class RandomFeaturesHead(torch.nn.Module):
-    r"""Base class for Random Feature heads
-
-    Args:
-        input_dim (int): Dimension of the input features.
-        num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
-    """
+    """Base class for random-feature heads"""
 
     def __init__(
         self,
@@ -29,6 +21,17 @@ class RandomFeaturesHead(torch.nn.Module):
         num_species: int | None = None,
         chemically_informed_ratio: float | None = None,
     ):
+        r"""Initializer for random features base class.
+
+        Args:
+            input_dim (int): Dimension of the input features.
+            num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
+            num_species (int | None): The number of chemical species for
+                which the kernel is computed. This parameter is relevant for systems
+                with multiple chemical species. Defaults to :code:`None`.
+            chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
+                :code:`num_species` is None. Defaults to :code:`None`.
+        """
         super(RandomFeaturesHead, self).__init__()
         self.input_dim = input_dim
         self.num_random_features = num_random_features
@@ -54,6 +57,22 @@ class RandomFeaturesHead(torch.nn.Module):
     def species_scatter_sum(
         self, Z: torch.Tensor, atomic_numbers: torch.Tensor | None = None
     ) -> torch.Tensor:
+        r"""Average features across all atoms in a configuration.
+
+        Depending on the configuration of random features, this function will either perform
+        a simple average, or will use a chemically-informed averaging method where features
+        are averaged within each atomic type and concatenated across atomic types. In this latter
+        case, the number of output features is larger than the number of input features. It will
+        always be equal to :code:`self.total_random_features`.
+
+        Args:
+            Z (torch.Tensor): [num_atoms, feature_dim] tensor containing the random features for each atom
+            atomic_numbers (torch.Tensor | None, optional): if specified, an integer tensor of size [num_atoms]
+                detailing the atomic number of each atom in the configuration. Defaults to None.
+
+        Returns:
+            torch.Tensor: [total_feature_dim] tensor containing the random features for the whole configuration.
+        """
         if self.num_species is None:
             return Z.mean(0)
         else:
@@ -90,6 +109,7 @@ class RandomFeaturesHead(torch.nn.Module):
             return chemically_informed_descriptors.view(-1)
 
     def init_args(self):
+        """Returns the arguments needed to re-initialize this class."""
         return {
             "num_random_features": self.num_random_features,
             "num_species": self.num_species,
@@ -99,29 +119,13 @@ class RandomFeaturesHead(torch.nn.Module):
 
 class OrthogonalRFF(RandomFeaturesHead):
     r"""
-    `Orthogonal Random Fourier Features <https://arxiv.org/abs/1610.09072>`_ by Yu et al. for approximating the gaussian kernel
+    `Orthogonal Random Fourier Features <https://arxiv.org/abs/1610.09072>`_ by Yu et al. for approximating the Gaussian kernel
 
     .. math::
+
         \text{exp}\left(-\frac{\| x - y \|^{2}}{2\ell^{2}}\right)
 
-
-    Args:
-        input_dim (int): Dimensionality of the input features.
-        num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
-        use_offset (bool): A flag indicating whether to use an offset in
-            the random feature generation. Using an offset reduces the number of
-            random features by half but increases variance. Defaults to :code:`True`.
-        length_scale (float): The length scale parameter :math:`\ell` that
-            controls the smoothness of the kernel function. It affects how quickly
-            the kernel values decay with distance. Defaults to 1.0.
-        rng_seed (int | None): A seed for the random number generator
-            used in generating random features. Setting this ensures reproducibility
-            of results. Defaults to :code:`None`.
+    .
     """
 
     def __init__(
@@ -134,6 +138,31 @@ class OrthogonalRFF(RandomFeaturesHead):
         length_scale: float = 1.0,
         rng_seed=None,
     ):
+        r"""Initialize the ORFF approximation to the Gaussian kernel with given length scale :math:`\ell`.
+
+        As with the Gaussian kernel, the RF approximation depends on the :code:`length_scale` parameter.
+        In addition to that, one needs to choose the number of random features to control the approximation
+        quality.
+
+        Args:
+            input_dim (int): Dimensionality of the input features.
+            num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
+            num_species (int | None): The number of chemical species for
+                which the kernel is computed. This parameter is relevant for systems
+                with multiple chemical species. Defaults to :code:`None`.
+            chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
+                :code:`num_species` is None. Defaults to :code:`None`.
+            use_offset (bool): A flag indicating whether to use an offset in
+                the random feature generation. Using an offset reduces the number of
+                random features by half but increases variance. Defaults to :code:`True`.
+            length_scale (float): The length scale parameter :math:`\ell` that
+                controls the smoothness of the kernel function. It affects how quickly
+                the kernel values decay with distance. Defaults to 1.0.
+            rng_seed (int | None): A seed for the random number generator
+                used in generating random features. Setting this ensures reproducibility
+                of results. Defaults to :code:`None`.
+
+        """
         check_positive_arg(length_scale, "length_scale")
         super(OrthogonalRFF, self).__init__(
             input_dim,
@@ -199,9 +228,13 @@ class OrthogonalRFF(RandomFeaturesHead):
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        h: torch.Tensor - descriptors for a single configuration ~[natoms, descriptors]
-        atomic_numbers: torch.Tensor - atomic numbers for a single configuration ~[natoms]
+        """Computes the random-feature map for a given configuration :code:`h`
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, descriptors]
+            atomic_numbers (torch.Tensor):
+                atomic numbers for a single configuration ~[natoms]
         """
         length_scale = self.length_scale
         # Convert dtype of rf matrices to same as h
@@ -270,6 +303,17 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
 
 
 class MultiScaleOrthogonalRFF(RandomFeaturesHead):
+    r"""
+    A multi-scale version of :class:`OrthogonalRFF` which splits the available random features among multiple length-scales.
+    This approximates a mixture of Gaussian kernels at different scales, simplifying hyper-parameter tuning.
+
+    .. math::
+
+        \text{exp}\left(-\frac{\| x - y \|^{2}}{2\ell^{2}}\right)
+
+    .
+    """
+
     def __init__(
         self,
         input_dim: int,
@@ -282,6 +326,36 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         length_scale_num: int = 4,
         rng_seed=None,
     ):
+        r"""Initialize the multi-scale ORFF approximation.
+
+        Multiple scales are specified with arguments :code:`length_scale_low`, :code:`length_scale_high`
+        and :code:`length_scale_num` which will be used to subdivide the available :code:`num_random_features`
+        random features into :code:`length_scale_num` blocks with equally spaced length-scales.
+        This means that each length-scale will only use a fraction of the total random features, but in practice
+        we found this have very small impact on overall accuracy.
+        This kernel can be seen as implicitly doing a grid-search over linearly spaced length-scales.
+
+        Args:
+            input_dim (int): Dimensionality of the input features.
+            num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
+            num_species (int | None): The number of chemical species for
+                which the kernel is computed. This parameter is relevant for systems
+                with multiple chemical species. Defaults to :code:`None`.
+            chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
+                :code:`num_species` is None. Defaults to :code:`None`.
+            use_offset (bool): A flag indicating whether to use an offset in
+                the random feature generation. Using an offset reduces the number of
+                random features by half but increases variance. Defaults to :code:`True`.
+            length_scale_low (float): The lower end of the interval of length-scales considered.
+            length_scale_high (float): The higher end of the interval of length-scales considered.
+            length_scale_num (int): The number of different length-scales, equally spaced between
+                :code:`length_scale_low` and :code:`length_scale_high` which are considered in the
+                multi-scale approximation.
+            rng_seed (int | None): A seed for the random number generator
+                used in generating random features. Setting this ensures reproducibility
+                of results. Defaults to :code:`None`.
+
+        """
         super(MultiScaleOrthogonalRFF, self).__init__(
             input_dim,
             num_random_features,
@@ -326,9 +400,13 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        h: torch.Tensor - descriptors for a single configuration ~[natoms, descriptors]
-        atomic_numbers: torch.Tensor - atomic numbers for a single configuration ~[natoms]
+        """Computes the random-feature map for a given configuration :code:`h`
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, descriptors]
+            atomic_numbers (torch.Tensor):
+                atomic numbers for a single configuration ~[natoms]
         """
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -362,22 +440,16 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
 
 
 class Linear(RandomFeaturesHead):
-    r"""
-    Module implementing the linear kernel
+    r"""Implements the linear kernel.
+
+    This kernel does not need to be approximated with random-features, and can be used directly
+    as if it were composed of random features. No stochasticity is present.
 
     .. math::
+
         \frac{\langle x, y \rangle}{\ell^{2}} + b
 
-
-    Args:
-        input_dim (int): The dimensionality of the input features.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
-        bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
-        length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
+    .
     """
 
     def __init__(
@@ -388,6 +460,18 @@ class Linear(RandomFeaturesHead):
         bias: float = 0.0,
         length_scale: float = 1.0,
     ):
+        r"""Initialize a linear kernel with given bias :math:`b` and length scale :math:`\ell`.
+
+        Args:
+            input_dim (int): The dimensionality of the input features.
+            num_species (int | None): The number of chemical species for
+                which the kernel is computed. This parameter is relevant for systems
+                with multiple chemical species. Defaults to :code:`None`.
+            chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
+                :code:`num_species` is None. Defaults to :code:`None`.
+            bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
+            length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
+        """
         check_positive_arg(length_scale, "length_scale")
         super(Linear, self).__init__(
             input_dim,
@@ -405,6 +489,14 @@ class Linear(RandomFeaturesHead):
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Computes the random-feature map for a given configuration :code:`h`
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, descriptors]
+            atomic_numbers (torch.Tensor):
+                atomic numbers for a single configuration ~[natoms]
+        """
         length_scale = self.length_scale
         scaled_descriptors = h / length_scale
         # Add a constant bias feature to scaled_descriptors
@@ -429,27 +521,13 @@ class Linear(RandomFeaturesHead):
 
 
 class TensorSketch(RandomFeaturesHead):
-    r"""
-    TensorSketch of the polynomial kernel
+    r"""TensorSketch random-features approximation of the polynomial kernel
 
     .. math::
         \left(\frac{\langle x, y \rangle}{\ell^{2}} + b\right)^{d}
 
 
     from `"Fast and scalable polynomial kernels via explicit feature maps" <https://doi.org/10.1145/2487575.2487591>`_ by Pham and Pagh.
-
-    Args:
-        input_dim (int): The dimensionality of the input features.
-        num_random_features (int): The number of random features to use in the sketching process. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
-        degree (int): Degree :math:`d` of the polynomial kernel to sketch. Defaults to 2.
-        bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
-        length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
-        rng_seed (int | None): A seed for the random number generator used in generating random features. Setting this ensures reproducibility of results. Defaults to :code:`None`.
     """
 
     def __init__(
@@ -463,6 +541,21 @@ class TensorSketch(RandomFeaturesHead):
         length_scale: float = 1.0,
         rng_seed=None,
     ):
+        r"""Initialize an approximation to the polynomial kernel of specified degree.
+
+        Args:
+            input_dim (int): The dimensionality of the input features.
+            num_random_features (int): The number of random features to use in the sketching process. Defaults to :math:`2^{10} = 1024`.
+            num_species (int | None): The number of chemical species for
+                which the kernel is computed. This parameter is relevant for systems
+                with multiple chemical species. Defaults to :code:`None`.
+            chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
+                :code:`num_species` is None. Defaults to :code:`None`.
+            degree (int): Degree :math:`d` of the polynomial kernel to sketch. Defaults to 2.
+            bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
+            length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
+            rng_seed (int | None): A seed for the random number generator used in generating random features. Setting this ensures reproducibility of results. Defaults to :code:`None`.
+        """
         check_positive_arg(length_scale, "length_scale")
         super(TensorSketch, self).__init__(
             input_dim,
@@ -511,6 +604,14 @@ class TensorSketch(RandomFeaturesHead):
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Computes the random-feature map for a given configuration :code:`h`
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, descriptors]
+            atomic_numbers (torch.Tensor):
+                atomic numbers for a single configuration ~[natoms]
+        """
         length_scale = self.length_scale
         scaled_descriptors = (h + torch.sqrt(torch.abs(self.bias))) / length_scale
         # Convert dtype of self to the same dtype as h.

@@ -1,26 +1,16 @@
-.. _model_reference:
-======
-Models
-======
+.. _api_reference:
 
-Franken Machine Learning Potential
-----------------------------------
+Franken API Reference
+=====================
 
-.. autoclass:: franken.rf.model.FrankenPotential
-   :members: energy, energy_and_forces, feature_map, grad_energy_func, grad_energy_autograd
-   :special-members:
 
-.. _random_features_params:
-Random Features heads
----------------------
-.. autoclass:: franken.rf.heads.RandomFeaturesHead
-   :special-members:
+.. currentmodule:: franken
 
-.. autoclass:: franken.rf.heads.Linear
-   :special-members:
+.. autosummary::
+    :toctree: franken-api/
 
-.. autoclass:: franken.rf.heads.OrthogonalRFF
-   :special-members:
-
-.. autoclass:: franken.rf.heads.TensorSketch
-   :special-members:
+    franken.trainers
+    franken.calculators
+    franken.rf.model
+    franken.rf.heads
+    franken.rf.scaler

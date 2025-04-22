@@ -1,48 +1,31 @@
 (model-registry)=
 # Backbones Registry
 
-The available pre-trained GNNs can be listed by running `franken.backbones list`, and downloaded by:
-
-```bash
-
-   franken.backbones download <gnn_backbone_id>
-```
-
+The available pre-trained GNNs can be listed by running `franken.backbones list`.
 As of today, the available models are:
 
 ```
-                               DOWNLOADED MODELS                                
+                               DOWNLOADED MODELS
 --------------------(/path/to/.franken/gnn_checkpoints)--------------------
-MACE-L0 (MACE)                          
+MACE-L0 (MACE)
 --------------------------------AVAILABLE MODELS--------------------------------
-MACE-L1 (MACE)                                                                  
-MACE-L2 (MACE)                                                                  
-SchNet-S2EF-OC20-200k (fairchem)                                                
-SchNet-S2EF-OC20-2M (fairchem)                                                  
-SchNet-S2EF-OC20-20M (fairchem)                                                 
-SchNet-S2EF-OC20-All (fairchem)                                                 
+SevenNet0 (sevenn)
+MACE-L1 (MACE)
+MACE-L2 (MACE)
+MACE-OFF-small (MACE)
+MACE-OFF-medium (MACE)
+MACE-OFF-large (MACE)
+SchNet-S2EF-OC20-200k (fairchem)
+SchNet-S2EF-OC20-2M (fairchem)
+SchNet-S2EF-OC20-20M (fairchem)
+SchNet-S2EF-OC20-All (fairchem)
 --------------------------------------------------------------------------------
 ```
 
-One can get help by typing `franken.backbones --help`
+Models can also be directly downloaded by copying the backbone-ID from the command above into the `download` command
 
+```bash
+   franken.backbones download <gnn_backbone_id>
 ```
 
-NAME
-    franken.backbones download - Download the model if it's not already present locally.
-
-SYNOPSIS
-    franken.backbones download GNN_BACKBONE_ID <flags>
-
-DESCRIPTION
-    Download the model if it's not already present locally.
-
-POSITIONAL ARGUMENTS
-    GNN_BACKBONE_ID
-        Type: str
-
-FLAGS
-    -c, --cache_dir=CACHE_DIR
-        Type: Optional[str | None]
-        Default: None
-```
+Check the command-line help (e.g. `franken.backbones download --help`) for more information.
