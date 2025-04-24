@@ -70,6 +70,14 @@ Advantages of Franken
    topics/lammps.md
 
 .. toctree::
+    :maxdepth: 2
+    :caption: Tutorials:
+    :hidden:
+
+    notebooks/getting_started
+
+
+.. toctree::
    :maxdepth: 3
    :caption: API Reference:
    :hidden:

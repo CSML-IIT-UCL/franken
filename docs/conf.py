@@ -49,6 +49,7 @@ extensions = [
     "sphinxawesome_theme",
     "myst_parser",
     "sphinxarg.ext",
+    "nbsphinx",
 ]
 
 myst_enable_extensions = ["amsmath", "dollarmath", "html_image"]
