@@ -23,6 +23,8 @@ logger = logging.getLogger("franken")
 
 
 class BaseTrainer(abc.ABC):
+    """Base trainer class. Requires :meth:`~BaseTrainer.fit` and :meth:`~BaseTrainer.evaluate` methods."""
+
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
@@ -53,6 +55,16 @@ class BaseTrainer(abc.ABC):
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
+        """Compute statistics on the training dataset with the provided model
+
+        Args:
+            model (FrankenPotential): Franken model from which the attached GNN
+                is used to compute the features on atomic configurations.
+
+        Returns:
+            statistics (Statistics): The dataset statistics
+            gnn_info (dict[str, Any]): Hyperparameters of the GNN used to compute the statistics.
+        """
         if self.statistics_ is None or not are_dicts_equal(
             self.statistics_[1], asdict_with_classvar(model.gnn_config)
         ):
@@ -67,15 +79,23 @@ class BaseTrainer(abc.ABC):
         return self.statistics_
 
     @abc.abstractmethod
-    def on_fit_start(self, model: FrankenPotential):
-        pass
-
-    @abc.abstractmethod
     def fit(
         self,
         model: FrankenPotential,
         solver_params: dict,
     ) -> tuple[LogCollection, torch.Tensor]:
+        """Fit a given franken model on the training set.
+
+        Args:
+            model (FrankenPotential): The model which defines GNN and random features.
+            solver_params (dict): Parameters for the solver which actually
+                performs the fit.
+
+        Returns:
+            tuple[LogCollection, torch.Tensor]:
+            - Logs which contain all parameters related to the fitting, as well as timings.
+            - Weights which were learned during the fit.
+        """
         pass
 
     @abc.abstractmethod
@@ -87,6 +107,22 @@ class BaseTrainer(abc.ABC):
         all_weights: torch.Tensor,
         metrics: list[str],
     ) -> LogCollection:
+        """Evaluate a fitted model by computing metrics on a validation dataset.
+
+        Args:
+            model (FrankenPotential): The model which defines GNN and random features.
+            dataloader (torch.utils.data.DataLoader): Evaluation will run the model
+                on each configuration in the dataloader, computing averaged metrics.
+            log_collection (LogCollection): Log object as output by the :meth:`fit`
+                method. Metric values will be added to the logs and the same object will
+                be returned by this method.
+            all_weights (torch.Tensor): The weights as output by the :meth:`fit` method.
+            metrics (list[str]): List of metrics which should be computed.
+
+        Returns:
+            logs (LogCollection): Logs which contain all parameters related
+            to the fitting, as well as timings and metrics.
+        """
         pass
 
     def serialize_logs(

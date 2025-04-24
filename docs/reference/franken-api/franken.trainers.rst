@@ -29,7 +29,6 @@ franken.trainers
                     ~BaseTrainer.fit
                     ~BaseTrainer.evaluate
                     ~BaseTrainer.get_statistics
-                    ~BaseTrainer.on_fit_start
                     ~BaseTrainer.serialize_logs
                     ~BaseTrainer.serialize_best_model
 

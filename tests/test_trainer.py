@@ -135,7 +135,7 @@ class TestTrainer:
         )
         model = self.init_model(efmap_vals, device, trainer.buffer_dt)
         trainer._compute_covs_and_coeffs(model, dataloader)
-        solution = trainer._solve(force_weight=loss_lerp_weight, l2_penalty=L2_penalty)
+        solution = trainer.solve(force_weight=loss_lerp_weight, l2_penalty=L2_penalty)
         torch.testing.assert_close(exp_sol, solution)
 
     def test_compute_train_preds_shortcut(self, device):
@@ -145,7 +145,7 @@ class TestTrainer:
         dataloader = self.gen_data(num_configs, num_atoms, trainer.buffer_dt, split="train")
         model = self.init_model(None, device, trainer.buffer_dt)
         trainer._compute_covs_and_coeffs(model, dataloader)
-        weights = trainer._solve(force_weight=0.3, l2_penalty=1e-3)
+        weights = trainer.solve(force_weight=0.3, l2_penalty=1e-3)
         weights = weights.view(1, -1)  # fit converts to this shape
 
         logs = LogCollection([LogEntry("", 0, 0, 0, [], [])])

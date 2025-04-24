@@ -1,7 +1,7 @@
 (installation)=
 # Installation
 
-To install `franken`, start by setting up your environment with the correct version of [PyTorch](https://pytorch.org/). This is especially necessary if you wish to use GPUs. Then install `franken` by running
+To install `franken`, start by setting up your environment with the correct **version of [PyTorch](https://pytorch.org/)**. This is especially necessary if you wish to use GPUs. Then install `franken` by running
 ```bash
 pip install franken
 ```

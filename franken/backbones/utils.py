@@ -102,6 +102,24 @@ def make_summary(cache_dir: str | None = None):
 
 
 def get_checkpoint_path(backbone_path_or_id: str) -> Path:
+    """Fetches the path of a given backbone. If the backbone is not present, it will be downloaded.
+
+    The backbone can be either specified directly via its file-system path,
+    then this function is a thin wrapper -- or it can be specified via its
+    ID in the model registry. Then this function takes care of finding the
+    correct model path and potentially downloading the backbone from the internet.
+
+    Args:
+        backbone_path_or_id (str): file-system path to the backbone
+            or the backbone's ID as per the model registry.
+
+    Returns:
+        Path: Path to the model on disk
+
+    See Also:
+        You can use the command :code:`franken.backbones list` from the command-line
+        to find out which backbone IDs are supported out-of-the-box.
+    """
     registry = load_model_registry()
     gnn_checkpoints_dir = CacheDir.get() / "gnn_checkpoints"
 

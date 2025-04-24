@@ -3,7 +3,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import List, Literal, Sequence
+from typing import Any, List, Literal, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -36,33 +36,7 @@ logger = logging.getLogger("franken")
 
 
 class RandomFeaturesTrainer(BaseTrainer):
-    """Main class which groups training and evaluation functionality for franken models.
-
-    Args:
-        train_dataloader (torch.utils.data.DataLoader):
-            Dataloader which iterates over the training set.
-        random_features_normalization (Literal["leading_eig"] | None, optional):
-            How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
-        log_dir (Path | None, optional):
-            Directory where to save logs and models. If not specified, no logs will be saved.
-            Defaults to None.
-        save_every_model (bool, optional):
-            Model fitting with this class is done simultaneously for a list
-            of solver parameters. This argument controls the behavior of model saving:
-            if set to True, the models corresponding to all solver parameters will be saved,
-            otherwise only the 'best' model among them (according to some validation set) will
-            be saved. Defaults to True.
-        device (_type_, optional):
-            PyTorch device on which computations are performed. Defaults to "cuda:0".
-        dtype (str | torch.dtype, optional):
-            Data-type for solver operations. Random features will be computed in float32, and
-            then converted to float64 if requested. Defaults to torch.float32.
-        save_fmaps (bool, optional):
-            Whether or not to save feature-maps for the training set. Saving them
-            requires extra memory (linear in the training-set size), but speeds up
-            the :meth:`~franken.trainers.FrankenPotential.evaluate` method on training
-            data. Defaults to True.
-    """
+    """Main class which groups training and evaluation functionality for franken models."""
 
     def __init__(
         self,
@@ -74,6 +48,33 @@ class RandomFeaturesTrainer(BaseTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
     ):
+        """Initialize random-feature trainer class
+
+        Args:
+            train_dataloader (torch.utils.data.DataLoader):
+                Dataloader which iterates over the training set.
+            random_features_normalization (Literal["leading_eig"] | None, optional):
+                How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
+            log_dir (Path | None, optional):
+                Directory where to save logs and models. If not specified, no logs will be saved.
+                Defaults to None.
+            save_every_model (bool, optional):
+                Model fitting with this class is done simultaneously for a list
+                of solver parameters. This argument controls the behavior of model saving:
+                if set to True, the models corresponding to all solver parameters will be saved,
+                otherwise only the 'best' model among them (according to some validation set) will
+                be saved. Defaults to True.
+            device (_type_, optional):
+                PyTorch device on which computations are performed. Defaults to "cuda:0".
+            dtype (str | torch.dtype, optional):
+                Data-type for solver operations. Random features will be computed in float32, and
+                then converted to float64 if requested. Defaults to torch.float32.
+            save_fmaps (bool, optional):
+                Whether or not to save feature-maps for the training set. Saving them
+                requires extra memory (linear in the training-set size), but speeds up
+                the :meth:`~franken.trainers.FrankenPotential.evaluate` method on training
+                data. Defaults to True.
+        """
         super().__init__(
             train_dataloader,
             log_dir=log_dir,
@@ -96,8 +97,34 @@ class RandomFeaturesTrainer(BaseTrainer):
     def fit(
         self,
         model: FrankenPotential,
-        solver_params: dict,
+        solver_params: Mapping[str, Sequence[Any]],
     ) -> tuple[LogCollection, torch.Tensor]:
+        """Fit a given franken model on the training set.
+
+        Args:
+            model (FrankenPotential): The model which defines GNN and random features.
+            solver_params (dict): Parameters for the solver which actually
+                performs the fit. This argument allows to specify multiple parameters,
+                for each of which we will perform a fit. For example
+
+                >>> solver_params = {
+                >>>     "l2_penalty": [1e-6, 1e-4],
+                >>>     "force_weight": [0.5]
+                >>> }
+
+                will result in two different models, one with :code:`l2_penalty=1e-6, force_weight=0.5`
+                and one with :code:`l2_penalty=1e-4, force_weight=0.5`. This way of specifying solver
+                parameters allows to easily perform a grid-search.
+
+        Returns:
+            logs (LogCollection): Logs which contain all parameters related
+                to the fitting, as well as timings.
+            weights (torch.Tensor): Weights which were learned during the fit.
+
+        Note:
+            More information about the available solver parameters can be found under the
+            :meth:`solve` method.
+        """
         if self.device.type == "cuda":
             # Patch E3NN for batched jacobians!
             from franken.backbones.wrappers.common_patches import patch_e3nn
@@ -134,7 +161,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             print(f"{hp_val=}")
             t_solve_start = perf_counter()
             try:
-                weights = self._solve(**hp_val)
+                weights = self.solve(**hp_val)
             except torch.linalg.LinAlgError as e:
                 weights = torch.full_like(all_weights[hp_idx], torch.inf)
                 num_failed += 1
@@ -399,7 +426,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             )
 
     @torch.no_grad()
-    def _solve(self, force_weight: float, l2_penalty: float = 1e-6) -> Tensor:
+    def solve(self, force_weight: float, l2_penalty: float = 1e-6) -> Tensor:
         # This is the 2nd copy of the covariance matrix that we need to store.
         lerped_cov, lerped_diag = triangular_lerp(
             self.covariance,
