@@ -75,6 +75,7 @@ Advantages of Franken
     :hidden:
 
     notebooks/getting_started
+    notebooks/autotune
 
 
 .. toctree::

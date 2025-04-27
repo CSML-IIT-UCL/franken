@@ -158,7 +158,6 @@ class RandomFeaturesTrainer(BaseTrainer):
         local_logs = dict()
         num_failed = torch.zeros((1,), device=self.device, dtype=torch.int)
         for hp_idx, hp_val in solver_iter:
-            print(f"{hp_val=}")
             t_solve_start = perf_counter()
             try:
                 weights = self.solve(**hp_val)
