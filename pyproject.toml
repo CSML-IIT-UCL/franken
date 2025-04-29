@@ -43,7 +43,7 @@ Documentation = "https://github.com/CSML-IIT-UCL/mlpot_transfer"
 [project.scripts]
 "franken.backbones" = "franken.backbones.cli:main"
 "franken.autotune" = "franken.autotune.script:cli_entry_point"
-"franken.create_lammps_model" = "franken.calculators.lammps:create_lammps_model_cli"
+"franken.create_lammps_model" = "franken.calculators.lammps_calc:create_lammps_model_cli"
 
 [project.optional-dependencies]
 develop = [

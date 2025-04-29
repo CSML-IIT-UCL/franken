@@ -12,7 +12,7 @@ from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
 from franken.datasets.registry import DATASET_REGISTRY
-from franken.calculators.lammps import create_lammps_model
+from franken.calculators.lammps_calc import LammpsFrankenCalculator
 
 from .conftest import DEVICES
 from .utils import are_dicts_close, cleanup_dir, create_temp_dir
@@ -64,7 +64,7 @@ def test_lammps_compile(rf_cfg, device):
         model.save(model_save_path)
 
         # Step 3: Run create_lammps_model
-        comp_model_path = create_lammps_model(model_path=model_save_path, rf_weight_id=None)
+        comp_model_path = LammpsFrankenCalculator.create_lammps_model(model_path=model_save_path, rf_weight_id=None)
 
         # Step 4: Load saved model
         comp_model = torch.jit.load(comp_model_path, map_location=device)

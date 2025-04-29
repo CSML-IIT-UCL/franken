@@ -5,7 +5,7 @@ extended to support your favorite MD software.
 """
 
 from .ase_calc import FrankenCalculator
-from .lammps import LammpsFrankenCalculator
+from .lammps_calc import LammpsFrankenCalculator
 
 __all__ = (
     "FrankenCalculator",
