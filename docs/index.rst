@@ -76,6 +76,7 @@ Advantages of Franken
 
     notebooks/getting_started
     notebooks/autotune
+    notebooks/molecular_dynamics
 
 
 .. toctree::
