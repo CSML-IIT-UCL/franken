@@ -65,8 +65,6 @@ Advantages of Franken
 
    topics/installation.md
    topics/model_registry.md
-   topics/autotune.md
-   topics/sample_complexity.md
    topics/lammps.md
 
 .. toctree::

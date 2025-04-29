@@ -3,7 +3,7 @@
 The basic steps required to run a Franken model with [LAMMPS](https://www.lammps.org/) are:
  1. Compile the model using `franken/calculators/lammps.py`:
     ```bash
-    python franken/calculators/lammps.py --model_path=<best_ckpt.pt>
+    franken.create_lammps_model --model_path=<best_ckpt.pt>
     ```
     Note that only models which use the MACE backbone can be compiled and run with LAMMPS. For the other backbones please use the ase MD interface. The compiled model will be saved in the same directory as the original model, with `-lammps` appended to the filename.
  2. Configure LAMMPS. The following lines are necessary, the second line should point to the compiled model from step 1.
