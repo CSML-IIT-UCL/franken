@@ -12,10 +12,13 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('..'))
 import re
 from docutils import nodes
 from sphinxawesome_theme.postprocess import Icons
+
+basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, basedir)
+
 
 html_permalinks_icon = Icons.permalinks_icon  # SVG as a string
 
@@ -46,6 +49,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
+    "sphinx.ext.intersphinx",
     "sphinxawesome_theme",
     "myst_parser",
     "sphinxarg.ext",
@@ -54,21 +58,31 @@ extensions = [
 
 myst_enable_extensions = ["amsmath", "dollarmath", "html_image"]
 
+intersphinx_mapping = {
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "torch": ("https://pytorch.org/docs/stable/", None),
+    "torchvision": ("https://pytorch.org/vision/stable/", None),
+    "python": ("https://docs.python.org/3.9/", None),
+}
 
-templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "requirements.txt"]
 
-html_theme = "sphinxawesome_theme"
-autodoc_class_signature = "separated"
-autoclass_content = "class"
-autosummary_generate = False
+autodoc_typehints = "description"
+autodoc_typehints_description_target = "all"
+# to handle functions as default input arguments
+autodoc_preserve_defaults = True
+# Warn about broken links
+nitpicky = True
+autodoc_inherit_docstrings = False
+# autodoc_class_signature = "separated"
+# autoclass_content = "class"
+# autosummary_generate = False
 
-autodoc_typehints = "signature"
-autodoc_member_order = "groupwise"
-napoleon_preprocess_types = True
-napoleon_use_rtype = False
+# autodoc_member_order = "groupwise"
+# napoleon_preprocess_types = True
+# napoleon_use_rtype = False
 
-master_doc = "index"
+# master_doc = "index"
 
 source_suffix = {
     ".rst": "restructuredtext",
@@ -76,13 +90,17 @@ source_suffix = {
     ".md": "markdown",
 }
 
+# -- Options for HTML output -------------------------------------------------
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+html_theme = "sphinxawesome_theme"
+html_static_path = ["_static"]
+html_css_files = ["css/mystyle.css"]
+templates_path = ["_templates"]
 # Favicon configuration
 # html_favicon = '_static/favicon.ico'
-
 # Configure syntax highlighting for Awesome Sphinx Theme
 pygments_style = "default"
 pygments_style_dark = "material"
-
 html_title = "franken"
 # Additional theme configuration
 html_theme_options = {
@@ -101,10 +119,6 @@ html_theme_options = {
     # "logo_light": "_static/[logo_light].png",
     # "logo_dark": "_static/[logo_dark].png",
 }
-
-html_static_path = ["_static"]
-html_css_files = ["css/mystyle.css"]
-templates_path = ["_templates"]
 
 ## Teletype role
 tt_re = re.compile('^:tt:`(.*)`$')

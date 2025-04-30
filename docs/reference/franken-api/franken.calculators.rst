@@ -1,26 +1,11 @@
-﻿..
-  module.rst
-
-franken.calculators
+﻿franken.calculators
 ===================
 
-.. automodule:: franken.calculators
 
-    .. rubric:: Classes
+.. autosummary::
+    :toctree: stubs
+    :template: class.rst
+    :nosignatures:
 
-    .. autosummary::
-        :toctree:
-        :nosignatures:
-
-            FrankenCalculator
-            LammpsFrankenCalculator
-
-
-    .. autoclass:: FrankenCalculator
-        :members: calculate
-        :exclude-members: __new__
-
-
-    .. autoclass:: LammpsFrankenCalculator
-        :members: forward, create_lammps_model
-        :exclude-members: __new__
+        franken.calculators.FrankenCalculator
+        franken.calculators.LammpsFrankenCalculator

@@ -1,44 +1,40 @@
-﻿..
-  module.rst
-
-franken.trainers
+﻿franken.trainers
 ================
 
-.. automodule:: franken.trainers
 
-    .. rubric:: Classes
+Base Class
+----------
+.. autosummary::
+    :toctree: stubs
+    :template: class.rst
+    :nosignatures:
 
-    .. autosummary::
-        :toctree:
-        :nosignatures:
-        :template: autosummary/class.rst
+    franken.trainers.BaseTrainer
 
-            RandomFeaturesTrainer
-            BaseTrainer
+Random features trainer
+-----------------------
+.. autosummary::
+    :toctree: stubs
+    :template: class.rst
+    :nosignatures:
+
+    franken.trainers.RandomFeaturesTrainer
 
 
-    .. autoclass:: BaseTrainer
-        :members:
-        :no-inherited-members:
 
-            .. rubric:: Methods
 
-            .. autosummary::
-                :nosignatures:
 
-                    ~BaseTrainer.fit
-                    ~BaseTrainer.evaluate
-                    ~BaseTrainer.get_statistics
-                    ~BaseTrainer.serialize_logs
-                    ~BaseTrainer.serialize_best_model
 
-    .. autoclass:: RandomFeaturesTrainer
-        :members:
 
-            .. rubric:: Methods
 
-            .. autosummary::
-                :nosignatures:
 
-                    ~RandomFeaturesTrainer.fit
-                    ~RandomFeaturesTrainer.evaluate
+
+
+
+
+
+
+
+
+
+

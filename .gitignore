@@ -10,6 +10,8 @@ franken/datasets/water/*.zip
 # Random
 rsync.sh
 
+# Docs
+docs/reference/franken-api/stubs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

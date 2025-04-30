@@ -10,15 +10,14 @@ from franken.utils.misc import garbage_collection_cuda
 
 
 class Statistics:
-    """Running statistics of GNN features, computing both per-species and global statistics."""
+    """Running statistics of GNN features, computing both per-species and global statistics.
+
+    Args:
+        input_dim (Optional[int], optional): Dimension of GNN features. If not specified will
+        be inferred automatically when the first feature is provided. Defaults to None.
+    """
 
     def __init__(self, input_dim: Optional[int] = None):
-        """Initialize running statistics calculator
-
-        Args:
-            input_dim (Optional[int], optional): Dimension of GNN features. If not specified will
-            be inferred automatically when the first feature is provided. Defaults to None.
-        """
         self.input_dim = input_dim
         self.statistics: dict[int, dict[str, Any]] = {}
         if self.input_dim is not None:
@@ -115,6 +114,15 @@ class FeatureScaler(torch.nn.Module):
 
     Can be initialized from a :class:`franken.rf.scaler.Statistics` instance, and when called
     will scale GNN features. Supports both global and per-species normalization.
+
+    Args:
+        input_dim (int): Dimension of the GNN features
+        statistics (Optional[Statistics]): Instance of :class:`franken.rf.scaler.Statistics`
+            from which the feature mean and standard deviation can be fetched. If set to
+            :code:`None`, the class will be initialized to perform no normalization. You can
+            modify the statistics by calling :meth:`franken.rf.scaler.FeatureScaler.set_from_statistics`.
+        scale_by_Z (bool): Whether to scale per-species or globally.
+        num_species (int): The number of distinct species in the data.
     """
 
     def __init__(
@@ -124,17 +132,6 @@ class FeatureScaler(torch.nn.Module):
         scale_by_Z: bool,
         num_species: int,
     ):
-        """Initialize feature scaler.
-
-        Args:
-            input_dim (int): Dimension of the GNN features
-            statistics (Optional[Statistics]): Instance of :class:`franken.rf.scaler.Statistics`
-                from which the feature mean and standard deviation can be fetched. If set to
-                :code:`None`, the class will be initialized to perform no normalization. You can
-                modify the statistics by calling :meth:`franken.rf.scaler.FeatureScaler.set_from_statistics`.
-            scale_by_Z (bool): Whether to scale per-species or globally.
-            num_species (int): The number of distinct species in the data.
-        """
         super().__init__()
         self.input_dim = input_dim
         self.scale_by_Z = scale_by_Z

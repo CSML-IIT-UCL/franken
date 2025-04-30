@@ -1,37 +1,18 @@
-..
-  module.rst
-
-franken.rf.scaler
+﻿franken.rf.scaler
 =================
 
-.. automodule:: franken.rf.scaler
+.. autosummary::
+    :toctree: stubs
+    :template: class.rst
+    :nosignatures:
 
-    .. rubric:: Classes
-
-    .. autosummary::
-        :toctree:
-        :nosignatures:
-
-            Statistics
-            FeatureScaler
-
-    .. rubric:: Functions
-
-    .. autosummary::
-        :toctree:
-        :nosignatures:
-
-            compute_dataset_statistics
+    franken.rf.scaler.FeatureScaler
+    franken.rf.scaler.Statistics
 
 
-    .. autoclass:: Statistics
-        :members:
-        :exclude-members: __new__
+.. autosummary::
+    :toctree: stubs
+    :template: func.rst
+    :nosignatures:
 
-
-    .. autoclass:: FeatureScaler
-        :members:
-        :exclude-members: __new__
-
-
-    .. autofunction:: compute_dataset_statistics
+    franken.rf.scaler.compute_dataset_statistics

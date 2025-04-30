@@ -1,16 +1,13 @@
-.. _api_reference:
 
 Franken API Reference
 =====================
 
 
-.. currentmodule:: franken
+.. toctree::
+    :maxdepth: 1
 
-.. autosummary::
-    :toctree: franken-api/
-
-    franken.trainers
-    franken.calculators
-    franken.rf.model
-    franken.rf.heads
-    franken.rf.scaler
+    franken-api/franken.trainers
+    franken-api/franken.calculators
+    franken-api/franken.rf.model
+    franken-api/franken.rf.heads
+    franken-api/franken.rf.scaler

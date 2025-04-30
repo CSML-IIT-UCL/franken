@@ -1,4 +1,4 @@
-# Franken models and LAMMPS
+# Franken + LAMMPS
 
 The basic steps required to run a Franken model with [LAMMPS](https://www.lammps.org/) are:
  1. Compile the model using `franken/calculators/lammps.py`:

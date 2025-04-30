@@ -29,16 +29,27 @@ class FrankenPotential(torch.nn.Module):
     linear model (:meth:`~franken.rf.model.FrankenPotential.energy_and_forces`).
 
     Args:
-        gnn_backbone_id (str):
-        kernel_type (str): The kernel type to use. Must be one of :code:`gaussian`, :code:`poly`, or :code:`linear`.
-        rf_config (dict): A dictionary of parameters for the random features head. For each kernel type the default parameters can be found :ref:`below <random_features_params>`.
-        interaction_block (int): GNN layer used for feature extraction
-        jac_chunk_size (int or "auto"):
+        gnn_config: Configuration object for the GNN. Sets the ID and other backbone parameters.
+        rf_config: Configuration object for the random features (kernel-approximation). Sets all relevant kernel parameters,
+            as well as the number of random features.
+        jac_chunk_size (int, "auto"): Force calculation requires computing Jacobians through the GNN. Since this is
+            memory intensive, we can do this in batches across atoms of each configuration. When dealing with large systems,
+            the chunk size becomes important to ensure no out-of-memory errors occur. This can either be set manually or be
+            set automatically (by passing `"auto"`) which will attempt to determine the largest chunk that fits in memory.
+            Defaults to "auto"
+        scale_by_Z: Whether features should be scaled indipendently for each different species. Defaults to True.
+        num_species: The number of species that this model will be trained on. Defaults to 1.
+        atomic_energies: A precomputed dictionary mapping atomic numbers to the average energy of that species.
+            Can be safely left to its default of None in most cases.
 
     Attributes:
         gnn (torch.nn.Module): The graph neural network which is used for feature extraction, loaded from
             a pretrained checkpoint.
         rf (torch.nn.Module): Random-features module :class:`franken.rf.heads.RandomFeaturesHead`.
+
+    Note:
+        The automatic Jacobian chunking is known to be error-prone. If you encounter out-of-memory errors
+        with this option active, try manually setting the `jac_chunk_size` parameter.
     """
 
     def __init__(
