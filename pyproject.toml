@@ -57,6 +57,19 @@ mace = ["mace-torch"]
 fairchem = ["fairchem-core"]
 sevenn = ["sevenn"]
 cuda = ["cupy"]
+docs = [
+    "Sphinx",
+    "sphinxawesome-theme",
+    "sphinxcontrib-applehelp",
+    "sphinxcontrib-devhelp",
+    "sphinxcontrib-htmlhelp",
+    "sphinxcontrib-jsmath",
+    "sphinxcontrib-qthelp",
+    "sphinxcontrib-serializinghtml",
+    "sphinx-argparse",
+    "myst-parser",
+    "nbsphinx",
+]
 
 [build-system]
 requires = ["hatchling"]

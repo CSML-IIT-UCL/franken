@@ -1,0 +1,27 @@
+channels:
+- pytorch
+- nvidia
+- conda-forge
+dependencies:
+- pytorch>=2.4
+- ase
+- numpy
+- omegaconf
+- pip
+- requests
+- tqdm
+- pytest
+- psutil
+- tyro
+- Sphinx
+- sphinxawesome-theme
+- sphinxcontrib-applehelp
+- sphinxcontrib-devhelp
+- sphinxcontrib-htmlhelp
+- sphinxcontrib-jsmath
+- sphinxcontrib-qthelp
+- sphinxcontrib-serializinghtml
+- sphinx-argparse
+- myst-parser
+- nbsphinx
+name: franken
