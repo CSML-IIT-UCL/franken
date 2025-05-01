@@ -60,6 +60,7 @@ jobs:
         # conda setup requires this special shell
         shell: bash -l {0}
         run: |
+          # Check import works. sphinx-build will try to import but not provide reliable error-traces.
           python -c "import franken; import franken.calculators;"
           sphinx-build docs _build
 
