@@ -8,6 +8,7 @@ dependencies:
 - numpy
 - omegaconf
 - cupy
+- e3nn
 - pip
 - requests
 - tqdm
