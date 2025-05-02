@@ -17,5 +17,4 @@ dependencies:
 - black
 - ruff
 - psutil
-- tyro
 name: franken

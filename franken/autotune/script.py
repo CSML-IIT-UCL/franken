@@ -2,15 +2,16 @@ import dataclasses
 import datetime
 import json
 import logging
+import sys
 import warnings
 from pathlib import Path
 from typing import Generator, Literal, NamedTuple
 from uuid import uuid4
 
-import tyro
 import torch.distributed
 import torch.utils.data
 
+from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
@@ -348,13 +349,7 @@ def autotune(cfg: AutotuneConfig):
 
 
 def cli_entry_point():
-    args = tyro.cli(
-        AutotuneConfig,
-        config=(
-            tyro.conf.SuppressFixed,
-            tyro.conf.FlagConversionOff,
-        ),
-    )
+    args = parse_cli(sys.argv[1:])
     autotune(args)
 
 
@@ -363,10 +358,4 @@ if __name__ == "__main__":
 
 
 # For sphinx docs
-get_parser_fn = lambda: tyro.extras.get_parser(  # noqa: E731
-    AutotuneConfig,
-    config=(
-        tyro.conf.SuppressFixed,
-        tyro.conf.FlagConversionOff,
-    ),
-)
+get_parser_fn = build_parser()

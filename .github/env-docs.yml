@@ -13,7 +13,6 @@ dependencies:
 - tqdm
 - pytest
 - psutil
-- tyro
 - ipython
 - sphinx
 - sphinxawesome-theme

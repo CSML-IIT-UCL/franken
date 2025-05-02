@@ -4,38 +4,22 @@ Franken CLI Reference
 =====================
 
 
-Autotune
---------
+.. list-table::
+   :header-rows: 1
 
-.. code-block:: bash
+   * - Program
+     - Description
+   * - :doc:`franken.trainers <franken-cli/franken.autotune>`
+     - Automatic hyperparameter tuning for franken models.
+   * - :doc:`franken.calculators <franken-cli/franken.backbones>`
+     - List and download GNN backbones for franken.
+   * - :doc:`franken.rf.model <franken-cli/franken.create_lammps_model>`
+     - Convert a franken model to be able to use it with LAMMPS.
 
-    usage: franken.autotune [-h] [OPTIONS] {backbone:mace,backbone:fairchem,backbone:sevenn}
+.. toctree::
+    :maxdepth: 1
+    :hidden:
 
-
-.. argparse::
-    :module: franken.autotune.script
-    :func: get_parser_fn
-    :prog: franken.autotune
-    :nodefault:
-
-    subcommands : @skip
-        skip subcommands. This is far from ideal since we'd like subcommands to show up, but current output is worse than nothing.
-
-
-Backbones
----------
-
-
-.. argparse::
-    :module: franken.backbones.cli
-    :func: get_parser_fn
-    :prog: franken.backbones
-
-
-Create LAMMPS model
--------------------
-
-.. argparse::
-    :module: franken.calculators.lammps_calc
-    :func: get_parser_fn
-    :prog: franken.create_lammps_model
+    franken-cli/franken.autotune
+    franken-cli/franken.backbones
+    franken-cli/franken.create_lammps_model

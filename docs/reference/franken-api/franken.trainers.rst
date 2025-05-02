@@ -1,7 +1,6 @@
 ﻿franken.trainers
 ================
 
-
 Base Class
 ----------
 .. autosummary::
@@ -19,22 +18,3 @@ Random features trainer
     :nosignatures:
 
     franken.trainers.RandomFeaturesTrainer
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

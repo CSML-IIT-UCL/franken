@@ -13,8 +13,8 @@ class Statistics:
     """Running statistics of GNN features, computing both per-species and global statistics.
 
     Args:
-        input_dim (Optional[int], optional): Dimension of GNN features. If not specified will
-        be inferred automatically when the first feature is provided. Defaults to None.
+        input_dim: Dimension of GNN features. If not specified will
+            be inferred automatically when the first feature is provided. Defaults to None.
     """
 
     def __init__(self, input_dim: Optional[int] = None):
@@ -117,7 +117,7 @@ class FeatureScaler(torch.nn.Module):
 
     Args:
         input_dim (int): Dimension of the GNN features
-        statistics (Optional[Statistics]): Instance of :class:`franken.rf.scaler.Statistics`
+        statistics: Instance of :class:`franken.rf.scaler.Statistics`
             from which the feature mean and standard deviation can be fetched. If set to
             :code:`None`, the class will be initialized to perform no normalization. You can
             modify the statistics by calling :meth:`franken.rf.scaler.FeatureScaler.set_from_statistics`.
@@ -188,7 +188,7 @@ class FeatureScaler(torch.nn.Module):
 
         Args:
             descriptors (torch.Tensor): GNN features
-            atomic_numbers (Optional[torch.Tensor], optional): Atomic numbers for each atom.
+            atomic_numbers: Atomic numbers for each atom.
                 This can be left to None unless the feature-scaler has been configured
                 to perform per-species normalization. Defaults to None.
 

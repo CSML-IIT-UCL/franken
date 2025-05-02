@@ -62,8 +62,9 @@ class BaseTrainer(abc.ABC):
                 is used to compute the features on atomic configurations.
 
         Returns:
-            statistics (Statistics): The dataset statistics
-            gnn_info (dict[str, Any]): Hyperparameters of the GNN used to compute the statistics.
+            A tuple containing an object of type :class:`franken.rf.scaler.Statistics` containing
+            the dataset statistics, and a dictionary containing the GNN-backbone hyperparameters
+            used when computing dataset features.
         """
         if self.statistics_ is None or not are_dicts_equal(
             self.statistics_[1], asdict_with_classvar(model.gnn_config)
@@ -110,10 +111,10 @@ class BaseTrainer(abc.ABC):
         """Evaluate a fitted model by computing metrics on a validation dataset.
 
         Args:
-            model (FrankenPotential): The model which defines GNN and random features.
+            model: The model which defines GNN and random features.
             dataloader (torch.utils.data.DataLoader): Evaluation will run the model
                 on each configuration in the dataloader, computing averaged metrics.
-            log_collection (LogCollection): Log object as output by the :meth:`fit`
+            log_collection: Log object as output by the :meth:`fit`
                 method. Metric values will be added to the logs and the same object will
                 be returned by this method.
             all_weights (torch.Tensor): The weights as output by the :meth:`fit` method.

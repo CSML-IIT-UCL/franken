@@ -1,6 +1,5 @@
 ﻿franken.rf.heads
 ================
-
 This module contains random feature implementations for different kernels
 
 Base Class

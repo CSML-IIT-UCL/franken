@@ -2,9 +2,7 @@ from abc import ABC
 import ast
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Annotated, Any, ClassVar, Literal, Sequence, Union
-
-import tyro
+from typing import Any, ClassVar, Literal, Sequence, Union
 
 
 def all_fields(class_or_instance):
@@ -88,6 +86,10 @@ class HPSearchConfig:
         except ValueError:
             pass
         try:
+            # Deal with linear, log being unquoted
+            hp_str_tmp = [hp_tmp.strip() for hp_tmp in hp_str.strip("( )").split(",")]
+            if len(hp_str_tmp) == 4 and hp_str_tmp[-1] in {"log", "linear"}:
+                hp_str = f'({hp_str_tmp[0]}, {hp_str_tmp[1]}, {hp_str_tmp[2]}, "{hp_str_tmp[3]}")'
             vals = ast.literal_eval(hp_str)
             if isinstance(vals, (tuple, list)):
                 if all(isinstance(v, (int, float)) for v in vals):
@@ -101,7 +103,10 @@ class HPSearchConfig:
                         return HPSearchConfig(
                             start=vals[0], stop=vals[1], num=vals[2], scale=vals[3]
                         )
-        except Exception:
+            elif isinstance(vals, (float, int)):
+                return HPSearchConfig(value=vals)
+        except Exception as e:
+            raise e
             pass
         raise TypeError(
             f"String '{hp_str}' cannot be converted to an instance of HPSearchConfig. You can either provide float or int values, "
@@ -135,18 +140,6 @@ class HPSearchConfig:
                     or self.scale not in {"log", "linear"}
                 ):
                     raise TypeError("Invalid HPSearchConfig object was created.")
-
-
-HPSearchConfigStringType = Annotated[
-    HPSearchConfig,
-    tyro.constructors.PrimitiveConstructorSpec(
-        nargs=1,
-        metavar="HYPERPARAMETER",
-        instance_from_str=lambda args: HPSearchConfig.from_str(args[0]),
-        is_instance=HPSearchConfig.is_string_valid,
-        str_from_instance=lambda instance: [str(instance)],
-    ),
-]
 
 
 @dataclass
@@ -246,13 +239,13 @@ class RFConfig(ABC):
 
 @dataclass
 class GaussianRFConfig(RFConfig):
+    """Orthogonal random features to approximate the Gaussian kernel."""
+
     rf_type: ClassVar[str] = "gaussian"
     num_random_features: int
     """Number of random features"""
 
-    length_scale: tyro.conf.AvoidSubcommands[
-        HPSearchConfigStringType | list[float] | float
-    ] = field(
+    length_scale: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(start=4, stop=20, num=10, scale="linear")
     )
     """Gaussian length-scale sigma."""
@@ -266,6 +259,8 @@ class GaussianRFConfig(RFConfig):
 
 @dataclass
 class MultiscaleGaussianRFConfig(RFConfig):
+    """Random features to approximate a Gaussian kernel with multiple length-scales."""
+
     rf_type: ClassVar[str] = "multiscale-gaussian"
     num_random_features: int
     """Number of random features"""
@@ -288,16 +283,12 @@ class MultiscaleGaussianRFConfig(RFConfig):
 
 @dataclass
 class SolverConfig:
-    l2_penalty: tyro.conf.AvoidSubcommands[
-        HPSearchConfigStringType | list[float] | float
-    ] = field(
+    l2_penalty: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(start=-11, stop=-6, num=6, scale="log")
     )
     """The amount of regularization. Should be a small positive number."""
 
-    force_weight: tyro.conf.AvoidSubcommands[
-        HPSearchConfigStringType | list[float] | float
-    ] = field(
+    force_weight: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(
             start=0.01, stop=0.99, num=10, scale="linear"
         )
@@ -335,47 +326,13 @@ class AutotuneConfig:
     solver: SolverConfig
     """Configure the franken solver. Hyperparameter search over these is efficient, so the search-grid can be quite fine-grained."""
 
-    backbone: Union[
-        Annotated[
-            MaceBackboneConfig,
-            tyro.conf.subcommand(
-                name="mace", description="Configure the MACE GNN backbone."
-            ),
-        ],
-        Annotated[
-            FairchemBackboneConfig,
-            tyro.conf.subcommand(
-                name="fairchem", description="Configure the Fairchem GNN backbone."
-            ),
-        ],
-        Annotated[
-            SevennBackboneConfig,
-            tyro.conf.subcommand(
-                name="sevenn", description="Configure the SevenNet GNN backbone."
-            ),
-        ],
-    ]
+    backbone: BackboneConfig
     """The GNN backbone which will be used by franken."""
 
-    rfs: Union[
-        Annotated[
-            GaussianRFConfig,
-            tyro.conf.subcommand(
-                name="gaussian",
-                description="Orthogonal random features to approximate the Gaussian kernel.",
-            ),
-        ],
-        Annotated[
-            MultiscaleGaussianRFConfig,
-            tyro.conf.subcommand(
-                name="multiscale-gaussian",
-                description="Random features to approximate a Gaussian kernel with multiple length-scales.",
-            ),
-        ],
-    ]
+    rfs: RFConfig
     """Choose the random-feature approximation."""
 
-    rf_normalization: Literal["leading_eig"] | None = "leading_eig"
+    rf_normalization: Literal["leading_eig"] | None = field(default="leading_eig")
     """Normalization strategy for the covariance matrix."""
 
     save_every_model: bool = False

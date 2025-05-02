@@ -32,11 +32,11 @@ class FrankenPotential(torch.nn.Module):
         gnn_config: Configuration object for the GNN. Sets the ID and other backbone parameters.
         rf_config: Configuration object for the random features (kernel-approximation). Sets all relevant kernel parameters,
             as well as the number of random features.
-        jac_chunk_size (int, "auto"): Force calculation requires computing Jacobians through the GNN. Since this is
+        jac_chunk_size: Force calculation requires computing Jacobians through the GNN. Since this is
             memory intensive, we can do this in batches across atoms of each configuration. When dealing with large systems,
             the chunk size becomes important to ensure no out-of-memory errors occur. This can either be set manually or be
             set automatically (by passing `"auto"`) which will attempt to determine the largest chunk that fits in memory.
-            Defaults to "auto"
+            Defaults to "auto".
         scale_by_Z: Whether features should be scaled indipendently for each different species. Defaults to True.
         num_species: The number of species that this model will be trained on. Defaults to 1.
         atomic_energies: A precomputed dictionary mapping atomic numbers to the average energy of that species.
@@ -217,7 +217,7 @@ class FrankenPotential(torch.nn.Module):
     ) -> torch.Tensor:
         r"""Computes the energy of a configuration, using a linear model.
 
-        if :attr:`weights` is not provided, the weights stored in the :attr:`self.rf`
+        if `weights` is not provided, the weights stored in the :attr:`FrankenPotential.rf`
         random features object will be used instead.
 
         This function returns the energy of the configuration scaled by the number
@@ -260,15 +260,15 @@ class FrankenPotential(torch.nn.Module):
         The gradient is equivalent to the negative force acting on
         the configuration.
 
-        if :attr:`weights` is not provided, the weights stored in the :attr:`self.rf`
+        if `weights` is not provided, the weights stored in the :attr:`FrankenPotential.rf`
         random features object will be used instead.
 
-        This function returns a tuple: :attr:`energy_gradient`, :attr:`energy`.
+        This function returns a tuple: `energy_gradient`, `energy`.
 
         .. note::
             This function uses the :mod:`torch.func` package to compute the gradient,
             which is particularly useful when computing the energy gradient with
-            multiple linear models. In this case :attr:`weights` can be a matrix whose
+            multiple linear models. In this case `weights` can be a matrix whose
             first dimension is the number of linear models.
             When computing the gradient for a single linear model, use the
             :meth:`~franken.rf.model.FrankenPotential.grad_energy_autograd` method instead
@@ -276,7 +276,7 @@ class FrankenPotential(torch.nn.Module):
 
         Args:
             weights (Tensor or None): the linear coefficients to compute the energy
-            configuration: the molecular configuration whose energy and gradient to compute.
+            data: the molecular configuration whose energy and gradient to compute.
 
         See also :meth:`~franken.rf.model.FrankenPotential.grad_energy_autograd`.
 
@@ -299,16 +299,16 @@ class FrankenPotential(torch.nn.Module):
         The gradient is equivalent to the negative force acting on
         the configuration.
 
-        if :attr:`weights` is not provided, the weights stored in the :attr:`self.rf`
+        if `weights` is not provided, the weights stored in the :attr:`FrankenPotential.rf`
         random features object will be used instead.
 
-        This function returns a tuple: :attr:`energy_gradient`, :attr:`energy`. See
+        This function returns a tuple: `energy_gradient`, `energy`. See
         :meth:`~franken.rf.model.FrankenPotential.grad_energy_func` for a discussion on the
         performance characteristics of the two implementations.
 
         Args:
             weights (Tensor or None): the linear coefficients to compute the energy
-            configuration: the molecular configuration whose energy and gradient to compute.
+            data: the molecular configuration whose energy and gradient to compute.
         """
         # Ensure atom positions require gradients
         data.atom_pos.requires_grad_(True)
@@ -363,29 +363,30 @@ class FrankenPotential(torch.nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Infer energy and forces of an atomic configuration using a learned random-features model.
 
-        The parameter :attr:`weights` can be used to specified the model's weights. Otherwise the weights stored in
-        :attr:`self.rf.weights` will be used instead.
+        The parameter `weights` can be used to specified the model's weights. Otherwise the weights stored in
+        :attr:`FrankenPotential.rf.weights` will be used instead.
 
-        The different values of :attr:`forces_mode` correspond to different ways of differentiating
+        The different values of `forces_mode` correspond to different ways of differentiating
         through the model to obtain the forces acting on the atoms:
 
-        * :code:`"torch.func"` is best for when :attr:`weights` contains multiple linear models on which to perform inference at the same time (in that case :attr:`weights` should be a matrix of shape `[n_linear_models, model_size]`).
+        * :code:`"torch.func"` is best for when `weights` contains multiple linear models on which to perform inference at the same time (in that case `weights` should be a matrix of shape `[n_linear_models, model_size]`).
 
-        * :code:`"torch.autograd"` is best for when a single linear model is used (i.e. when :attr:`weights` is a vector of shape `[model_size]`)
+        * :code:`"torch.autograd"` is best for when a single linear model is used (i.e. when `weights` is a vector of shape `[model_size]`)
 
         * :code:`"no_forces"` can be used if forces are not required.
 
         Args:
-            weights: weights of the random feature model. Defaults to None, in which case the weights set in :attr:`self.rf` will be used instead.
+            weights: weights of the random feature model. Defaults to None, in which case the weights set in :attr:`FrankenPotential.rf` will be used instead.
 
             forces_mode: how to compute the model's forces. Defaults to :code:`"torch.autograd"`.
 
             add_energy_shift: whether to add the energy shift to the energy.
 
         Returns:
-            energy (Tensor): the scalar (or vector-valued when doing inference with multiple models) valued potential energy.
-
-            forces (Tensor): the forces acting on each atom of the given configuration. If multiple models are given, this will have shape :code:`[n_linear_models, n_atoms, 3]`.
+            A tuple containing a tensor representing the potential energy (this is scalar, unless doing inference with multiple
+            models when it can be vector-valued), and another optional tensor representing the forces acting on each atom of the
+            given configuration. If multiple models are given, the forces will have shape :code:`[n_linear_models, n_atoms, 3]`,
+            otherwise they will have shape :code:`[n_atoms, 3]`.
         """
         if forces_mode == "torch.func":
             with torch.no_grad():

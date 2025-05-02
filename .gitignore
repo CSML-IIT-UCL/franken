@@ -12,6 +12,7 @@ rsync.sh
 
 # Docs
 docs/reference/franken-api/stubs
+docs/reference/stubs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

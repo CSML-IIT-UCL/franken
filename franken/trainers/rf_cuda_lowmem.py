@@ -41,23 +41,23 @@ class RandomFeaturesTrainer(BaseTrainer):
     Args:
         train_dataloader (torch.utils.data.DataLoader):
             Dataloader which iterates over the training set.
-        random_features_normalization (Literal["leading_eig"] | None, optional):
+        random_features_normalization (Literal["leading_eig"] | None):
             How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
-        log_dir (Path | None, optional):
+        log_dir (Path | None):
             Directory where to save logs and models. If not specified, no logs will be saved.
             Defaults to None.
-        save_every_model (bool, optional):
+        save_every_model (bool):
             Model fitting with this class is done simultaneously for a list
             of solver parameters. This argument controls the behavior of model saving:
             if set to True, the models corresponding to all solver parameters will be saved,
             otherwise only the 'best' model among them (according to some validation set) will
             be saved. Defaults to True.
-        device (_type_, optional):
+        device:
             PyTorch device on which computations are performed. Defaults to "cuda:0".
-        dtype (str | torch.dtype, optional):
+        dtype (str | torch.dtype):
             Data-type for solver operations. Random features will be computed in float32, and
             then converted to float64 if requested. Defaults to torch.float32.
-        save_fmaps (bool, optional):
+        save_fmaps (bool):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
             the :meth:`~franken.trainers.FrankenPotential.evaluate` method on training

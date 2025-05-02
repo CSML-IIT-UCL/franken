@@ -4,18 +4,14 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-# -- Path setup --------------------------------------------------------------
 
-# If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-#
 import os
 import sys
 import re
 from docutils import nodes
 from sphinxawesome_theme.postprocess import Icons
 
+# -- Path setup --------------------------------------------------------------
 basedir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, basedir)
 
@@ -25,14 +21,11 @@ html_permalinks_icon = Icons.permalinks_icon  # SVG as a string
 # -- Project information -----------------------------------------------------
 
 project = "franken"
-copyright = "2024, franken team"
+copyright = "2025, franken team"
 author = "franken team"
 
 # -- General configuration ---------------------------------------------------
-
-# Add any Sphinx extension module names here, as strings. They can be
-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
-# ones.
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -40,11 +33,11 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "requirements.txt"]
 
-
-# -- General configuration ---------------------------------------------------
-# https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
+# Add any Sphinx extension module names here, as strings. They can be
+# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
+# ones.
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
@@ -63,12 +56,12 @@ intersphinx_mapping = {
     "torch": ("https://pytorch.org/docs/stable/", None),
     "torchvision": ("https://pytorch.org/vision/stable/", None),
     "python": ("https://docs.python.org/3.9/", None),
+    "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
 }
 
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "requirements.txt"]
 
 autodoc_typehints = "description"
-autodoc_typehints_description_target = "all"
+autodoc_typehints_description_target = "documented"
 # to handle functions as default input arguments
 autodoc_preserve_defaults = True
 # Warn about broken links

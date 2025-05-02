@@ -26,7 +26,7 @@ class RandomFeaturesHead(torch.nn.Module):
 
     Args:
         input_dim (int): Dimension of the input features.
-        num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
+        num_random_features (int): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
         num_species (int | None): The number of chemical species for
             which the kernel is computed. This parameter is relevant for systems
             with multiple chemical species. Defaults to :code:`None`.
@@ -76,7 +76,7 @@ class RandomFeaturesHead(torch.nn.Module):
 
         Args:
             Z (torch.Tensor): [num_atoms, feature_dim] tensor containing the random features for each atom
-            atomic_numbers (torch.Tensor | None, optional): if specified, an integer tensor of size [num_atoms]
+            atomic_numbers (torch.Tensor | None): if specified, an integer tensor of size [num_atoms]
                 detailing the atomic number of each atom in the configuration. Defaults to None.
 
         Returns:
@@ -140,7 +140,7 @@ class OrthogonalRFF(RandomFeaturesHead):
 
     Args:
         input_dim (int): Dimensionality of the input features.
-        num_random_features (int, optional): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
+        num_random_features (int): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
         num_species (int | None): The number of chemical species for
             which the kernel is computed. This parameter is relevant for systems
             with multiple chemical species. Defaults to :code:`None`.

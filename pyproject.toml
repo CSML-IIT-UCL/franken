@@ -22,7 +22,6 @@ dependencies = [
     "e3nn",
     "omegaconf",
     "requests",
-    "tyro",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
