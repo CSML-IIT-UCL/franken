@@ -13,6 +13,7 @@ dependencies:
 - tqdm
 - pytest
 - psutil
+- docstring_parser
 - ipython
 - sphinx
 - sphinxawesome-theme

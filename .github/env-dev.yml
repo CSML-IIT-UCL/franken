@@ -17,4 +17,5 @@ dependencies:
 - black
 - ruff
 - psutil
+- docstring_parser
 name: franken
