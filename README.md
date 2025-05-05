@@ -1,8 +1,14 @@
 # Franken
 
+[![Test status](https://github.com/CSML-IIT-UCL/franken/actions/workflows/CI.yaml/badge.svg)](https://github.com/CSML-IIT-UCL/franken/actions/workflows/CI.yaml)
+[![Docs status](https://github.com/CSML-IIT-UCL/franken/actions/workflows/docs.yaml/badge.svg)](https://github.com/CSML-IIT-UCL/franken/actions/workflows/docs.yaml)
+
+
+## Introduction
+
 Franken is an open-source library which can be used to enhance the accuracy of atomistic foundation models. It can be used for molecular dynamics simulations, and has a focus on computational efficiency.
 
-`franken` features
+`franken` features include:
  - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [SchNet](https://github.com/facebookresearch/fairchem))
  - Automatic [hyperparameter tuning](https://csml-iit-ucl.github.io/franken/notebooks/autotune.html) simplifies the adaptation procedure, for an out-of-the-box user experience.
  - Several random-feature approximations to common kernels (e.g. Gaussian, polynomial) are available to flexibly fine-tune any foundation model.
