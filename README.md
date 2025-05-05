@@ -18,24 +18,25 @@ Franken is an open-source library which can be used to enhance the accuracy of a
 
 ## Documentation
 
-A full documentation including several examples is available: [https://csml-iit-ucl.github.io/franken/]
+A full documentation including several examples is available: [https://csml-iit-ucl.github.io/franken/](https://csml-iit-ucl.github.io/franken/)
 
 ## Install
 
 To install the latest release of `franken`, you can simply do:
 
 ```bash
-pip install deepinv
+pip install franken
 ```
 
 Several optional dependencies can be specified, to install packages required for certain operations:
  - `cuda` includes packages which speed up training on GPUs (note that `franken` will work on GPUs even without these dependencies thanks to pytorch).
- - `fairchem`, `mace`, `sevenn` install the necessary dependencies to use a specific backbone
+ - `fairchem`, `mace`, `sevenn` install the necessary dependencies to use a specific backbone.
  - `docs` and `develop` are only needed if you wish to build the documentation, or work on extending the library.
+
 They can be installed for example by running
 
 ```bash
-pip install deepinv[mace,cuda]
+pip install franken[mace,cuda]
 ```
 
 For more details read the [relevant documentation page](https://csml-iit-ucl.github.io/franken/topics/installation.html)
