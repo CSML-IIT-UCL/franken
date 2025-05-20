@@ -177,11 +177,11 @@ class BackboneConfig(ABC):
 
     @staticmethod
     def from_ckpt(ckpt):
-        if ckpt["family"] == "mace":
+        if ckpt["family"].lower() == "mace":
             cls = MaceBackboneConfig
-        elif ckpt["family"] == "fairchem":
+        elif ckpt["family"].lower() == "fairchem":
             cls = FairchemBackboneConfig
-        elif ckpt["family"] == "sevenn":
+        elif ckpt["family"].lower() == "sevenn":
             cls = SevennBackboneConfig
         else:
             raise ValueError(ckpt["family"])

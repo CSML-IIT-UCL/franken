@@ -12,6 +12,18 @@
         "implemented": true,
         "md5sum": "46c0d3cef9d863f285918bfaa66380c4"
     },
+    "Egret-1": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1.model",
+        "local": "egret/egret_1.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "Egret-1e": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1E.model",
+        "local": "egret/egret_1e.model",
+        "kind": "MACE",
+        "implemented": true
+    },
     "MACE-L1": {
         "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
         "local": "mace/2023-12-03-mace-128-L1_epoch-199.model",

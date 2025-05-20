@@ -6,6 +6,7 @@ from mace.modules.utils import get_edge_vectors_and_lengths
 from e3nn.util.jit import compile_mode
 
 from franken.data import Configuration
+from franken.utils.misc import torch_load_maybejit
 
 
 @compile_mode("script")
@@ -17,8 +18,33 @@ class FrankenMACE(torch.nn.Module):
         self.base_model = base_model
         self.gnn_backbone_id = gnn_backbone_id
         self.interaction_block = interaction_block
-        self.interactions = self.base_model.interactions[: self.interaction_block]
-        self.products = self.base_model.products[: self.interaction_block]
+        # Load the interactions and products from the torchscript hell
+        # that this module becomes.
+        module_dict = {nm[0]: nm[1] for nm in base_model.named_modules()}
+        try:
+            self.interactions = [
+                module_dict[f"interactions.{i}"]
+                for i in range(0, self.interaction_block)
+            ]
+            self.products = [
+                module_dict[f"products.{i}"] for i in range(0, self.interaction_block)
+            ]
+        except KeyError:
+            # only for printing helpful message.
+            max_interaction = max(
+                [
+                    int(k.split(".")[1])
+                    for k in module_dict.keys()
+                    if k.startswith("interactions")
+                ]
+            )
+            raise ValueError(
+                f"This model has {max_interaction} gnn layers, while descriptors "
+                f"have been required for the {self.interaction_block} layer"
+            )
+        # This would be the equivalent code if the model were not torchscripted!
+        # self.interactions = self.base_model.interactions[: self.interaction_block]
+        # self.products = self.base_model.products[: self.interaction_block]
         self.atomic_numbers = self.base_model.atomic_numbers
 
     def init_args(self):
@@ -28,10 +54,6 @@ class FrankenMACE(torch.nn.Module):
         }
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
-        if self.interaction_block > len(self.base_model.interactions):
-            raise ValueError(
-                f"This model has {len(self.base_model.interactions)} gnn layers, while descriptors have been required for the {self.interaction_block} layer"
-            )
         # assert on local variables to make torchscript happy
         edge_index = data.edge_index
         shifts = data.shifts
@@ -79,16 +101,16 @@ class FrankenMACE(torch.nn.Module):
         return sum(p.numel() for p in self.base_model.parameters())
 
     def feature_dim(self):
-        return (
-            self.interaction_block
-            * self.base_model.node_embedding.linear.irreps_out.count("0e")
-        )
+        nfeat = 0
+        for p in self.products:
+            nfeat += p.linear.irreps_out[0][0] * (2 * p.linear.irreps_out[0][1][0] + 1)
+        return nfeat
 
     @staticmethod
     def load_from_checkpoint(
         trainer_ckpt, gnn_backbone_id: str, interaction_block: int, map_location=None
     ) -> "FrankenMACE":
-        mace = torch.load(
+        mace = torch_load_maybejit(
             trainer_ckpt, map_location=map_location, weights_only=False
         ).to(dtype=torch.float32)
         return FrankenMACE(

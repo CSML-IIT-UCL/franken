@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import get_checkpoint_path
 from franken.data import BaseAtomsDataset, Configuration, Target
+from franken.utils.misc import torch_load_maybejit
 
 
 class MACEAtomsToGraphs:
@@ -73,7 +74,9 @@ class MACEAtomsDataset(BaseAtomsDataset):
 
     def load_info_from_gnn_config(self, gnn_backbone_id: str):
         ckpt_path = get_checkpoint_path(gnn_backbone_id)
-        mace_gnn = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        mace_gnn = torch_load_maybejit(
+            ckpt_path, map_location="cpu", weights_only=False
+        )
         z_table = AtomicNumberTable([z.item() for z in mace_gnn.atomic_numbers])
         cutoff = mace_gnn.r_max.item()
         del mace_gnn

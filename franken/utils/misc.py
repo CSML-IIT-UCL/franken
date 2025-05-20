@@ -385,3 +385,13 @@ def are_dicts_equal(d1: dict, d2: dict) -> bool:
             if v1 != d2[k1]:
                 return False
     return True
+
+
+def torch_load_maybejit(path, map_location=None, weights_only=True):
+    try:
+        model = torch.jit.load(path, map_location=map_location)
+    except RuntimeError as e:
+        if "PytorchStreamReader" not in str(e):
+            raise
+        model = torch.load(path, map_location=map_location, weights_only=weights_only)
+    return model
