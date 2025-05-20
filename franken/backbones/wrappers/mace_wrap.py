@@ -15,20 +15,31 @@ class FrankenMACE(torch.nn.Module):
 
     def __init__(self, base_model: MACE, interaction_block, gnn_backbone_id):
         super().__init__()
-        self.base_model = base_model
         self.gnn_backbone_id = gnn_backbone_id
         self.interaction_block = interaction_block
+        # Copy things from base model
+        self.atomic_numbers = base_model.atomic_numbers
+        self.r_max = base_model.r_max
+        self.num_interactions = self.register_buffer(
+            "num_interactions", torch.tensor(interaction_block, dtype=torch.int64)
+        )
+        self.node_embedding = base_model.node_embedding
+        self.spherical_harmonics = base_model.spherical_harmonics
+        self.radial_embedding = base_model.radial_embedding
+
         # Load the interactions and products from the torchscript hell
         # that this module becomes.
         module_dict = {nm[0]: nm[1] for nm in base_model.named_modules()}
         try:
-            self.interactions = [
-                module_dict[f"interactions.{i}"]
-                for i in range(0, self.interaction_block)
-            ]
-            self.products = [
-                module_dict[f"products.{i}"] for i in range(0, self.interaction_block)
-            ]
+            self.interactions = torch.nn.ModuleList(
+                [
+                    module_dict[f"interactions.{i}"]
+                    for i in range(0, self.interaction_block)
+                ]
+            )
+            self.products = torch.nn.ModuleList(
+                [module_dict[f"products.{i}"] for i in range(0, self.interaction_block)]
+            )
         except KeyError:
             # only for printing helpful message.
             max_interaction = max(
@@ -45,7 +56,6 @@ class FrankenMACE(torch.nn.Module):
         # This would be the equivalent code if the model were not torchscripted!
         # self.interactions = self.base_model.interactions[: self.interaction_block]
         # self.products = self.base_model.products[: self.interaction_block]
-        self.atomic_numbers = self.base_model.atomic_numbers
 
     def init_args(self):
         return {
@@ -62,15 +72,15 @@ class FrankenMACE(torch.nn.Module):
         assert shifts is not None
         assert node_attrs is not None
         # Embeddings
-        node_feats = self.base_model.node_embedding(node_attrs)
+        node_feats = self.node_embedding(node_attrs)
         vectors, lengths = get_edge_vectors_and_lengths(
             positions=data.atom_pos,
             edge_index=edge_index,
             shifts=shifts,
         )
-        edge_attrs = self.base_model.spherical_harmonics(vectors)
-        edge_feats = self.base_model.radial_embedding(
-            lengths, node_attrs, edge_index, self.base_model.atomic_numbers
+        edge_attrs = self.spherical_harmonics(vectors)
+        edge_feats = self.radial_embedding(
+            lengths, node_attrs, edge_index, self.atomic_numbers
         )
 
         node_feats_list = []
@@ -98,7 +108,7 @@ class FrankenMACE(torch.nn.Module):
         return torch.cat(node_feats_list, dim=-1)
 
     def num_params(self) -> int:
-        return sum(p.numel() for p in self.base_model.parameters())
+        return sum(p.numel() for p in self.parameters())
 
     def feature_dim(self):
         nfeat = 0

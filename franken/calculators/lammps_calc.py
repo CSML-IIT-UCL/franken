@@ -18,18 +18,20 @@ class LammpsFrankenCalculator(torch.nn.Module):
 
         Args:
             franken_model (FrankenPotential): The base franken model used in this MD calculator
+
+        Note:
+            The backbone underlying the franken model must be a MACE model. This is because we
+            are re-using the LAMMPS interface developed by the MACE authors.
         """
         super().__init__()
 
         self.model = franken_model
-        self.register_buffer("atomic_numbers", self.model.gnn.base_model.atomic_numbers)
-        self.register_buffer("r_max", self.model.gnn.base_model.r_max)
-        self.register_buffer(
-            "num_interactions", self.model.gnn.base_model.num_interactions
-        )
+        self.register_buffer("atomic_numbers", self.model.gnn.atomic_numbers)
+        self.register_buffer("r_max", self.model.gnn.r_max)
+        self.register_buffer("num_interactions", self.model.gnn.num_interactions)
         # this attribute is used for dtype detection in LAMMPS-MACE.
         # See: https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp#314
-        self.model.node_embedding = self.model.gnn.base_model.node_embedding
+        self.model.node_embedding = self.model.gnn.node_embedding
 
         for param in self.model.parameters():
             param.requires_grad = False
