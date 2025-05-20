@@ -38,6 +38,7 @@ class SevennAtomsToGraphs:
             cutoff=self.cutoff,
             transfer_info=self.transfer_info,
             y_from_calc=self.y_from_calc,
+            with_shift=True,
         )
         if not self.y_from_calc:
             del graph[KEY.ENERGY]
