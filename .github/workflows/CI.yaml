@@ -61,7 +61,7 @@ jobs:
           # On the other hand it depends on them publishing the wheels
           python -m pip install torch_scatter torch_sparse torch_cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
           python -m pip install torch_geometric
-          python -m pip install fairchem-core
+          python -m pip install fairchem-core==1.10
           python -m pip install mace-torch
 
       - name: Install package

@@ -54,7 +54,7 @@ develop = [
     "pytest",
 ]
 mace = ["mace-torch"]
-fairchem = ["fairchem-core"]
+fairchem = ["fairchem-core == 1.10"]
 sevenn = ["sevenn"]
 cuda = ["cupy"]
 docs = [
