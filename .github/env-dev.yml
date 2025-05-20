@@ -18,4 +18,5 @@ dependencies:
 - ruff
 - psutil
 - docstring_parser
+- packaging
 name: franken

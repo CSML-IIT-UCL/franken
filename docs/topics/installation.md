@@ -16,9 +16,10 @@ In more detail:
  - the three supported backbones are [MACE](https://github.com/ACEsuit/mace), [SchNet from fairchem](https://github.com/FAIR-Chem/fairchem), and [SevenNet](https://github.com/MDIL-SNU/SevenNet). They are explained in more detail below.
 
 
-```{note}
-Each backbone seems to have mutually incompatible requirements, particularly with regards to `e3nn` - but also pytorch versions might be a problem. For this reason, we suggest that the user who wishes to use multiple backbones creates independent python environments for each, such as to minimize potential incompatibilities.
-The `mace-torch` package requires an old version of `e3nn` which **may** conflict with `fairchem-core`, see [this relevant issue](https://github.com/ACEsuit/mace/issues/555) . If this is occurring, simply upgrade `e3nn` by running `pip install -U e3nn`.
+```{warning}
+Each backbone seems to have mutually incompatible requirements, particularly with regards to `e3nn` - but also pytorch versions might be a problem.
+To minimize incompatibilities, we suggest that the users who wishes to use multiple backbones create independent python environments for each.
+In particular, the `mace-torch` package requires an old version of `e3nn` (0.4.4) which conflicts with `fairchem-core`, see [this relevant issue](https://github.com/ACEsuit/mace/issues/555) and with `SevenNet`. If you encounter errors with model loading, simply upgrade `e3nn` by running `pip install -U e3nn`.
 ```
 
 ## Supported pre-trained models
@@ -35,6 +36,11 @@ In addition to MACE-MP0 trained on the materials project dataset, Franken also s
 The `mace-torch` package requires a version of `e3nn` which *may* conflict with `fairchem-core`, see [this relevant issue](https://github.com/ACEsuit/mace/issues/555). If this is occurring, and you need both `fairchem` and `mace`, simply install `mace-torch` *after* `fairchem-core` so that the version of `e3nn` being installed is compatible with `mace-torch`. The models currently implemented from `fairchem` **do not need** `e3nn`.
 ```
 
+### SevenNet
+
+Franken also supports the [SevenNet model](https://arxiv.org/abs/2402.03789) by Park et al. as implemented in the [`sevennet`](https://github.com/MDIL-SNU/SevenNet) library.
+We have only tested the SevenNet-0 model trained on the materials project dataset, but support for other models should be possible (open an issue if you encounter any problem).
+
 ### SchNet OC20 (fairchem, formerly OCP)
 We support the [SchNet model](https://arxiv.org/abs/1706.08566) by Schütt et al. as implemented in the [`fairchem`](https://fair-chem.github.io/) library by Meta's FAIR. The pre-training was done on the [Open Catalyst dataset](https://fair-chem.github.io/core/datasets/oc20.html). To use it as a backbone for `franken`, install the `fairchem` library
 ```bash
@@ -44,8 +50,5 @@ and the `torch_geometric` dependencies as explained in the [FairChem docs](https
 ```{note}
 Not all of fairchem's dependencies can be installed by `pip` alone, check the [FairChem docs](https://fair-chem.github.io/core/install.html).
 ```
-
-### SevenNet
-
-Franken also supports the [SevenNet model](https://arxiv.org/abs/2402.03789) by Park et al. as implemented in the [`sevennet`](https://github.com/MDIL-SNU/SevenNet) library.
-We have only tested the SevenNet-0 model trained on the materials project dataset, but support for other models should be possible (open an issue if you encounter any problem).
+Note that `SchNet` is not competitive with more recent GNN models and is only meant as a baseline, and to showcase support for diverse backends.
+For now we do not support fairchem v2 models, if you wish to see this implemented please file an issue!

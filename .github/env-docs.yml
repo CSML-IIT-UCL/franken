@@ -26,4 +26,5 @@ dependencies:
 - sphinx-argparse
 - myst-parser
 - nbsphinx
+- packaging
 name: franken

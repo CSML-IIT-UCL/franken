@@ -10,7 +10,7 @@ Franken is an open-source library that can be used to enhance the accuracy of at
 
 `franken` features include:
  - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [SchNet](https://github.com/facebookresearch/fairchem))
- - Automatic [hyperparameter tuning](https://csml-iit-ucl.github.io/franken/notebooks/autotune.html) simplifies the adaptation procedure, for an out-of-the-box user experience.
+ - Automatic [hyperparameter tuning](https://franken.readthedocs.io/notebooks/autotune.html) simplifies the adaptation procedure, for an out-of-the-box user experience.
  - Several random-feature approximations to common kernels (e.g. Gaussian, polynomial) are available to flexibly fine-tune any foundation model.
  - Support for running within [LAMMPS](https://www.lammps.org/) molecular dynamics, as well as with [ASE](https://wiki.fysik.dtu.dk/ase/).
 
@@ -18,7 +18,9 @@ Franken is an open-source library that can be used to enhance the accuracy of at
 
 ## Documentation
 
-A full documentation including several examples is available: [https://csml-iit-ucl.github.io/franken/](https://csml-iit-ucl.github.io/franken/)
+A full documentation including several examples is available: [https://franken.readthedocs.io/index.html](https://franken.readthedocs.io/index.html).
+
+For a comprehensive description of the methods behind franken, have a look at [the paper](https://arxiv.org/abs/2505.05652).
 
 ## Install
 
@@ -39,7 +41,7 @@ They can be installed for example by running
 pip install franken[mace,cuda]
 ```
 
-For more details read the [relevant documentation page](https://csml-iit-ucl.github.io/franken/topics/installation.html)
+For more details read the [relevant documentation page](https://franken.readthedocs.io/topics/installation.html)
 
 ## Quickstart
 
@@ -57,12 +59,19 @@ franken.autotune \
     --rf=gaussian --gaussian.num-rf=512 --gaussian.length-scale="[10.0, 15.0]"
 ```
 
-For more details you can check out our [autotune tutorial](https://csml-iit-ucl.github.io/franken/notebooks/autotune.html) or our [getting started notebook](https://csml-iit-ucl.github.io/franken/notebooks/getting_started.html).
+For more details you can check out the [autotune tutorial](https://franken.readthedocs.io/notebooks/autotune.html) or the [getting started notebook](https://franken.readthedocs.io/notebooks/getting_started.html).
 
 
 ## Citing
 
 If you find this library useful, please cite our work using the folowing bibtex entry:
 ```
-TODO: Add citation
+@misc{novelli25franken,
+    title={Fast and Fourier Features for Transfer Learning of Interatomic Potentials},
+    author={Pietro Novelli and Giacomo Meanti and Pedro J. Buigues and Lorenzo Rosasco and Michele Parrinello and Massimiliano Pontil and Luigi Bonati},
+    year={2025},
+    eprint={2505.05652},
+    archivePrefix={arXiv},
+    url={https://arxiv.org/abs/2505.05652},
+}
 ```
