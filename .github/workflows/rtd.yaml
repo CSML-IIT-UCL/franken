@@ -17,12 +17,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
 jobs:
   docs:
     environment:
@@ -31,8 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
       - name: Create and setup mamba
         uses: mamba-org/setup-micromamba@v2
         with:
@@ -71,16 +63,16 @@ jobs:
           # Setup git identity
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          
+
           # Create docs.zip from the _build directory first
           cd _build
           zip -r ../docs.zip .
           cd ..
-          
+
           # Save a copy of important files
           cp .readthedocs.yaml /tmp/readthedocs.yaml
           cp docs.zip /tmp/docs.zip
-          
+
           # Create a fresh rtd branch
           git checkout --orphan rtd-temp
           git rm -rf .
@@ -88,10 +80,10 @@ jobs:
           # Restore the saved files
           cp /tmp/readthedocs.yaml .readthedocs.yaml
           cp /tmp/docs.zip docs.zip
-          
+
           # Add and commit both files
           git add docs.zip .readthedocs.yaml
           git commit -m "Update documentation build [skip ci]"
-          
+
           # Force push to rtd branch
           git push origin rtd-temp:rtd -f
