@@ -23,8 +23,13 @@ In particular, the `mace-torch` package requires an old version of `e3nn` (0.4.4
 ```
 
 ## Supported pre-trained models
-### MACE MP0
-We support [`MACE-MP0`](https://arxiv.org/abs/2401.00096) by Batatia et al. Additional informations on the pre-training of `MACE-MP0` are available on its [HuggingFace model card](https://huggingface.co/cyrusyc/mace-universal). To use `MACE-MP0` as a backbone for `franken` just `pip`-install `mace-torch` in `franken`'s environment
+### MACE
+We support several models which use the [MACE architecture](https://github.com/ACEsuit/mace):
+ - The [`MACE-MP0`](https://arxiv.org/abs/2401.00096) models trained on the materials project data by Batatia et al. Additional informations on the pre-training of `MACE-MP0` are available on its [HuggingFace model card](https://huggingface.co/cyrusyc/mace-universal).
+ - The MACE-OFF ([paper](https://github.com/ACEsuit/mace-off) and [github](https://github.com/ACEsuit/mace-off)) models which are pretrained on organic molecules.
+ - The Egret ([github](https://github.com/rowansci/egret-public)) family of models (`Egret-1`, `Egret-1e`, `Egret-1t`), also tuned for organic molecules.
+
+To use any MACE model as a backbone for `franken` just `pip`-install `mace-torch` in `franken`'s environment
 ```bash
 pip install mace-torch
 ```
@@ -32,9 +37,6 @@ or directly install franken with mace support (`pip install franken[cuda,mace]`)
 
 In addition to MACE-MP0 trained on the materials project dataset, Franken also supports the [`MACE-OFF` models](https://arxiv.org/abs/2312.15211) for organic chemistry.
 
-```{note}
-The `mace-torch` package requires a version of `e3nn` which *may* conflict with `fairchem-core`, see [this relevant issue](https://github.com/ACEsuit/mace/issues/555). If this is occurring, and you need both `fairchem` and `mace`, simply install `mace-torch` *after* `fairchem-core` so that the version of `e3nn` being installed is compatible with `mace-torch`. The models currently implemented from `fairchem` **do not need** `e3nn`.
-```
 
 ### SevenNet
 

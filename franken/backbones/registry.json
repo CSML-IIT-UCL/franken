@@ -24,6 +24,12 @@
         "kind": "MACE",
         "implemented": true
     },
+    "Egret-1t": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1T.model",
+        "local": "egret/egret_1t.model",
+        "kind": "MACE",
+        "implemented": true
+    },
     "MACE-L1": {
         "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
         "local": "mace/2023-12-03-mace-128-L1_epoch-199.model",
