@@ -1,4 +1,6 @@
+import e3nn
 import pytest
+from packaging.version import Version
 
 from franken.config import BackboneConfig
 from franken.data import BaseAtomsDataset
@@ -7,7 +9,16 @@ from franken.backbones import REGISTRY
 from franken.backbones.utils import load_checkpoint
 
 
-@pytest.mark.parametrize("model_name", ["Egret-1", "MACE-L1", "MACE-OFF-small", "SevenNet0", "SchNet-S2EF-OC20-200k"])
+models = [
+    "Egret-1",
+    pytest.param("MACE-L1", marks=pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.6"), reason="Known incompatibility")),
+    pytest.param("MACE-OFF-small", marks=pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.6"), reason="Known incompatibility")),
+    pytest.param("SevenNet0", marks=pytest.mark.xfail(Version(e3nn.__version__) < Version("0.5.0"), reason="Known incompatibility")),
+    "SchNet-S2EF-OC20-200k"
+]
+
+
+@pytest.mark.parametrize("model_name", models)
 def test_backbone_loading(model_name):
     registry_entry = REGISTRY[model_name]
     gnn_config = BackboneConfig.from_ckpt({
@@ -18,7 +29,7 @@ def test_backbone_loading(model_name):
     load_checkpoint(gnn_config)
 
 
-@pytest.mark.parametrize("model_name", ["Egret-1", "MACE-L1", "MACE-OFF-small", "SevenNet0", "SchNet-S2EF-OC20-200k"])  #, "MACE-L1"])
+@pytest.mark.parametrize("model_name", models)
 def test_descriptors(model_name):
     registry_entry = REGISTRY[model_name]
     gnn_config = BackboneConfig.from_ckpt({
