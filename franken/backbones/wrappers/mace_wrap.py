@@ -2,8 +2,10 @@ from typing import Final
 
 import torch
 from mace.modules.models import MACE
+from mace.modules.blocks import RadialEmbeddingBlock
 from mace.modules.utils import get_edge_vectors_and_lengths
 from e3nn.util.jit import compile_mode
+import e3nn.o3
 
 from franken.data import Configuration
 from franken.utils.misc import torch_load_maybejit
@@ -11,6 +13,19 @@ from franken.utils.misc import torch_load_maybejit
 
 @compile_mode("script")
 class FrankenMACE(torch.nn.Module):
+    """Wrap MACE module.
+
+    Most of the complication here is to support torch-scripted modules, which don't play well
+    with `torch.func.jacfwd` and other transformations. In particular
+     - the spherical harmonics of e3nn don't work as they are jitted by default. We have a patch
+        in :module:`franken.backbones.wrappers.common_patches` which fixes this, but does not get
+        called when the full model is scripted.
+     - the radial embedding doesn't work (more investigation needed to figure out exactly which
+        part of it fails), so we have to rebuild it discarding the jitted version.
+     - In order to extract features at a specific layer, we also have to pull apart the interactions
+        and products module-lists which are not easily indexable when jitted.
+    """
+
     interaction_block: Final[int]
 
     def __init__(self, base_model: MACE, interaction_block, gnn_backbone_id):
@@ -24,8 +39,23 @@ class FrankenMACE(torch.nn.Module):
             "num_interactions", torch.tensor(interaction_block, dtype=torch.int64)
         )
         self.node_embedding = base_model.node_embedding
-        self.spherical_harmonics = base_model.spherical_harmonics
-        self.radial_embedding = base_model.radial_embedding
+        # Replace jitted spherical harmonics
+        if isinstance(base_model.spherical_harmonics, torch.jit.ScriptModule):
+            self.spherical_harmonics = e3nn.o3.SphericalHarmonics(
+                irreps_out=e3nn.o3.Irreps(base_model.spherical_harmonics.irreps_out),
+                normalize=base_model.spherical_harmonics.normalize,
+                normalization=base_model.spherical_harmonics.normalization,
+                irreps_in=base_model.spherical_harmonics.irreps_in,
+            )
+        else:
+            self.spherical_harmonics = base_model.spherical_harmonics
+        # Replace jitted radial embedding
+        if isinstance(base_model.radial_embedding, torch.jit.ScriptModule):
+            self.radial_embedding = reconstruct_radial_embedding(
+                base_model.radial_embedding, base_model.r_max.item()
+            )
+        else:
+            self.radial_embedding = base_model.radial_embedding
 
         # Load the interactions and products from the torchscript hell
         # that this module becomes.
@@ -128,3 +158,35 @@ class FrankenMACE(torch.nn.Module):
             gnn_backbone_id=gnn_backbone_id,
             interaction_block=interaction_block,
         )
+
+
+def reconstruct_radial_embedding(base, r_max):
+    if base.bessel_fn.original_name == "BesselBasis":
+        radial_type = "bessel"
+    elif base.bessel_fn.original_name == "GaussianBasis":
+        radial_type = "gaussian"
+    elif base.bessel_fn.original_name == "ChebychevBasis":
+        radial_type = "chebyshev"
+    else:
+        raise ValueError(f"Unrecognised bessel function {base.bessel_fn}")
+
+    if hasattr(base, "distance_transform"):
+        if base.distance_transform.original_name == "AgnesiTransform":
+            distance_transform = "Agnesi"
+        elif base.distance_transform.original_name == "SoftTransform":
+            distance_transform = "Soft"
+        else:
+            raise ValueError(
+                f"Unrecognised distance transform {base.distance_transform}"
+            )
+    else:
+        distance_transform = "None"
+
+    new_remb = RadialEmbeddingBlock(
+        r_max=r_max,
+        num_bessel=base.out_dim,
+        num_polynomial_cutoff=int(base.cutoff_fn.p.item()),
+        radial_type=radial_type,
+        distance_transform=distance_transform,
+    )
+    return new_remb
