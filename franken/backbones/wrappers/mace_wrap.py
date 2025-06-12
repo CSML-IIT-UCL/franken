@@ -2,13 +2,129 @@ from typing import Final
 
 import torch
 from mace.modules.models import MACE
-from mace.modules.blocks import RadialEmbeddingBlock
 from mace.modules.utils import get_edge_vectors_and_lengths
 from e3nn.util.jit import compile_mode
-import e3nn.o3
+from e3nn import o3
 
 from franken.data import Configuration
 from franken.utils.misc import torch_load_maybejit
+
+
+def undo_script_mace(base: torch.jit.ScriptModule) -> MACE:
+    from mace.modules.models import ScaleShiftMACE
+    from mace.modules.blocks import (
+        RealAgnosticResidualInteractionBlock,
+        RealAgnosticInteractionBlock,
+    )
+
+    if base.original_name != "ScaleShiftMACE":
+        raise ValueError("Only ScaleShiftMACE supported")
+
+    def radial_to_name(radial_type):
+        if radial_type == "BesselBasis":
+            return "bessel"
+        if radial_type == "GaussianBasis":
+            return "gaussian"
+        if radial_type == "ChebychevBasis":
+            return "chebyshev"
+        else:
+            raise ValueError(f"Unrecognised bessel function {radial_type}")
+
+    def radial_to_transform(radial):
+        if not hasattr(radial, "distance_transform"):
+            return None
+        if radial.distance_transform.original_name == "AgnesiTransform":
+            return "Agnesi"
+        if radial.distance_transform.original_name == "SoftTransform":
+            return "Soft"
+        else:
+            raise ValueError(
+                f"Unrecognised distance transform {radial.distance_transform.original_name}"
+            )
+
+    def interaction_cls(module):
+        if module.original_name == "RealAgnosticResidualInteractionBlock":
+            return RealAgnosticResidualInteractionBlock
+        elif module.original_name == "RealAgnosticInteractionBlock":
+            return RealAgnosticInteractionBlock
+        else:
+            raise ValueError(f"Unrecognised interaction class {module.original_name}")
+
+    def gate_fn(non_linearity):
+        nonlin = non_linearity._modules["acts"]._modules["0"]
+        if hasattr(nonlin, "f"):
+            return nonlin.f
+        code = nonlin.code
+        if "silu" in code:
+            return torch.nn.functional.silu
+        elif "torch.abs" in code:
+            return torch.abs
+        else:
+            raise ValueError(f"Unrecognized gating function. Code is {code}")
+
+    module_dict = {nm[0]: nm[1] for nm in base.named_modules()}
+    heads = base.heads if hasattr(base, "heads") else ["default"]
+    num_interactions = int(base.num_interactions.item())
+    model_mlp_irreps = (
+        o3.Irreps(module_dict[f"readouts.{num_interactions - 1}"].hidden_irreps)
+        if base.num_interactions.item() > 1
+        else 1
+    )
+    try:
+        correlation = (
+            len(
+                list(
+                    module_dict[
+                        "products.0.symmetric_contractions.contractions.0"
+                    ].weights.parameters()
+                )
+            )
+            + 1
+        )
+    except (KeyError, AttributeError):
+        correlation = module_dict[
+            "products.0.symmetric_contractions"
+        ].contraction_degree
+
+    args = {}
+    args["r_max"] = base.r_max.item()
+    args["num_bessel"] = len(base.radial_embedding.bessel_fn.bessel_weights)
+    args["num_polynomial_cutoff"] = base.radial_embedding.cutoff_fn.p.item()
+    args["max_ell"] = base.spherical_harmonics._lmax
+    args["interaction_cls"] = interaction_cls(module_dict["interactions.1"])
+    args["interaction_cls_first"] = interaction_cls(module_dict["interactions.0"])
+    args["num_interactions"] = num_interactions
+    args["num_elements"] = len(base.atomic_numbers)
+    args["hidden_irreps"] = o3.Irreps(module_dict["products.0.linear"].irreps_out)
+    # args["edge_irreps"] = base.edge_irreps if hasattr(base, "edge_irreps") else None
+    args["MLP_irreps"] = (
+        o3.Irreps(f"{model_mlp_irreps.count((0, 1)) // len(heads)}x0e")  # type: ignore
+        if num_interactions > 1
+        else 1
+    )
+    args["atomic_energies"] = base.atomic_energies_fn.atomic_energies.cpu().numpy()
+    args["avg_num_neighbors"] = module_dict["interactions.0"].avg_num_neighbors
+    args["atomic_numbers"] = base.atomic_numbers.cpu().numpy()
+    args["correlation"] = correlation
+    args["gate"] = (
+        gate_fn(module_dict[f"readouts.{num_interactions - 1}"].non_linearity)
+        if num_interactions > 1
+        else None
+    )
+    args["pair_repulsion"] = hasattr(base, "pair_repulsion")
+    args["distance_transform"] = radial_to_transform(base.radial_embedding)
+    args["radial_MLP"] = module_dict["interactions.0"].conv_tp_weights.hs[1:-1]
+    # args["radial_MLP"] = module_dict["interactions.0"].radial_MLP
+    args["radial_type"] = radial_to_name(base.radial_embedding.bessel_fn.original_name)
+    args["heads"] = base.heads
+    # args["use_reduced_cg"] = base.use_reduced_cg if hasattr(base, "use_reduced_cg") else False
+    # args["use_so3"] = base.use_so3 if hasattr(base, "use_so3") else False
+    # args["cueq_config"] = base.cueq_config if hasattr(base, "cueq_config") else None
+    args["atomic_inter_scale"] = base.scale_shift.scale.cpu().numpy()
+    args["atomic_inter_shift"] = base.scale_shift.shift.cpu().numpy()
+    model = ScaleShiftMACE(**args)
+    model.load_state_dict(base.state_dict())
+    return model
 
 
 @compile_mode("script")
@@ -33,59 +149,18 @@ class FrankenMACE(torch.nn.Module):
         self.gnn_backbone_id = gnn_backbone_id
         self.interaction_block = interaction_block
         # Copy things from base model
+        if isinstance(base_model, torch.jit.ScriptModule):
+            base_model = undo_script_mace(base_model)
         self.atomic_numbers = base_model.atomic_numbers
         self.r_max = base_model.r_max
         self.num_interactions = self.register_buffer(
             "num_interactions", torch.tensor(interaction_block, dtype=torch.int64)
         )
         self.node_embedding = base_model.node_embedding
-        # Replace jitted spherical harmonics
-        if isinstance(base_model.spherical_harmonics, torch.jit.ScriptModule):
-            self.spherical_harmonics = e3nn.o3.SphericalHarmonics(
-                irreps_out=e3nn.o3.Irreps(base_model.spherical_harmonics.irreps_out),
-                normalize=base_model.spherical_harmonics.normalize,
-                normalization=base_model.spherical_harmonics.normalization,
-                irreps_in=base_model.spherical_harmonics.irreps_in,
-            )
-        else:
-            self.spherical_harmonics = base_model.spherical_harmonics
-        # Replace jitted radial embedding
-        if isinstance(base_model.radial_embedding, torch.jit.ScriptModule):
-            self.radial_embedding = reconstruct_radial_embedding(
-                base_model.radial_embedding, base_model.r_max.item()
-            )
-        else:
-            self.radial_embedding = base_model.radial_embedding
-
-        # Load the interactions and products from the torchscript hell
-        # that this module becomes.
-        module_dict = {nm[0]: nm[1] for nm in base_model.named_modules()}
-        try:
-            self.interactions = torch.nn.ModuleList(
-                [
-                    module_dict[f"interactions.{i}"]
-                    for i in range(0, self.interaction_block)
-                ]
-            )
-            self.products = torch.nn.ModuleList(
-                [module_dict[f"products.{i}"] for i in range(0, self.interaction_block)]
-            )
-        except KeyError:
-            # only for printing helpful message.
-            max_interaction = max(
-                [
-                    int(k.split(".")[1])
-                    for k in module_dict.keys()
-                    if k.startswith("interactions")
-                ]
-            )
-            raise ValueError(
-                f"This model has {max_interaction} gnn layers, while descriptors "
-                f"have been required for the {self.interaction_block} layer"
-            )
-        # This would be the equivalent code if the model were not torchscripted!
-        # self.interactions = self.base_model.interactions[: self.interaction_block]
-        # self.products = self.base_model.products[: self.interaction_block]
+        self.spherical_harmonics = base_model.spherical_harmonics
+        self.radial_embedding = base_model.radial_embedding
+        self.interactions = base_model.interactions[: self.interaction_block]
+        self.products = base_model.products[: self.interaction_block]
 
     def init_args(self):
         return {
@@ -158,35 +233,3 @@ class FrankenMACE(torch.nn.Module):
             gnn_backbone_id=gnn_backbone_id,
             interaction_block=interaction_block,
         )
-
-
-def reconstruct_radial_embedding(base, r_max):
-    if base.bessel_fn.original_name == "BesselBasis":
-        radial_type = "bessel"
-    elif base.bessel_fn.original_name == "GaussianBasis":
-        radial_type = "gaussian"
-    elif base.bessel_fn.original_name == "ChebychevBasis":
-        radial_type = "chebyshev"
-    else:
-        raise ValueError(f"Unrecognised bessel function {base.bessel_fn}")
-
-    if hasattr(base, "distance_transform"):
-        if base.distance_transform.original_name == "AgnesiTransform":
-            distance_transform = "Agnesi"
-        elif base.distance_transform.original_name == "SoftTransform":
-            distance_transform = "Soft"
-        else:
-            raise ValueError(
-                f"Unrecognised distance transform {base.distance_transform}"
-            )
-    else:
-        distance_transform = "None"
-
-    new_remb = RadialEmbeddingBlock(
-        r_max=r_max,
-        num_bessel=base.out_dim,
-        num_polynomial_cutoff=int(base.cutoff_fn.p.item()),
-        radial_type=radial_type,
-        distance_transform=distance_transform,
-    )
-    return new_remb
