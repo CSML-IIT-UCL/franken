@@ -56,7 +56,7 @@ develop = [
 ]
 mace = ["mace-torch"]
 fairchem = ["fairchem-core == 1.10"]
-sevenn = ["sevenn"]
+sevenn = ["sevenn ~= 0.11"]
 cuda = ["cupy"]
 docs = [
     "Sphinx",

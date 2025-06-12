@@ -222,7 +222,8 @@ class BaseAtomsDataset(torch.utils.data.Dataset, abc.ABC):
                 num_species=self.num_species, atomic_energies=self.atomic_energies
             )
             self.energy_shifts_ = [
-                shifter(atoms.get_atomic_numbers()) for atoms in self.ase_atoms
+                shifter(torch.from_numpy(atoms.get_atomic_numbers()))
+                for atoms in self.ase_atoms
             ]
 
         return self.energy_shifts_

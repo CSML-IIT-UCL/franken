@@ -67,7 +67,7 @@ class AtomicEnergiesShift(torch.nn.Module):
         )
 
         for z, atom_ene in zip(self.z_keys, self.atomic_energies):
-            mask = int(z.item()) == atomic_numbers
+            mask = atomic_numbers == int(z.item())
             shift += torch.sum(atom_ene * mask)
 
         return shift

@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 from tqdm.auto import tqdm
@@ -19,7 +19,7 @@ class Statistics:
 
     def __init__(self, input_dim: Optional[int] = None):
         self.input_dim = input_dim
-        self.statistics: dict[int, dict[str, Any]] = {}
+        self.statistics: dict[int, dict[str, torch.Tensor]] = {}
         if self.input_dim is not None:
             self._initialize_statistics_for_prefix(0)  # Use 0 for global statistics
 
@@ -164,6 +164,7 @@ class FeatureScaler(torch.nn.Module):
             self.z_keys = torch.tensor(
                 sorted([key for key in statistics.statistics.keys() if key != 0]),
                 dtype=torch.long,
+                device=statistics.statistics[0]["mean"].device,
             )
             assert len(self.z_keys) == self.num_species
 
