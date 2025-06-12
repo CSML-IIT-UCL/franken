@@ -6,6 +6,7 @@ import os
 import pytest
 import torch
 
+from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.config import GaussianRFConfig, MaceBackboneConfig, MultiscaleGaussianRFConfig
 from franken.data import BaseAtomsDataset
 from franken.rf.model import FrankenPotential
@@ -28,6 +29,7 @@ RF_PARAMETRIZE = [
 @pytest.mark.parametrize("device", DEVICES)
 def test_lammps_compile(rf_cfg, device):
     """Test for checking save and load methods of FrankenPotential"""
+    unpatch_e3nn()  # needed in case some previous test ran the patching code
     gnn_cfg = MaceBackboneConfig("MACE-L0")
     temp_dir = None
     try:
