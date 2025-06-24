@@ -201,7 +201,10 @@ def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
             logger.error(err_msg, exc_info=import_err)
             raise
         return FrankenMACE.load_from_checkpoint(
-            str(ckpt_path), gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
+            str(ckpt_path),
+            gnn_backbone_id=gnn_backbone_id,
+            map_location="cpu",
+            **gnn_config_dict,
         )
     elif backbone_family == "sevenn":
         try:
