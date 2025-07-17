@@ -53,7 +53,7 @@ class MACEAtomsDataset(BaseAtomsDataset):
         split: str,
         num_random_subsamples: int | None = None,
         subsample_rng: int | None = None,
-        gnn_backbone_id: str | None = None,
+        gnn_backbone_id: str | torch.nn.Module | None = None,
         z_table: AtomicNumberTable | None = None,
         cutoff=6.0,
         precompute=True,
@@ -72,11 +72,14 @@ class MACEAtomsDataset(BaseAtomsDataset):
                 split_name=self.split,
             )
 
-    def load_info_from_gnn_config(self, gnn_backbone_id: str):
-        ckpt_path = get_checkpoint_path(gnn_backbone_id)
-        mace_gnn = torch_load_maybejit(
-            ckpt_path, map_location="cpu", weights_only=False
-        )
+    def load_info_from_gnn_config(self, gnn_backbone_id: str | torch.nn.Module):
+        if isinstance(gnn_backbone_id, str):
+            ckpt_path = get_checkpoint_path(gnn_backbone_id)
+            mace_gnn = torch_load_maybejit(
+                ckpt_path, map_location="cpu", weights_only=False
+            )
+        else:
+            mace_gnn = gnn_backbone_id
         z_table = AtomicNumberTable([z.item() for z in mace_gnn.atomic_numbers])
         cutoff = mace_gnn.r_max.item()
         del mace_gnn

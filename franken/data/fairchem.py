@@ -15,7 +15,7 @@ class FairchemAtomsDataset(BaseAtomsDataset):
         split: str,
         num_random_subsamples: int | None = None,
         subsample_rng: int | None = None,
-        gnn_backbone_id: str | None = None,
+        gnn_backbone_id: str | torch.nn.Module | None = None,
         cutoff=6.0,
         max_num_neighbors=200,
         precompute=True,
@@ -44,7 +44,11 @@ class FairchemAtomsDataset(BaseAtomsDataset):
                 self.ase_atoms, disable_tqdm=dist_utils.get_rank() != 0
             )
 
-    def load_info_from_gnn_config(self, gnn_backbone_id: str):
+    def load_info_from_gnn_config(self, gnn_backbone_id: str | torch.nn.Module):
+        if not isinstance(gnn_backbone_id, str):
+            raise ValueError(
+                "Backbone path must be provided instead of the preloaded model."
+            )
         ckpt_path = get_checkpoint_path(gnn_backbone_id)
         model = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         model_cfg = model["config"]["model"]

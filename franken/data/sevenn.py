@@ -75,7 +75,7 @@ class SevennAtomsDataset(BaseAtomsDataset):
         split: str,
         num_random_subsamples: int | None = None,
         subsample_rng: int | None = None,
-        gnn_backbone_id: str | None = None,
+        gnn_backbone_id: str | torch.nn.Module | None = None,
         cutoff: float = 6.0,
         precompute=True,
     ):
@@ -100,7 +100,11 @@ class SevennAtomsDataset(BaseAtomsDataset):
                 split_name=self.split,
             )
 
-    def load_info_from_gnn_config(self, gnn_backbone_id: str):
+    def load_info_from_gnn_config(self, gnn_backbone_id: str | torch.nn.Module):
+        if not isinstance(gnn_backbone_id, str):
+            raise ValueError(
+                "Backbone path must be provided instead of the preloaded model."
+            )
         ckpt_path = get_checkpoint_path(gnn_backbone_id)
         checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
         config = checkpoint["config"]
