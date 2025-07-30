@@ -57,12 +57,12 @@ class LammpsFrankenCalculator(torch.nn.Module):
         # node_attrs is a one-hot representation of the atom types
         atom_nums = torch.nonzero(data["node_attrs"])[:, 1] + 1
         franken_data = Configuration(
-            atom_pos=data["positions"],
+            atom_pos=data["positions"].double(),
             atomic_numbers=atom_nums,
             natoms=torch.tensor(
                 len(atom_nums), dtype=torch.int32, device=atom_nums.device
             ).view(1),
-            node_attrs=data["node_attrs"],
+            node_attrs=data["node_attrs"].double(),
             edge_index=data["edge_index"],
             shifts=data["shifts"],
             unit_shifts=data["unit_shifts"],
