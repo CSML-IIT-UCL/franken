@@ -30,14 +30,13 @@ class EnergyMAE(BaseMetric):
             raise NotImplementedError(
                 "At the moment, target's forces are required to get the number of atoms in the configuration."
             )
-        if torch.any(torch.isnan(predictions.energy)):
-            return
         num_atoms = targets.forces.shape[-2]
         num_samples = 1
         if targets.energy.ndim > 0:
             num_samples = targets.energy.shape[0]
 
         error = 1000 * torch.abs(targets.energy - predictions.energy) / num_atoms
+
         self.buffer_add(error, num_samples=num_samples)
 
 
@@ -54,14 +53,13 @@ class EnergyRMSE(BaseMetric):
             raise NotImplementedError(
                 "At the moment, target's forces are required to get the number of atoms in the configuration."
             )
-        if torch.any(torch.isnan(predictions.energy)):
-            return
         num_atoms = targets.forces.shape[-2]
         num_samples = 1
         if targets.energy.ndim > 0:
             num_samples = targets.energy.shape[0]
 
         error = torch.square((targets.energy - predictions.energy) / num_atoms)
+
         self.buffer_add(error, num_samples=num_samples)
 
     def compute(self, reset: bool = True) -> torch.Tensor:
@@ -91,8 +89,6 @@ class ForcesMAE(BaseMetric):
     def update(self, predictions: Target, targets: Target) -> None:
         if targets.forces is None or predictions.forces is None:
             raise AttributeError("Forces must be specified to compute the MAE.")
-        if torch.any(torch.isnan(predictions.forces)):
-            return
         num_samples = 1
         if targets.forces.ndim > 2:
             num_samples = targets.forces.shape[0]
@@ -101,6 +97,7 @@ class ForcesMAE(BaseMetric):
 
         error = 1000 * torch.abs(targets.forces - predictions.forces)
         error = error.mean(dim=(-1, -2))  # Average over atoms and components
+
         self.buffer_add(error, num_samples=num_samples)
 
 
@@ -115,8 +112,6 @@ class ForcesRMSE(BaseMetric):
     def update(self, predictions: Target, targets: Target) -> None:
         if targets.forces is None or predictions.forces is None:
             raise AttributeError("Forces must be specified to compute the MAE.")
-        if torch.any(torch.isnan(predictions.forces)):
-            return
         num_samples = 1
         if targets.forces.ndim > 2:
             num_samples = targets.forces.shape[0]
@@ -125,6 +120,7 @@ class ForcesRMSE(BaseMetric):
 
         error = torch.square(targets.forces - predictions.forces)
         error = error.mean(dim=(-1, -2))  # Average over atoms and components
+
         self.buffer_add(error, num_samples=num_samples)
 
     def compute(self, reset: bool = True) -> torch.Tensor:
@@ -156,8 +152,6 @@ class ForcesRMSE2(BaseMetric):
     def update(self, predictions: Target, targets: Target) -> None:
         if targets.forces is None or predictions.forces is None:
             raise AttributeError("Forces must be specified to compute the MAE.")
-        if torch.any(torch.isnan(predictions.forces)):
-            return
         num_samples = 1
         if targets.forces.ndim > 2:
             num_samples = targets.forces.shape[0]
@@ -186,8 +180,6 @@ class ForcesCosineSimilarity(BaseMetric):
         num_samples = 1
         assert targets.forces is not None
         assert predictions.forces is not None
-        if torch.any(torch.isnan(predictions.forces)):
-            return
         if targets.forces.ndim > 2:
             num_samples = targets.forces.shape[0]
         elif targets.forces.ndim < 2:
