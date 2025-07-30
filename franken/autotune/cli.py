@@ -506,7 +506,8 @@ def build_parser(return_groups: bool = False):
     )
     parser.add_argument(
         "--global-scaling",
-        action="store_false",
+        action="store_true",
+        default=False,
         help=get_field_docstring(AutotuneConfig, "scale_by_species"),
     )
     parser.add_argument(
