@@ -54,8 +54,10 @@ class LammpsFrankenCalculator(torch.nn.Module):
             of the appropriate shape filled with zeros. Make sure that
             the chosen MD method does not depend on these quantities.
         """
-        # node_attrs is a one-hot representation of the atom types
-        atom_nums = torch.nonzero(data["node_attrs"])[:, 1] + 1
+        # node_attrs is a one-hot representation of the atom types. atom_nums should be the actual atomic numbers!
+        # we rely on correct sorting. This is the same as in MACE.
+        atom_nums = self.atomic_numbers[torch.argmax(data["node_attrs"], dim=1)]
+
         franken_data = Configuration(
             atom_pos=data["positions"].double(),
             atomic_numbers=atom_nums,
