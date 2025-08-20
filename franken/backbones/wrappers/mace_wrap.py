@@ -1,21 +1,23 @@
 from typing import Final
 
+import mace
 import torch
+from e3nn import o3
+from e3nn.util.jit import compile_mode
 from mace.modules.models import MACE
 from mace.modules.utils import get_edge_vectors_and_lengths
-from e3nn.util.jit import compile_mode
-from e3nn import o3
+from packaging.version import Version
 
 from franken.data import Configuration
 from franken.utils.misc import torch_load_maybejit
 
 
 def undo_script_mace(base: torch.jit.ScriptModule) -> MACE:
-    from mace.modules.models import ScaleShiftMACE
     from mace.modules.blocks import (
-        RealAgnosticResidualInteractionBlock,
         RealAgnosticInteractionBlock,
+        RealAgnosticResidualInteractionBlock,
     )
+    from mace.modules.models import ScaleShiftMACE
 
     if base.original_name != "ScaleShiftMACE":
         raise ValueError("Only ScaleShiftMACE supported")
@@ -187,6 +189,10 @@ class FrankenMACE(torch.nn.Module):
         edge_feats = self.radial_embedding(
             lengths, node_attrs, edge_index, self.atomic_numbers
         )
+        if Version(mace.__version__) >= Version("0.3.14"):
+            # Unpack the return tuple. See changes from commit a387f60 of the mace package.
+            # https://github.com/ACEsuit/mace/blob/a387f602b58c2de8de06bfeca665aad40e1bc0f0/mace/modules/blocks.py#L251
+            edge_feats, _ = edge_feats
 
         node_feats_list = []
         for interaction, product in zip(self.interactions, self.products):
