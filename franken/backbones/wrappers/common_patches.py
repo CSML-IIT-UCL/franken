@@ -1,8 +1,10 @@
 import logging
+import os
 
 import torch
 
 
+os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 logger = logging.getLogger("franken")
 
 
