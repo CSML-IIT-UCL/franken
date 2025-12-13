@@ -12,6 +12,13 @@
         "implemented": true,
         "md5sum": "46c0d3cef9d863f285918bfaa66380c4"
     },
+    "mace_mp_0b3": {
+        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b3/mace-mp-0b3-medium.model",
+        "local": "mace/mace-mp-0b3-medium.model",
+        "kind": "MACE",
+        "implemented": true,
+        "md5sum": "37d3504472841eb9af69b0f40eef0ad7"
+    },
     "Egret-1": {
         "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1.model",
         "local": "egret/egret_1.model",
