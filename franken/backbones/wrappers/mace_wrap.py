@@ -166,7 +166,10 @@ class FrankenMACE(torch.nn.Module):
         # Copy things from base model
         if isinstance(base_model, torch.jit.ScriptModule):
             base_model = undo_script_mace(base_model)
-        self.atomic_numbers = base_model.atomic_numbers
+        self.register_buffer(
+            "atomic_numbers",
+            torch.as_tensor(base_model.atomic_numbers, dtype=torch.int64),
+        )
         self.r_max = base_model.r_max
         self.register_buffer(
             "num_interactions", torch.tensor(interaction_block, dtype=torch.int64)
