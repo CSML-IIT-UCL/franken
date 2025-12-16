@@ -1,0 +1,465 @@
+{
+    "SevenNet0": {
+        "remote": "https://github.com/MDIL-SNU/SevenNet/raw/refs/heads/main/sevenn/pretrained_potentials/SevenNet_0__11Jul2024/checkpoint_sevennet_0.pth",
+        "local": "sevennet/SevenNet_0__11July2024/checkpoint_sevennet_0.pth",
+        "kind": "sevenn",
+        "implemented": true
+    },
+    "MACE-L0": {
+        "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-10-mace-128-L0_energy_epoch-249.model",
+        "local": "mace/2023-12-10-mace-128-L0_energy_epoch-249.model",
+        "kind": "MACE",
+        "implemented": true,
+        "md5sum": "46c0d3cef9d863f285918bfaa66380c4"
+    },
+    "Egret-1": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1.model",
+        "local": "egret/egret_1.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "Egret-1e": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1E.model",
+        "local": "egret/egret_1e.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "Egret-1t": {
+        "remote": "https://raw.githubusercontent.com/rowansci/egret-public/refs/heads/master/compiled_models/EGRET_1T.model",
+        "local": "egret/egret_1t.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "MACE-L1": {
+        "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
+        "local": "mace/2023-12-03-mace-128-L1_epoch-199.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "MACE-L2": {
+        "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2024-01-07-mace-128-L2_epoch-199.model",
+        "local": "mace/2024-01-07-mace-128-L2_epoch-199.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "MACE-OFF-small": {
+        "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_small.model?raw=true",
+        "local": "mace/MACE-OFF23_small.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "MACE-OFF-medium": {
+        "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_medium.model?raw=true",
+        "local": "mace/MACE-OFF23_medium.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "MACE-OFF-large": {
+        "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_large.model?raw=true",
+        "local": "mace/MACE-OFF23_large.model",
+        "kind": "MACE",
+        "implemented": true
+    },
+    "CGCNN-S2EF-OC20-200k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/cgcnn_200k.pt",
+        "local": "fairchem/cgcnn_200k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/cgcnn_2M.pt",
+        "local": "fairchem/cgcnn_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-S2EF-OC20-20M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/cgcnn_20M.pt",
+        "local": "fairchem/cgcnn_20M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/cgcnn_all.pt",
+        "local": "fairchem/cgcnn_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet-S2EF-OC20-200k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/dimenet_200k.pt",
+        "local": "fairchem/dimenet_200k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/dimenet_2M.pt",
+        "local": "fairchem/dimenet_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-S2EF-OC20-200k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_200k.pt",
+        "local": "fairchem/schnet_200k.pt",
+        "kind": "fairchem",
+        "implemented": true
+    },
+    "SchNet-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_2M.pt",
+        "local": "fairchem/schnet_2M.pt",
+        "kind": "fairchem",
+        "implemented": true
+    },
+    "SchNet-S2EF-OC20-20M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_20M.pt",
+        "local": "fairchem/schnet_20M.pt",
+        "kind": "fairchem",
+        "implemented": true
+    },
+    "SchNet-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_all_large.pt",
+        "local": "fairchem/schnet_all_large.pt",
+        "kind": "fairchem",
+        "implemented": true
+    },
+    "DimeNet++-S2EF-OC20-200k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_200k.pt",
+        "local": "fairchem/dimenetpp_200k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_2M.pt",
+        "local": "fairchem/dimenetpp_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-OC20-20M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_20M.pt",
+        "local": "fairchem/dimenetpp_20M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_all.pt",
+        "local": "fairchem/dimenetpp_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SpinConv-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_12/s2ef/spinconv_force_centric_2M.pt",
+        "local": "fairchem/spinconv_force_centric_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SpinConv-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_08/s2ef/spinconv_force_centric_all.pt",
+        "local": "fairchem/spinconv_force_centric_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-dT-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_12/s2ef/gemnet_t_direct_h512_2M.pt",
+        "local": "fairchem/gemnet_t_direct_h512_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-dT-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_08/s2ef/gemnet_t_direct_h512_all.pt",
+        "local": "fairchem/gemnet_t_direct_h512_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "PaiNN-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_05/s2ef/painn_h512_s2ef_all.pt",
+        "local": "fairchem/painn_h512_s2ef_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_07/s2ef/gemnet_oc_base_s2ef_2M.pt",
+        "local": "fairchem/gemnet_oc_base_s2ef_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EF-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_07/s2ef/gemnet_oc_base_s2ef_all.pt",
+        "local": "fairchem/gemnet_oc_base_s2ef_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/gemnet_oc_base_s2ef_all_md.pt",
+        "local": "fairchem/gemnet_oc_base_s2ef_all_md.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-Large-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_07/s2ef/gemnet_oc_large_s2ef_all_md.pt",
+        "local": "fairchem/gemnet_oc_large_s2ef_all_md.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SCN-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/scn_t1_b1_s2ef_2M.pt",
+        "local": "fairchem/scn_t1_b1_s2ef_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SCN-t4-b2-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/scn_t4_b2_s2ef_2M.pt",
+        "local": "fairchem/scn_t4_b2_s2ef_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SCN-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/scn_all_md_s2ef.pt",
+        "local": "fairchem/scn_all_md_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-L4-M2-Lay12-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/escn_l4_m2_lay12_2M_s2ef.pt",
+        "local": "fairchem/escn_l4_m2_lay12_2M_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-L6-M2-Lay12-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/escn_l6_m2_lay12_2M_s2ef.pt",
+        "local": "fairchem/escn_l6_m2_lay12_2M_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-L6-M2-Lay12-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/escn_l6_m2_lay12_all_md_s2ef.pt",
+        "local": "fairchem/escn_l6_m2_lay12_all_md_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-L6-M3-Lay20-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_03/s2ef/escn_l6_m3_lay20_all_md_s2ef.pt",
+        "local": "fairchem/escn_l6_m3_lay20_all_md_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-83M-S2EF-OC20-2M": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_06/oc20/s2ef/eq2_83M_2M.pt",
+        "local": "fairchem/eq2_83M_2M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-31M-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_06/oc20/s2ef/eq2_31M_ec4_allmd.pt",
+        "local": "fairchem/eq2_31M_ec4_allmd.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-153M-S2EF-OC20-All+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_06/oc20/s2ef/eq2_153M_ec4_allmd.pt",
+        "local": "fairchem/eq2_153M_ec4_allmd.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-S2EF-force-only-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_all_forceonly.pt",
+        "local": "fairchem/schnet_all_forceonly.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-force-only-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/dimenetpp_all_forceonly.pt",
+        "local": "fairchem/dimenetpp_all_forceonly.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-Large-S2EF-force-only-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_large_all_forceonly.pt",
+        "local": "fairchem/dimenetpp_large_all_forceonly.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-force-only-OC20-20M+Rattled": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_20M_rattled_forceonly.pt",
+        "local": "fairchem/dimenetpp_20M_rattled_forceonly.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-force-only-OC20-20M+MD": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/s2ef/dimenetpp_20M_md_forceonly.pt",
+        "local": "fairchem/dimenetpp_20M_md_forceonly.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-IS2RE-OC20-10k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/cgcnn_10k.pt",
+        "local": "fairchem/cgcnn_10k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-IS2RE-OC20-100k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/cgcnn_100k.pt",
+        "local": "fairchem/cgcnn_100k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "CGCNN-IS2RE-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/cgcnn_all.pt",
+        "local": "fairchem/cgcnn_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet-IS2RE-OC20-10k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/is2re/dimenet_10k.pt",
+        "local": "fairchem/dimenet_10k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet-IS2RE-OC20-100k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/is2re/dimenet_100k.pt",
+        "local": "fairchem/dimenet_100k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet-IS2RE-OC20-all": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/is2re/dimenet_all.pt",
+        "local": "fairchem/dimenet_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-IS2RE-OC20-10k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/schnet_10k.pt",
+        "local": "fairchem/schnet_10k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-IS2RE-OC20-100k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/schnet_100k.pt",
+        "local": "fairchem/schnet_100k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-IS2RE-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/schnet_all.pt",
+        "local": "fairchem/schnet_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-IS2RE-OC20-10k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/dimenetpp_10k.pt",
+        "local": "fairchem/dimenetpp_10k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-IS2RE-OC20-100k": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/dimenetpp_100k.pt",
+        "local": "fairchem/dimenetpp_100k.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-IS2RE-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2021_02/is2re/dimenetpp_all.pt",
+        "local": "fairchem/dimenetpp_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "PaiNN-IS2RE-OC20-All": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_05/is2re/painn_h1024_bs4x8_is2re_all.pt",
+        "local": "fairchem/painn_h1024_bs4x8_is2re_all.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-dT-S2EFS-OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_09/oc22/s2ef/gndt_oc22_all_s2ef.pt",
+        "local": "fairchem/gndt_oc22_all_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EFS-OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_09/oc22/s2ef/gnoc_oc22_all_s2ef.pt",
+        "local": "fairchem/gnoc_oc22_all_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EFS-OC20+OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_09/oc22/s2ef/gnoc_oc22_oc20_all_s2ef.pt",
+        "local": "fairchem/gnoc_oc22_oc20_all_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EFS-nsn-OC20+OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_05/oc22/s2ef/gnoc_oc22_oc20_all_s2ef.pt",
+        "local": "fairchem/gnoc_oc22_oc20_all_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EFS-OC20->OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2022_09/oc22/s2ef/gnoc_finetune_all_s2ef.pt",
+        "local": "fairchem/gnoc_finetune_all_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-lE4-lF100-S2EFS-OC22": {
+        "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2023_10/oc22/s2ef/eq2_121M_e4_f100_oc22_s2ef.pt",
+        "local": "fairchem/eq2_121M_e4_f100_oc22_s2ef.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "SchNet-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/Schnet.pt",
+        "local": "fairchem/Schnet.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "DimeNet++-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/DimenetPP.pt",
+        "local": "fairchem/DimenetPP.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "PaiNN-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/PaiNN.pt",
+        "local": "fairchem/PaiNN.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "GemNet-OC-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/Gemnet-OC.pt",
+        "local": "fairchem/Gemnet-OC.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/eSCN.pt",
+        "local": "fairchem/eSCN.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231116/eqv2_31M.pt",
+        "local": "fairchem/eqv2_31M.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-Large-S2EF-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/Equiformer_V2_Large.pt",
+        "local": "fairchem/Equiformer_V2_Large.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "Gemnet-OC-IS2RE-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/Gemnet-OC_Direct.pt",
+        "local": "fairchem/Gemnet-OC_Direct.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "eSCN-IS2RE-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/eSCN_Direct.pt",
+        "local": "fairchem/eSCN_Direct.pt",
+        "kind": "fairchem",
+        "implemented": false
+    },
+    "EquiformerV2-IS2RE-ODAC": {
+        "remote": "https://dl.fbaipublicfiles.com/dac/checkpoints_20231018/Equiformer_V2_Direct.pt",
+        "local": "fairchem/Equiformer_V2_Direct.pt",
+        "kind": "fairchem",
+        "implemented": false
+    }
+}
