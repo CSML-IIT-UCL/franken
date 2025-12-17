@@ -206,12 +206,15 @@ class FrankenMACE(torch.nn.Module):
         edge_attrs = self.spherical_harmonics(vectors)  # type: ignore
         rad_emb = self.radial_embedding(
             lengths, node_attrs, edge_index, self.atomic_numbers
-        )  # type: ignore
-        if torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[float]]):
+                )  # type: ignore
+        if torch.jit.isinstance(rad_emb, torch.Tensor):
+            edge_feats, cutoff = rad_emb, None
+        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, torch.Tensor]):
             edge_feats, cutoff = rad_emb
-        else:
-            edge_feats = rad_emb
-            cutoff = None
+        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[float]]):
+            edge_feats, cutoff = rad_emb
+        else:  # Python fallback
+            edge_feats, cutoff = rad_emb
 
         # lammps_class, lammps_natoms are only set when using LAMMPS MLIAP
         # the defaults are used otherwise and set here
