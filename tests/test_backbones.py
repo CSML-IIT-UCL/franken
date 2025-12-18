@@ -1,5 +1,6 @@
 import pytest
 import torch
+import importlib.util
 
 from franken.backbones import REGISTRY
 from franken.backbones.utils import load_checkpoint
@@ -8,16 +9,19 @@ from franken.data import BaseAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.rf.model import FrankenPotential
 
-# models = [
-#     "Egret-1t",
-#     pytest.param("MACE-L1", marks=pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True)),
-#     pytest.param("MACE-OFF-small", marks=pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True)),
-#     pytest.param("SevenNet0", marks=pytest.mark.xfail(Version(e3nn.__version__) < Version("0.5.0"), reason="Known incompatibility", strict=True)),
-#     pytest.param("SchNet-S2EF-OC20-200k", marks=pytest.mark.xfail(reason="Fails in CI due to unknown reasons", strict=False))
-# ]
+# Check availability of backbones
+HAS_MACE = importlib.util.find_spec("mace") is not None
+HAS_SEVENN = importlib.util.find_spec("sevenn") is not None
+HAS_FAIRCHEM = importlib.util.find_spec("fairchem") is not None
 
-models = list(REGISTRY.keys())
-
+# Build parametrized model list with skip marks when deps are missing
+models = []
+for name in REGISTRY.keys():
+    kind = REGISTRY[name]["kind"]    
+    marks = []
+    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN) or (kind == "fairchem" and not HAS_FAIRCHEM):
+        marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
+    models.append(pytest.param(name, marks=marks))
 
 @pytest.mark.parametrize("model_name", models)
 def test_backbone_loading(model_name):
