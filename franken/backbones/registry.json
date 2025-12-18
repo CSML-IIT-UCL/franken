@@ -106,5 +106,59 @@
     "local": "mace/mace-omol-0-extra-large-4M.model",
     "implemented": true,
     "kind": "mace"
+  },
+  "SevenNet0/11July2024": {
+    "remote": "https://github.com/MDIL-SNU/SevenNet/raw/refs/heads/main/sevenn/pretrained_potentials/SevenNet_0__11Jul2024/checkpoint_sevennet_0.pth",
+    "local": "sevennet/SevenNet_0__11July2024/checkpoint_sevennet_0.pth",
+    "kind": "sevenn",
+    "implemented": true
+  },
+  "SchNet/S2EF-OC20-200k": {
+    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_200k.pt",
+    "local": "fairchem/schnet_200k.pt",
+    "kind": "fairchem",
+    "implemented": true
+  },
+  "SchNet/S2EF-OC20-2M": {
+    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_2M.pt",
+    "local": "fairchem/schnet_2M.pt",
+    "kind": "fairchem",
+    "implemented": true
+  },
+  "SchNet/S2EF-OC20-20M": {
+    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_20M.pt",
+    "local": "fairchem/schnet_20M.pt",
+    "kind": "fairchem",
+    "implemented": true
+  },
+  "SchNet/S2EF-OC20-All": {
+    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_all_large.pt",
+    "local": "fairchem/schnet_all_large.pt",
+    "kind": "fairchem",
+    "implemented": true
+  },
+  "mace/off-small": {
+    "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_small.model?raw=true",
+    "local": "mace/MACE-OFF23_small.model?raw=true",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/off-medium": {
+    "remote": "https://github.com/ACEsuit/mace-off/raw/main/mace_off23/MACE-OFF23_medium.model?raw=true",
+    "local": "mace/MACE-OFF23_medium.model?raw=true",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/off24-medium": {
+    "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off24/MACE-OFF24_medium.model?raw=true",
+    "local": "mace/MACE-OFF24_medium.model?raw=true",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/off-large": {
+    "remote": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_large.model?raw=true",
+    "local": "mace/MACE-OFF23_large.model?raw=true",
+    "implemented": true,
+    "kind": "mace"
   }
 }
