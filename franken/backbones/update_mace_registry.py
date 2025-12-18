@@ -6,10 +6,10 @@ See : https://github.com/ACEsuit/mace/blob/main/mace/calculators/foundations_mod
 import os
 import json
 
-# retrieve urls from mace
+# retrieve mp ones from mace
 from mace.calculators.foundations_models import mace_mp_urls
 
-# add development ones
+# add other mace families (off, mh, omol,...)
 mace_mp_urls.update(
     {
         "mh-0": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-0.model",
