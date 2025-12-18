@@ -127,6 +127,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         if self.device.type == "cuda":
             # Patch E3NN for batched jacobians!
             from franken.backbones.wrappers.common_patches import patch_e3nn
+
             patch_e3nn()
             # disable jit optimization
             torch._C._get_graph_executor_optimize(False)
