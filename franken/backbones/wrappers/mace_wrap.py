@@ -168,7 +168,7 @@ class FrankenMACE(torch.nn.Module):
             base_model = undo_script_mace(base_model)
         self.register_buffer(
             "atomic_numbers",
-            torch.as_tensor(base_model.atomic_numbers, dtype=torch.int64)
+            torch.as_tensor(base_model.atomic_numbers, dtype=torch.int64),
         )
         self.r_max = base_model.r_max
         self.register_buffer(
@@ -206,7 +206,7 @@ class FrankenMACE(torch.nn.Module):
         edge_attrs = self.spherical_harmonics(vectors)  # type: ignore
         rad_emb = self.radial_embedding(
             lengths, node_attrs, edge_index, self.atomic_numbers
-                )  # type: ignore
+        )  # type: ignore
         if torch.jit.isinstance(rad_emb, torch.Tensor):
             edge_feats, cutoff = rad_emb, None
         elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, torch.Tensor]):
