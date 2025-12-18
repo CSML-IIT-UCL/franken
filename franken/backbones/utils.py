@@ -68,37 +68,57 @@ class CacheDir:
 
 
 def make_summary(cache_dir: str | None = None):
-    """Function to print available models, first those present locally."""
+    """Function to print available models, grouped and sorted by backbone kind."""
     if cache_dir is not None:
         CacheDir.initialize(cache_dir=cache_dir)
+
     registry = load_model_registry()
     ckpt_dir = CacheDir.get() / "gnn_checkpoints"
 
     local_models = []
     remote_models = []
-    _summary = ""
-    for model, info in registry.items():
-        local_path = ckpt_dir / info["local"]
-        kind = info["kind"]
-        implemented = info.get("implemented", False)
-        if implemented:
-            if local_path.is_file():
-                local_models.append((model, kind))
-            else:
-                remote_models.append((model, kind))
-    if len(local_models) > 0:
-        _summary += f"{'DOWNLOADED MODELS':^80}\n"
-        _summary += f"{'(' + str(ckpt_dir) + ')':-^80}\n"
-        for model, kind in local_models:
-            _str = f"{model} ({kind})"
-            _summary += f"{_str:<40}\n"
 
-    _summary += f"{'AVAILABLE MODELS':-^80}\n"
-    for model, kind in remote_models:
-        _str = f"{model} ({kind})"
-        _summary += f"{_str:<80}\n"
-    _summary += "-" * 80
-    return _summary
+    # Collect implemented backbones
+    for model, info in registry.items():
+        if not info.get("implemented", False):
+            continue
+        kind = info["kind"]
+        local_path = ckpt_dir / info["local"]
+        (local_models if local_path.is_file() else remote_models).append((model, kind))
+
+    # ---- Group → Sort → Flatten ----
+    def group_and_sort(models):
+        groups = {}
+        for model, kind in models:
+            groups.setdefault(kind, []).append(model)
+        # sort kinds and sort models inside groups
+        return {kind: groups[kind] for kind in groups.keys()}
+
+    local_groups = group_and_sort(local_models)
+    remote_groups = group_and_sort(remote_models)
+
+    summary = ""
+
+    # ---------------- LOCAL ----------------
+    if local_groups:
+        summary += f"{'DOWNLOADED MODELS':^80}\n"
+        summary += f"{'(' + str(ckpt_dir) + ')':-^80}\n"
+        for kind, models in local_groups.items():
+            summary += f"* {kind.upper()}\n"
+            for model in models:
+                summary += f"{model}\n"
+            summary += "\n"  # spacing between groups
+
+    # ---------------- REMOTE ----------------
+    summary += f"{'AVAILABLE MODELS':-^80}\n"
+    for kind, models in remote_groups.items():
+        summary += f"* {kind.upper()}\n"
+        for model in models:
+            summary += f"{model}\n"
+        #summary += ""
+
+    summary += "-" * 80
+    return summary
 
 
 def get_checkpoint_path(backbone_path_or_id: str) -> Path:
