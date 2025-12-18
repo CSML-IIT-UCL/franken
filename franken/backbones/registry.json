@@ -1,116 +1,110 @@
 {
-    "mace_mh_1/mace-mh-0": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-0.model",
-        "local": "mace/mace_mh_1/mace-mh-0.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mh_1/mace-mh-1": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-1.model",
-        "local": "mace/mace_mh_1/mace-mh-1.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_omol_0/MACE-omol-0-extra-large-1024": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
-        "local": "mace/mace_omol_0/MACE-omol-0-extra-large-1024.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_omol_0/mace-omol-0-extra-large-4M": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/mace-omol-0-extra-large-4M.model",
-        "local": "mace/mace_omol_0/mace-omol-0-extra-large-4M.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_matpes_0/MACE-matpes-pbe-omat-ft": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-pbe-omat-ft.model",
-        "local": "mace/mace_matpes_0/MACE-matpes-pbe-omat-ft.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_matpes_0/MACE-matpes-r2scan-omat-ft": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-r2scan-omat-ft.model",
-        "local": "mace/mace_matpes_0/MACE-matpes-r2scan-omat-ft.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_omat_0/mace-omat-0-medium": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omat_0/mace-omat-0-medium.model",
-        "local": "mace/mace_omat_0/mace-omat-0-medium.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_omat_0/mace-omat-0-small": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omat_0/mace-omat-0-small.model",
-        "local": "mace/mace_omat_0/mace-omat-0-small.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mpa_0/mace-mpa-0-medium": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mpa_0/mace-mpa-0-medium.model",
-        "local": "mace/mace_mpa_0/mace-mpa-0-medium.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b3/mace-mp-0b3-medium": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b3/mace-mp-0b3-medium.model",
-        "local": "mace/mace_mp_0b3/mace-mp-0b3-medium.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b2/mace-large-density-agnesi-stress": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b2/mace-large-density-agnesi-stress.model",
-        "local": "mace/mace_mp_0b2/mace-large-density-agnesi-stress.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b2/mace-medium-density-agnesi-stress": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b2/mace-medium-density-agnesi-stress.model",
-        "local": "mace/mace_mp_0b2/mace-medium-density-agnesi-stress.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b2/mace-small-density-agnesi-stress": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b2/mace-small-density-agnesi-stress.model",
-        "local": "mace/mace_mp_0b2/mace-small-density-agnesi-stress.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b/mace_agnesi_medium": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b/mace_agnesi_medium.model",
-        "local": "mace/mace_mp_0b/mace_agnesi_medium.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0b/mace_agnesi_small": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0b/mace_agnesi_small.model",
-        "local": "mace/mace_mp_0b/mace_agnesi_small.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0/2023-12-03-mace-128-L1_epoch-199": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
-        "local": "mace/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0/2023-12-10-mace-128-L0_energy_epoch-249": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0/2023-12-10-mace-128-L0_energy_epoch-249.model",
-        "local": "mace/mace_mp_0/2023-12-10-mace-128-L0_energy_epoch-249.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0/2023-12-10-mace-128-L0_epoch-199": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0/2023-12-10-mace-128-L0_epoch-199.model",
-        "local": "mace/mace_mp_0/2023-12-10-mace-128-L0_epoch-199.model",
-        "kind": "mace",
-        "implemented": true
-    },
-    "mace_mp_0/2024-01-07-mace-128-L2_epoch-199": {
-        "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mp_0/2024-01-07-mace-128-L2_epoch-199.model",
-        "local": "mace/mace_mp_0/2024-01-07-mace-128-L2_epoch-199.model",
-        "kind": "mace",
-        "implemented": true
-    }
+  "mace/small": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-10-mace-128-L0_energy_epoch-249.model",
+    "local": "mace/2023-12-10-mace-128-L0_energy_epoch-249.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/2023-12-03-mace-128-L1_epoch-199.model",
+    "local": "mace/2023-12-03-mace-128-L1_epoch-199.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/large": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0/MACE_MPtrj_2022.9.model",
+    "local": "mace/MACE_MPtrj_2022.9.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/small-0b": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b/mace_agnesi_small.model",
+    "local": "mace/mace_agnesi_small.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium-0b": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b/mace_agnesi_medium.model",
+    "local": "mace/mace_agnesi_medium.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/small-0b2": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b2/mace-small-density-agnesi-stress.model",
+    "local": "mace/mace-small-density-agnesi-stress.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium-0b2": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b2/mace-medium-density-agnesi-stress.model",
+    "local": "mace/mace-medium-density-agnesi-stress.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/large-0b2": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b2/mace-large-density-agnesi-stress.model",
+    "local": "mace/mace-large-density-agnesi-stress.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium-0b3": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mp_0b3/mace-mp-0b3-medium.model",
+    "local": "mace/mace-mp-0b3-medium.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium-mpa-0": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_mpa_0/mace-mpa-0-medium.model",
+    "local": "mace/mace-mpa-0-medium.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/small-omat-0": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-small.model",
+    "local": "mace/mace-omat-0-small.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/medium-omat-0": {
+    "remote": "https://github.com/ACEsuit/mace-mp/releases/download/mace_omat_0/mace-omat-0-medium.model",
+    "local": "mace/mace-omat-0-medium.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mace-matpes-pbe-0": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-pbe-omat-ft.model",
+    "local": "mace/MACE-matpes-pbe-omat-ft.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mace-matpes-r2scan-0": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_matpes_0/MACE-matpes-r2scan-omat-ft.model",
+    "local": "mace/MACE-matpes-r2scan-omat-ft.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mh-0": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-0.model",
+    "local": "mace/mace-mh-0.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mh-1": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_mh_1/mace-mh-1.model",
+    "local": "mace/mace-mh-1.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mace_omol_0_1024": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/MACE-omol-0-extra-large-1024.model",
+    "local": "mace/MACE-omol-0-extra-large-1024.model",
+    "implemented": true,
+    "kind": "mace"
+  },
+  "mace/mace_omol_0_4M": {
+    "remote": "https://github.com/ACEsuit/mace-foundations/releases/download/mace_omol_0/mace-omol-0-extra-large-4M.model",
+    "local": "mace/mace-omol-0-extra-large-4M.model",
+    "implemented": true,
+    "kind": "mace"
+  }
 }
