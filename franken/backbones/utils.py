@@ -115,7 +115,6 @@ def make_summary(cache_dir: str | None = None):
         summary += f"* {kind.upper()}\n"
         for model in models:
             summary += f"{model}\n"
-        #summary += ""
 
     summary += "-" * 80
     return summary

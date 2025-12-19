@@ -7,28 +7,28 @@ As of today, the available models are:
 ```
 --------------------------------AVAILABLE MODELS--------------------------------
 * MACE
-mace/small
-mace/medium
-mace/large
-mace/small-0b
-mace/medium-0b
-mace/small-0b2
-mace/medium-0b2
-mace/large-0b2
-mace/medium-0b3
-mace/medium-mpa-0
-mace/small-omat-0
-mace/medium-omat-0
-mace/mace-matpes-pbe-0
-mace/mace-matpes-r2scan-0
-mace/mh-0
-mace/mh-1
-mace/mace_omol_0_1024
-mace/mace_omol_0_4M
-mace/off-small
-mace/off-medium
-mace/off24-medium
-mace/off-large
+mace_mp/small
+mace_mp/medium
+mace_mp/large
+mace_mp/small-0b
+mace_mp/medium-0b
+mace_mp/small-0b2
+mace_mp/medium-0b2
+mace_mp/large-0b2
+mace_mp/medium-0b3
+mace_mpa/medium-0
+mace_omat/small-0
+mace_omat/medium-0
+mace_matpes/pbe-0
+mace_matpes/r2scan-0
+mace_mh/0
+mace_mh/1
+mace_omol/0_1024
+mace_omol/0_4M
+mace_off/small
+mace_off/medium
+mace_off/medium24
+mace_off/large
 * SEVENN
 SevenNet0/11July2024
 * FAIRCHEM
