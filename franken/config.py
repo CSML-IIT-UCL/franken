@@ -2,7 +2,10 @@ from abc import ABC
 import ast
 from copy import deepcopy
 from dataclasses import dataclass, field
+import logging
 from typing import Any, ClassVar, Literal, Sequence, Union
+
+logger = logging.getLogger("franken")
 
 
 def all_fields(class_or_instance):
@@ -172,6 +175,26 @@ class BackboneConfig(ABC):
 
     family: ClassVar[str]
 
+    def __post_init__(self) -> None:
+        _deprecated_path_ids = {
+            "MACE-L0": "mace_mp/small",
+            "MACE-L1": "mace_mp/medium",
+            "MACE-L2": "mace_mp/medium",
+            "MACE-OFF-small" : "mace_off/small",
+            "MACE-OFF-medium" : "mace_off/medium",
+            "MACE-OFF-large" : "mace_off/large",
+            "SevenNet0" : "SevenNet0/11July2024"
+        }
+
+        new_path_or_id = _deprecated_path_ids.get(self.path_or_id)
+        if new_path_or_id is not None:
+            logger.warning(
+                "Backbone ID '%s' is deprecated; use '%s' instead.",
+                self.path_or_id,
+                new_path_or_id,
+            )
+            self.path_or_id = new_path_or_id
+
     def to_ckpt(self):
         return asdict_with_classvar(self)
 
@@ -188,6 +211,7 @@ class BackboneConfig(ABC):
         init_args = deepcopy(ckpt)
         init_args.pop("family")
         return cls(**init_args)
+
 
 
 @dataclass
