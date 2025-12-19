@@ -180,10 +180,10 @@ class BackboneConfig(ABC):
             "MACE-L0": "mace_mp/small",
             "MACE-L1": "mace_mp/medium",
             "MACE-L2": "mace_mp/medium",
-            "MACE-OFF-small" : "mace_off/small",
-            "MACE-OFF-medium" : "mace_off/medium",
-            "MACE-OFF-large" : "mace_off/large",
-            "SevenNet0" : "SevenNet0/11July2024"
+            "MACE-OFF-small": "mace_off/small",
+            "MACE-OFF-medium": "mace_off/medium",
+            "MACE-OFF-large": "mace_off/large",
+            "SevenNet0": "SevenNet0/11July2024",
         }
 
         new_path_or_id = _deprecated_path_ids.get(self.path_or_id)
@@ -211,7 +211,6 @@ class BackboneConfig(ABC):
         init_args = deepcopy(ckpt)
         init_args.pop("family")
         return cls(**init_args)
-
 
 
 @dataclass
