@@ -20,7 +20,7 @@ __all__ = [
 ROOT_PATH = FRANKEN_DIR
 
 DEFAULT_GNN_CONFIGS = [
-    # MaceBackboneConfig("MACE-L0")
+    # MaceBackboneConfig("mace_mp/small")
 ]  # , "SchNet-S2EF-OC20-All"]  # List of gnn_ids to download
 
 SKIP_NO_CUDA = pytest.mark.skipif(
