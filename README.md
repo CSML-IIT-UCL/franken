@@ -55,7 +55,7 @@ franken.autotune \
     --seed=42 \
     --jac-chunk-size=64 \
     --run-dir="./results" \
-    --backbone=mace --mace.path-or-id="MACE-L0" --mace.interaction-block=2 \
+    --backbone=mace --mace.path-or-id="mace_mp/small" --mace.interaction-block=2 \
     --rf=gaussian --gaussian.num-rf=512 --gaussian.length-scale="[10.0, 15.0]"
 ```
 
