@@ -30,7 +30,7 @@ RF_PARAMETRIZE = [
 def test_lammps_compile(rf_cfg, device):
     """Test for checking save and load methods of FrankenPotential"""
     unpatch_e3nn()  # needed in case some previous test ran the patching code
-    gnn_cfg = MaceBackboneConfig("MACE-L0")
+    gnn_cfg = MaceBackboneConfig("mace_mp/small")
     temp_dir = None
     try:
         # Step 1: Create a temporary directory for saving the model
