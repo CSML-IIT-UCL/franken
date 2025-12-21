@@ -8,6 +8,7 @@ import torch
 
 from franken import FRANKEN_DIR
 from franken.backbones.utils import CacheDir, download_checkpoint
+from franken.config import MaceBackboneConfig
 
 __all__ = [
     "ROOT_PATH",
@@ -20,7 +21,7 @@ __all__ = [
 ROOT_PATH = FRANKEN_DIR
 
 DEFAULT_GNN_CONFIGS = [
-    # MaceBackboneConfig("mace_mp/small")
+    MaceBackboneConfig("mace_mp/small")
 ]  # , "SchNet-S2EF-OC20-All"]  # List of gnn_ids to download
 
 SKIP_NO_CUDA = pytest.mark.skipif(
