@@ -29,7 +29,7 @@ from franken.utils.linalg.cov import (
 )
 from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.linalg.tri import triangular_lerp
-from franken.utils.misc import params_grid, throughput
+from franken.utils.misc import no_jit, params_grid, throughput
 
 
 logger = logging.getLogger("franken")
@@ -129,8 +129,6 @@ class RandomFeaturesTrainer(BaseTrainer):
             from franken.backbones.wrappers.common_patches import patch_e3nn
 
             patch_e3nn()
-            # disable jit optimization
-            torch._C._get_graph_executor_optimize(False)
 
         model = model.to(self.device)
         self.on_fit_start(model)
@@ -339,6 +337,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Saved feature maps require {tot_bytes / 2**30:.2f}GB of device memory."
                 )
 
+    @no_jit()
     @torch.no_grad()
     def _compute_covs_and_coeffs(
         self, model: FrankenPotential, dataloader: torch.utils.data.DataLoader
