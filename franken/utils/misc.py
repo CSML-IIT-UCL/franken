@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import gc
 import inspect
 import logging
@@ -395,3 +396,14 @@ def torch_load_maybejit(path, map_location=None, weights_only=True):
             raise
         model = torch.load(path, map_location=map_location, weights_only=weights_only)
     return model
+
+
+@contextmanager
+def no_jit():
+    # disable jit optimization
+    stored_flag = torch._C._get_graph_executor_optimize()
+    torch._C._set_graph_executor_optimize(False)
+    try:
+        yield
+    finally:
+        torch._C._get_graph_executor_optimize(stored_flag)
