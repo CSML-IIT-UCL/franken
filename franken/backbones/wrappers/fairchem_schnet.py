@@ -1,33 +1,8 @@
 from collections import namedtuple
-from packaging.version import Version
 
 import torch
-
-try:
-    from fairchem.core.models.schnet import SchNetWrap
-    import fairchem.core.common.utils
-except ImportError as e:  # need fairchem < 2 for SchNetWrap to work.
-    is_fairchem_installed = True
-    is_fairchem_gt2 = False
-    try:
-        import fairchem.core
-
-        is_fairchem_gt2 = Version(fairchem.core.__version__) >= Version("2")
-    except:  # noqa: E722
-        is_fairchem_installed = False
-    msg = "Failed to import SchNet from fairchem module. "
-    if is_fairchem_installed:
-        if is_fairchem_gt2:
-            msg += (
-                "A version of fairchem < 2 is required. Please see "
-                "https://github.com/facebookresearch/fairchem?tab=readme-ov-file#looking-for-fairchem-v1-models-and-code "
-                "to know more"
-            )
-        else:
-            msg += e.msg
-    else:
-        msg += "Please install fairchem version 1."
-    raise ImportError(msg)
+from fairchem.core.models.schnet import SchNetWrap
+import fairchem.core.common.utils
 
 from franken.data import Configuration
 
