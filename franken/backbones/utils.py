@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from packaging.version import Version
 
 import requests
 import torch
@@ -208,6 +209,29 @@ def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
         try:
             from franken.backbones.wrappers.fairchem_schnet import FrankenSchNetWrap
         except ImportError as import_err:
+            fairchem_importable = True
+            is_fairchem_gt2 = False
+            try:
+                import fairchem.core
+
+                is_fairchem_gt2 = Version(fairchem.core.__version__) >= Version("2")
+                print(f"{is_fairchem_gt2=}")
+            except:  # noqa: E722
+                fairchem_importable = False
+            err_msg = f"franken wasn't able to load {gnn_backbone_id}. "
+            if fairchem_importable:
+                if is_fairchem_gt2:
+                    err_msg += (
+                        "Fairchem version < 2 is required. Please see "
+                        "https://github.com/facebookresearch/fairchem?tab=readme-ov-file#looking-for-fairchem-v1-models-and-code "
+                        "to know more"
+                    )
+                else:
+                    err_msg += import_err.msg
+            else:
+                err_msg += (
+                    f"Please install fairchem version 1.\nBase error: {import_err.msg}"
+                )
             logger.error(err_msg, exc_info=import_err)
             raise
         return FrankenSchNetWrap.load_from_checkpoint(
