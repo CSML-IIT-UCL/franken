@@ -1,5 +1,5 @@
 """
-Use the list of released MACE models to populate the model registry.
+Script to automatically generate the MACE part of the model registry using the list of released MACE models.
 Some urls are available also inside the mace package: https://github.com/ACEsuit/mace/blob/main/mace/calculators/foundations_models.py
 """
 
@@ -34,18 +34,19 @@ mace_urls = {
     "mace_off/large": "https://github.com/ACEsuit/mace-off/blob/main/mace_off23/MACE-OFF23_large.model?raw=true",
 }
 
-# update registry
-with open("registry.json", "r") as f:
-    model_registry = json.load(f)
+if __name__ == "__main__":
+    # update registry
+    with open("registry.json", "r") as f:
+        model_registry = json.load(f)
 
-for mace_id, mace_url in mace_urls.items():
-    print(mace_id)
-    model_registry[f"{mace_id}"] = {
-        "remote": mace_url,
-        "local": "mace/" + os.path.basename(mace_url),
-        "implemented": True,
-        "kind": "mace",
-    }
+    for mace_id, mace_url in mace_urls.items():
+        print(mace_id)
+        model_registry[f"{mace_id}"] = {
+            "remote": mace_url,
+            "local": "mace/" + os.path.basename(mace_url),
+            "implemented": True,
+            "kind": "mace",
+        }
 
-with open("registry.json", "w") as f:
-    json.dump(model_registry, f, indent=2)
+    with open("registry.json", "w") as f:
+        json.dump(model_registry, f, indent=2)
