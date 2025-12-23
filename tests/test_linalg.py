@@ -1,4 +1,15 @@
+from functools import partial
+from unittest.mock import DEFAULT, patch
+
 import numpy as np
+import pytest
+import torch
+try:
+    import cupy # pyright: ignore[reportMissingImports]  # noqa: F401
+    cupy_available = True
+except ImportError:
+    cupy_available = False
+
 from franken.utils.linalg.cov import (
     _lowmemcov_rank1_update,
     _lowmemcov_rankk_update,
@@ -23,11 +34,12 @@ from .conftest import (
     SKIP_NO_CUDA,
 )
 
-import pytest
-import torch
 
-from functools import partial
-from unittest.mock import DEFAULT, patch
+FAIL_NO_CUPY_MARK = pytest.mark.xfail(not cupy_available, reason="No CuPy")
+DEVICES_FAIL_NOCUPY = [
+    "cpu",
+    pytest.param("cuda:0", marks=[SKIP_NO_CUDA, FAIL_NO_CUPY_MARK]),  # type: ignore
+]
 
 
 class TestCovUpdates:
@@ -57,7 +69,7 @@ class TestCovUpdates:
         veck = torch.randn((self.mat_size, 3), device=device, dtype=dtype, generator=gen)
         return veck
 
-    @pytest.mark.parametrize("device", DEVICES)
+    @pytest.mark.parametrize("device", DEVICES_FAIL_NOCUPY)
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     @pytest.mark.parametrize("upper", [True, False])
     def test_lowmem_rank1(self, dtype, device, upper):
@@ -83,7 +95,7 @@ class TestCovUpdates:
         # preserving the other triangular matrix
         torch.testing.assert_close(other_tri_func(out_cov), other_tri_func(Acp))
 
-    @pytest.mark.parametrize("device", DEVICES)
+    @pytest.mark.parametrize("device", DEVICES_FAIL_NOCUPY)
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     @pytest.mark.parametrize("upper", [True, False])
     def test_lowmem_rankk(self, device, dtype, upper):
@@ -183,6 +195,7 @@ class TestCovUpdates:
                 _lowmemcov_rankk_update(A, d, veck, upper=upper)
 
     @SKIP_NO_CUDA
+    @FAIL_NO_CUPY_MARK
     def test_rank1_dispatcher_cuda(self):
         upper = True
         dtype = torch.float32
@@ -198,6 +211,7 @@ class TestCovUpdates:
             mocks['_lowmemcov_rank1_update'].assert_called_once()
 
     @SKIP_NO_CUDA
+    @FAIL_NO_CUPY_MARK
     def test_rankk_dispatcher_cuda(self):
         upper = True
         dtype = torch.float32
@@ -232,6 +246,7 @@ class TestPSDSolvers:
         return torch.linalg.solve(A.double(), B.double()).to(dtype=A.dtype)
 
     @SKIP_NO_CUDA
+    @FAIL_NO_CUPY_MARK
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     def test_lowmem_cuda(self, dtype):
         A = self.A("cuda", dtype)
@@ -281,6 +296,7 @@ class TestPSDSolvers:
         torch.testing.assert_close(result, expected)
 
     @SKIP_NO_CUDA
+    @FAIL_NO_CUPY_MARK
     def test_dispatcher_cuda(self):
         with patch.multiple(
             "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT
