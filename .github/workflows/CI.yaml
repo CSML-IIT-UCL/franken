@@ -17,7 +17,7 @@ on:
 
 jobs:
   test:
-    name: Py=${{ matrix.python-version }}, PT={{ matrix.pytorch-version }}, OS=${{ matrix.os }}
+    name: Py=${{ matrix.python-version }}, PT=${{ matrix.pytorch-version }}, OS=${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
