@@ -17,12 +17,12 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}, Python ${{ matrix.python-version }}
+    name: Py=${{ matrix.python-version }}, PT={{ matrix.pytorch-version }}, OS=${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.14"]
         pytorch-version: ["2.5", "2.6", "2.9"]
         exclude:
           - python-version: "3.10"  # only to save CI minutes
