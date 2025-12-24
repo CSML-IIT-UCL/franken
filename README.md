@@ -72,6 +72,6 @@ If you find this library useful, please cite our work using the folowing bibtex 
     year={2025},
     eprint={2505.05652},
     archivePrefix={arXiv},
-    url={https://arxiv.org/abs/2505.05652},
+    url={https://arxiv.org/abs/2505.05652}
 }
 ```
