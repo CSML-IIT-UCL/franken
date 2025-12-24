@@ -93,6 +93,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 self.train_dataloader.dataset.atomic_energies
             )
 
+    @no_jit()
     def fit(
         self,
         model: FrankenPotential,
@@ -199,6 +200,7 @@ class RandomFeaturesTrainer(BaseTrainer):
 
         return log_collection, all_weights
 
+    @no_jit()
     def evaluate(
         self,
         model: FrankenPotential,

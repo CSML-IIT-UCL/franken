@@ -406,4 +406,4 @@ def no_jit():
     try:
         yield
     finally:
-        torch._C._get_graph_executor_optimize(stored_flag)
+        torch._C._set_graph_executor_optimize(stored_flag)
