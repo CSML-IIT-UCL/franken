@@ -179,6 +179,7 @@ def run_autotune(
                     "energy_RMSE",
                     "forces_RMSE",
                     "forces_cosim",
+                    "forces_MAE_weighted",
                 ],
             )
         split_for_best_model = (
