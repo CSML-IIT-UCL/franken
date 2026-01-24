@@ -12,6 +12,7 @@ class BaseMetric:
         device: torch.device,
         dtype: torch.dtype = torch.float64,
         units: Mapping[str, str | None] = {},
+        requires_species: bool = False,
     ):
         self.name = name
         self.device = device
@@ -19,6 +20,7 @@ class BaseMetric:
         self.buffer = None
         self.samples_counter = torch.zeros((1,), device=device, dtype=dtype)
         self.units = units
+        self.requires_species = requires_species
 
     def reset(self) -> None:
         """Reset the buffer to zeros"""

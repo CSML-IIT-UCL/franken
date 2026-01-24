@@ -282,7 +282,10 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Configuration {i} - {split_name} has NaNs in force predictions"
                 )
             for metric in metric_objects:
-                metric.update(predictions, targets)
+                if metric.requires_species:
+                    metric.update(predictions, targets, data.atomic_numbers)
+                else:
+                    metric.update(predictions, targets)
 
         num_models = (
             all_weights.shape[0]
@@ -307,8 +310,23 @@ class RandomFeaturesTrainer(BaseTrainer):
         for idx in range(num_models):
             results = []
             for name, value in metric_values.items():
-                float_value = value[idx].item()
-                results.append(dict(name=name, value=float_value))
+                v = value[idx]
+
+                if v.ndim == 0:
+                    results.append(dict(name=name, value=v.item()))
+                else:
+                    # per-species metric
+                    metric = metric_objects[name]  # or however you access it
+                    counts = metric.samples_counter
+
+                    for z in range(v.shape[0]):
+                        if counts[z] > 0:
+                            results.append(
+                                dict(
+                                    name=f"{name}_Z{z}",
+                                    value=v[z].item(),
+                                )
+                            )
             raw_logs.append(results)
 
         assert len(raw_logs) == len(log_collection)
