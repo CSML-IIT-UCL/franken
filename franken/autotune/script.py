@@ -180,6 +180,7 @@ def run_autotune(
                     "forces_RMSE",
                     "forces_cosim",
                     "forces_MAE_weighted",
+                    "forces_MAE_species",
                 ],
             )
         split_for_best_model = (

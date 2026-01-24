@@ -153,8 +153,110 @@ class ForcesMAEWeighted(BaseMetric):
         # -> (M,) or ()
         error = torch.stack(species_errors, dim=0).mean(dim=0)
 
-        print("MAE_weighted", error.shape)
         self.buffer_add(error, num_samples=num_samples)
+
+
+class ForcesMAESpecies(BaseMetric):
+    """
+    Returns force MAE computed for each species.
+    """
+
+    Z_MAX = 90  # upper bound
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        units = {
+            "inputs": "eV/ang",
+            "outputs": "meV/ang",
+        }
+        super().__init__(
+            name="forces_MAE_species",
+            device=device,
+            dtype=dtype,
+            units=units,
+            requires_species=True,
+        )
+
+        # buffers will be initialized later once we know n_models
+        self.buffer = None
+        self.samples_counter = torch.zeros(self.Z_MAX + 1, device=device, dtype=dtype)
+
+    def reset(self) -> None:
+        if self.buffer is not None:
+            self.buffer.zero_()
+        self.samples_counter.zero_()
+
+    def update(
+        self,
+        predictions: Target,
+        targets: Target,
+        atomic_numbers: torch.Tensor,
+    ) -> None:
+
+        # ---- assertions on species ----
+        assert atomic_numbers.ndim == 1
+        assert atomic_numbers.shape[0] == targets.forces.shape[-2]
+        assert atomic_numbers.max() <= self.Z_MAX
+
+        # |ΔF| averaged over Cartesian components
+        # shapes:
+        #   single model: (N,)
+        #   ensemble:     (M, N)
+        error = torch.abs(targets.forces - predictions.forces).mean(dim=-1)
+
+        # ensure model dimension exists
+        if error.ndim == 1:
+            error = error.unsqueeze(0)  # (1, N)
+
+        n_models = error.shape[0]
+
+        # lazy buffer initialization
+        if self.buffer is None:
+            self.buffer = torch.zeros(
+                self.Z_MAX + 1,
+                n_models,
+                device=self.device,
+                dtype=self.dtype,
+            )
+
+        # accumulate per species
+        for z in torch.unique(atomic_numbers):
+            z_int = int(z)
+            mask = atomic_numbers == z  # (N,)
+
+            # sum over atoms, keep models
+            # (M, N_z) → (M,)
+            self.buffer[z_int] += error[:, mask].sum(dim=1)
+
+            # count atoms (same for all models)
+            self.samples_counter[z_int] += mask.sum()
+
+    def compute(self, reset: bool = True) -> torch.Tensor:
+        if self.buffer is None:
+            raise ValueError(
+                f"Cannot compute value for metric '{self.name}' "
+                "because it was never updated."
+            )
+
+        # sync across ranks
+        distributed.all_sum(self.buffer)
+        distributed.all_sum(self.samples_counter)
+
+        # buffer shape: (Z, M) → transpose to (M, Z)
+        buffer = self.buffer.transpose(0, 1)  # (M, Z)
+
+        # MAE per model, per species
+        mae = torch.zeros_like(buffer)
+
+        mask = self.samples_counter > 0
+        mae[:, mask] = buffer[:, mask] / self.samples_counter[mask]
+
+        # unit conversion: eV/Å → meV/Å
+        mae = mae * 1000
+
+        if reset:
+            self.reset()
+
+        return mae
 
 
 class ForcesRMSE(BaseMetric):
@@ -271,3 +373,4 @@ registry.register("forces_RMSE", ForcesRMSE)
 registry.register("forces_RMSE2", ForcesRMSE2)
 registry.register("forces_cosim", ForcesCosineSimilarity)
 registry.register("forces_MAE_weighted", ForcesMAEWeighted)
+registry.register("forces_MAE_species", ForcesMAESpecies)
