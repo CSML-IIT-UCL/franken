@@ -64,6 +64,7 @@ Advantages of Franken
    Introduction <self>
 
    topics/installation.md
+   topics/minimal_example.md
    topics/model_registry.md
    topics/lammps.md
 
