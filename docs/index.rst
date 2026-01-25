@@ -3,7 +3,7 @@
 Franken: A Method for Efficient and Accurate Molecular Dynamics
 ================================================================
 
-:tt:`franken` is a novel method designed to enhance the accuracy of atomistic foundation models used for molecular dynamics simulations, all while maintaining computational efficiency. This method builds upon the capabilities of the `MEKRR method <https://proceedings.neurips.cc/paper_files/paper/2023/hash/5f02c76bc411a6f7c9a8bb2cbf981260-Abstract-Conference.html>`_, extending its application from fitting energies to also fitting forces, thereby enabling feasible molecular dynamics (MD) simulations.
+:tt:`franken` is a novel method which uses Random Fourier Features to transfer the representation learned from a pre-trained atomistic model to new system in extremely efficient way. The method is described in the publication: `Fast and Fourier features for transfer learning of interatomic potentials, npj Computational Materials (2025) <https://doi.org/10.1038/s41524-025-01779-z>`_. 
 
 Franken's Three-Step Process
 ----------------------------
@@ -64,6 +64,7 @@ Advantages of Franken
    Introduction <self>
 
    topics/installation.md
+   topics/minimal_example.md
    topics/model_registry.md
    topics/lammps.md
 

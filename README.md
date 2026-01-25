@@ -45,33 +45,46 @@ For more details read the [relevant documentation page](https://franken.readthed
 
 ## Quickstart
 
-You can directly run `franken.autotune` to get started with the `franken` library. A quick example is to fine-tune MACE-MP0 on a high-level-of-theory water dataset:
+### Train
+You can directly run `franken.autotune` to get started with the `franken` library. 
 
 ```bash
 franken.autotune \
-    --dataset-name="water" --max-train-samples=8 \
-    --l2-penalty="(-10, -5, 5, log)" \
-    --force-weight="(0.01, 0.99, 5, linear)" \
-    --seed=42 \
-    --jac-chunk-size=64 \
-    --run-dir="./results" \
-    --backbone=mace --mace.path-or-id="mace_mp/small" --mace.interaction-block=2 \
-    --rf=gaussian --gaussian.num-rf=512 --gaussian.length-scale="[10.0, 15.0]"
+    --train-path train.xyz \
+    --val-path val.xyz \
+    --backbone=mace --mace.path-or-id "mace_mp/small" --mace.interaction-block 2 \
+    --rf=ms-gaussian --ms-gaussian.num-rf 4096 --ms-gaussian.length-scale-num 5\
+    --ms-gaussian.length-scale-low 1  --ms-gaussian.length-scale-high 32 \
+    --force-weight=0.99 \
+    --l2-penalty="(-10, -6, 5, log)" \
+    --jac-chunk-size "auto"
 ```
 
 For more details you can check out the [autotune tutorial](https://franken.readthedocs.io/notebooks/autotune.html) or the [getting started notebook](https://franken.readthedocs.io/notebooks/getting_started.html).
 
+### Inference/MD
+The trained model can be used as a ASE (Atomistic Simulations Environment) calculator for easy inference. 
+
+```python
+from franken.calculators import FrankenCalculator
+calc = FrankenCalculator('best_model.ckpt', device='cuda:0')
+atoms.calc = calc
+```
+
+See the [MD tutorial](.https://franken.readthedocs.io/notebooks/molecular_dynamics.html) for a complete example about running molecular dynamics, while for deploying it to LAMMPS see the dedicated [page](https://franken.readthedocs.io/topics/lammps.html).
 
 ## Citing
 
 If you find this library useful, please cite our work using the folowing bibtex entry:
 ```
-@misc{novelli25franken,
-    title={Fast and Fourier Features for Transfer Learning of Interatomic Potentials},
-    author={Pietro Novelli and Giacomo Meanti and Pedro J. Buigues and Lorenzo Rosasco and Michele Parrinello and Massimiliano Pontil and Luigi Bonati},
-    year={2025},
-    eprint={2505.05652},
-    archivePrefix={arXiv},
-    url={https://arxiv.org/abs/2505.05652}
+@article{novelli2025fast,
+  title={Fast and Fourier features for transfer learning of interatomic potentials},
+  author={Novelli, Pietro and Meanti, Giacomo and Buigues, Pedro J and Rosasco, Lorenzo and Parrinello, Michele and Pontil, Massimiliano and Bonati, Luigi},
+  journal={npj Computational Materials},
+  volume={11},
+  number={1},
+  pages={293},
+  year={2025},
+  publisher={Nature Publishing Group UK London}
 }
 ```
