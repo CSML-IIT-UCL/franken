@@ -76,7 +76,7 @@ Below is an example `best.json` file, which contains info about the **metrics**,
 }
 ```
 
-See the *Franken CLI Reference > [Autotune](../reference/franken-cli/franken.autotune.html)* page to view the description of the options and the dedicated [tutorial](../notebooks/autotune.html).
+See the *Franken CLI Reference > [Autotune](https://franken.readthedocs.io/reference/franken-cli/franken.autotune.html)* page to view the description of the options and the dedicated [tutorial](https://franken.readthedocs.io/notebooks/autotune.html).
 
 ### Predict 
 
@@ -92,4 +92,4 @@ calc.calculate(atoms)
 atoms.calc = calc
 ```
 
-See the [MD tutorial](./molecular_dynamics.ipynb) for a complete example about running molecular dynamics, while for deploying it to LAMMPS see the dedicated [page](./lammps.html).
+See the [MD tutorial](https://franken.readthedocs.io/notebooks/molecular_dynamics.html) for a complete example about running molecular dynamics, while for deploying it to LAMMPS see the dedicated [page](https://franken.readthedocs.io/topics/lammps.html).
