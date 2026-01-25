@@ -282,33 +282,57 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Configuration {i} - {split_name} has NaNs in force predictions"
                 )
             for metric in metric_objects:
-                metric.update(predictions, targets)
+                if metric.requires_species:
+                    metric.update(predictions, targets, data.atomic_numbers)
+                else:
+                    metric.update(predictions, targets)
 
         num_models = (
             all_weights.shape[0]
             if all_weights is not None
             else model.rf.weights.shape[0]
         )
+
         # Sync metrics across GPUs
         metric_values = {}
+        metric_counters = {}
         for metric in metric_objects:
             value = metric.compute(reset=False)
-            if metric.samples_counter.item() != tot_dset_size:
-                logger.warning(
-                    f"Metric {metric.name} has {metric.samples_counter.item()} samples "
-                    f"while the dataset has {tot_dset_size} configurations."
-                )
-            assert value.ndim == 1
+            # LUIGI: i would remove this check as now we have different normalizations
+            # assume that total number of samples must match dataset size
+            # if metric.samples_counter.sum().item() != tot_dset_size:
+            #     logger.warning(
+            #         f"Metric {metric.name} has {metric.samples_counter.sum().item()} samples "
+            #         f"while the dataset has {tot_dset_size} configurations."
+            #     )
+            # scalar metric → (M,) while per-species metric → (M, Z)
+            assert value.ndim in (1, 2)
             assert value.shape[0] == num_models
             metric_values[metric.name] = value
+            metric_counters[metric.name] = metric.samples_counter
 
         # Explode metric values into list of MetricLog
         raw_logs = []
         for idx in range(num_models):
             results = []
             for name, value in metric_values.items():
-                float_value = value[idx].item()
-                results.append(dict(name=name, value=float_value))
+                v = value[idx]
+
+                if v.ndim == 0:
+                    # scalar metric
+                    results.append(dict(name=name, value=v.item()))
+                else:
+                    # per-species metric:
+                    counts = metric_counters[name]
+
+                    for z in range(v.shape[0]):
+                        if counts[z] > 0:
+                            results.append(
+                                dict(
+                                    name=f"{name}_{z}",
+                                    value=v[z].item(),
+                                )
+                            )
             raw_logs.append(results)
 
         assert len(raw_logs) == len(log_collection)
