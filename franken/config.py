@@ -147,7 +147,7 @@ class HPSearchConfig:
 
 @dataclass
 class DatasetConfig:
-    name: str | None = "custom"
+    name: str | None = None
     """Dataset name. Can be either one of the predefined datasets, or a custom one."""
 
     train_path: str | None = None

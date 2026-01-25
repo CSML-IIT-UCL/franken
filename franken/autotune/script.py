@@ -257,7 +257,6 @@ def get_dataset_paths(
                 None  # TODO: This is not very good, check with our datasets!
             )
     except KeyError:
-        logger.info(f"Dataset with name '{dataset_name}' not found in registry")
         if train_path is None:
             raise ValueError(
                 "Either a valid 'dataset_name' or 'train_path' must be "
