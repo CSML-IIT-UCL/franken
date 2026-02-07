@@ -8,8 +8,7 @@ covariance/coefficients before solving.
 torchrun --standalone --nnodes=1 --nproc-per-node=4 franken.autotune \
     --train-path="train_dataset.xyz" \
     --backbone=mace --mace.path-or-id "mace_mp/small" \
-    --jac-chunk-size "auto" \
-    --rf=gaussian --gaussian.num-rf 8192 --gaussian.length-scale="[5.,10.,20.]"
+    --rf=gaussian --gaussian.num-rf 4096 --gaussian.length-scale="[5.,10.,20.]"
 ```
 
 If you see a `FileNotFoundError`, call the script via its absolute path, for example:
@@ -36,7 +35,5 @@ torchrun --standalone --nnodes=1 --nproc-per-node="${SLURM_NTASKS_PER_NODE}" "$E
     --train-path="train_dataset.xyz" \
     --val-path="valid_dataset.xyz" \
     --backbone=mace --mace.path-or-id "mace_mp/small" --mace.interaction-block 2 \
-    --force-weight=0.99 \
-    --jac-chunk-size "auto" \
     --rf=gaussian --gaussian.num-rf 4096 --gaussian.length-scale="[5.,10.,20.]"
 ```
