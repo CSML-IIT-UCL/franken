@@ -1,8 +1,6 @@
 # Distributed training
 
-Franken supports data-parallel training across multiple GPUs via `torchrun`. Each rank processes a shard of the
-dataset, accumulates local covariance/coefficients, and the results are summed across ranks to obtain the global
-covariance/coefficients before solving.
+Franken supports data-parallel training across multiple GPUs via Pytorch distributed support. Each rank processes a shard of the dataset, accumulates local covariance, and the results are summed to obtain the global covariance before solving.
 
 ```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=4 franken.autotune \
