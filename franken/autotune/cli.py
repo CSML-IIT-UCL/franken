@@ -549,6 +549,13 @@ def parse_cli(argv):
     parser, groups = build_parser(True)
     args = parser.parse_args(argv)
 
+    if not getattr(args, "dataset_name", None) and not getattr(
+        args, "train_path", None
+    ):
+        parser.error(
+            "Either the training dataset path (--train-path) or a dataset registry item (--dataset-name) must be provided to load a training dataset."
+        )
+
     groups["backbone"].validate_required(parser, args)
     groups["rfs"].validate_required(parser, args)
 
