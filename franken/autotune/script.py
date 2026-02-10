@@ -353,4 +353,4 @@ if __name__ == "__main__":
 
 
 # For sphinx docs
-get_parser_fn = build_parser()
+get_parser_fn = lambda: build_parser()  # noqa: E731
