@@ -16,6 +16,7 @@ from franken.config import (
     DatasetConfig,
     HPSearchConfig,
     DEFAULT_AUTOTUNE_METRICS,
+    DEFAULT_BEST_MODEL_SELECTION,
 )
 
 
@@ -512,6 +513,12 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "metrics"),
     )
     parser.add_argument(
+        "--best-model-selection",
+        nargs="+",
+        default=DEFAULT_BEST_MODEL_SELECTION.copy(),
+        help=get_field_docstring(AutotuneConfig, "best_model_selection"),
+    )
+    parser.add_argument(
         "--global-scaling",
         action="store_true",
         default=False,
@@ -582,6 +589,7 @@ def parse_cli(argv):
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
         metrics=args.metrics,
+        best_model_selection=args.best_model_selection,
         scale_by_species=not args.global_scaling,
         jac_chunk_size=args.jac_chunk_size,
         run_dir=args.run_dir,

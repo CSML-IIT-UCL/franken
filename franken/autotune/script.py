@@ -15,11 +15,12 @@ from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
+    DEFAULT_AUTOTUNE_METRICS,
+    DEFAULT_BEST_MODEL_SELECTION,
     HPSearchConfig,
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
-    DEFAULT_AUTOTUNE_METRICS,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
@@ -151,9 +152,18 @@ def run_autotune(
     jac_chunk_size: int | Literal["auto"],
     trainer: BaseTrainer,
     metrics: list[str] | None = None,
+    best_model_selection: list[str] | None = None,
 ):
     if metrics is None:
         metrics = DEFAULT_AUTOTUNE_METRICS.copy()
+    if best_model_selection is None:
+        best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
+
+    for metric in best_model_selection:
+        if metric not in metrics:
+            raise ValueError(
+                f"best_model_selection metric '{metric}' is not present in computed metrics {metrics}"
+            )
 
     current_best = BestTrial(None, None)
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
@@ -185,7 +195,13 @@ def run_autotune(
         )
         if dist_utils.get_rank() == 0:
             if trainer.log_dir is not None:
-                trainer.serialize_logs(model, logs, weights, split_for_best_model)
+                trainer.serialize_logs(
+                    model,
+                    logs,
+                    weights,
+                    split_for_best_model,
+                    best_model_selection=best_model_selection,
+                )
         dist_utils.barrier()
 
         # current best model update
@@ -333,6 +349,7 @@ def autotune(cfg: AutotuneConfig):
             solver_cfg=cfg.solver,
             loaders=loaders,
             metrics=cfg.metrics,
+            best_model_selection=cfg.best_model_selection,
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,
             trainer=trainer,
