@@ -377,7 +377,7 @@ class AutotuneConfig:
             "forces_cosim",
         ]
     )
-    """Metrics to compute during evaluation."""
+    """Metrics to compute during evaluation. Options: `energy_MAE`, `forces_MAE`, `energy_RMSE`, `forces_RMSE`, `forces_MAE_species`, `forces_RMSE_species`, `forces_cosim`. """
 
     scale_by_species: bool = True
     """how to scale the GNN features, whether globally (across species) or individually per species."""
