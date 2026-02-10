@@ -184,7 +184,6 @@ def run_autotune(
     if best_model_selection is None:
         best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
 
-
     current_best = BestTrial(None, None)
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
     solver_param_grid = create_solver_hpsearch_grid(solver_cfg)
