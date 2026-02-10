@@ -66,6 +66,7 @@ Advantages of Franken
    topics/installation.md
    topics/minimal_example.md
    topics/model_registry.md
+   topics/metrics.md
    topics/multigpu.md
    topics/lammps.md
 
