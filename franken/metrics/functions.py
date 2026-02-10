@@ -200,6 +200,12 @@ class ForcesMAESpecies(BaseMetric):
         # unit conversion: eV/Å → meV/Å
         mae = mae * 1000
 
+        # store average across present species at index 0
+        species_mask = mask.clone()
+        species_mask[0] = False
+        if species_mask.any():
+            mae[:, 0] = mae[:, species_mask].mean(dim=1)
+
         if reset:
             self.reset()
 
