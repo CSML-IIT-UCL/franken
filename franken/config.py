@@ -318,6 +318,7 @@ class SolverConfig:
     )
     """Controls how much weight the forces term, as opposed to the energy term has in the loss. Should be a number between 0 and 1."""
 
+
 DEFAULT_AUTOTUNE_METRICS = [
     "energy_MAE",
     "forces_MAE",
@@ -326,6 +327,7 @@ DEFAULT_AUTOTUNE_METRICS = [
     "forces_MAE_species",
     "forces_cosim",
 ]
+
 
 @dataclass
 class AutotuneConfig:
