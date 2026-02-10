@@ -184,11 +184,6 @@ def run_autotune(
     if best_model_selection is None:
         best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
 
-    for metric in best_model_selection:
-        if metric not in metrics:
-            raise ValueError(
-                f"best_model_selection metric '{metric}' is not present in computed metrics {metrics}"
-            )
 
     current_best = BestTrial(None, None)
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
