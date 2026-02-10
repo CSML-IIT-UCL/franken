@@ -5,24 +5,17 @@
 Franken models can be easily trained using the autotune CLI tool:
 ```bash
 franken.autotune \
-    --train-path train.xyz \
-    --val-path val.xyz \
-    --backbone=mace --mace.path-or-id "mace_mp/small" --mace.interaction-block 2 \
-    --rf=ms-gaussian --ms-gaussian.num-rf 4096 --ms-gaussian.length-scale-num 5\
+    --train-path train.xyz --val-path val.xyz \
+    --backbone=mace --mace.path-or-id "mace_mp/small" \
+    --rf=ms-gaussian --ms-gaussian.num-rf 8192 --ms-gaussian.length-scale-num 5\
     --ms-gaussian.length-scale-low 1  --ms-gaussian.length-scale-high 32 \
-    --force-weight=0.99 \
-    --l2-penalty="(-10, -6, 5, log)" \
-    --metrics energy_MAE forces_MAE forces_MAE_species \
-    --jac-chunk-size "auto"
 ```
-
-You can customize which evaluation metrics are computed via `--metrics`. If omitted, a default set of metrics is computed.
 
 This will create a folder `run_DATE_TIME_...` containing:
 * `best_ckpt.pt`  -->  model checkpoint
 * `best.json`  -->  train/val/test metrics for the best model
 * `config.json`  -->  training configuration
-* `log.json`  -->  metrics for all tested models (in case of hyperparameter optimization:)
+* `log.json`  -->  metrics for all tested models (hyperparameter optimization)
 
 Below is an example `best.json` file, which contains info about the **metrics**, **timings**, and **hyperparameters**.
 
@@ -42,14 +35,12 @@ Below is an example `best.json` file, which contains info about the **metrics**,
             "forces_MAE": 15.919811367988586,
             "energy_RMSE": 0.31621758133552114,
             "forces_RMSE": 20.368873955871486,
-            "forces_cosim": 0.9990022741258144
         },
         "validation": {
             "energy_MAE": 0.23749234564490368,
             "forces_MAE": 16.388884401321413,
             "energy_RMSE": 0.31755570717758935,
             "forces_RMSE": 20.917586551063245,
-            "forces_cosim": 0.9989026814699173
         }
     },
     "hyperparameters": {

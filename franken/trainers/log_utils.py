@@ -11,6 +11,7 @@ import torch
 
 import franken.metrics
 import franken.utils.distributed as dist_utils
+from franken.config import DEFAULT_BEST_MODEL_SELECTION
 
 
 logger = logging.getLogger("franken")
@@ -279,7 +280,7 @@ class LogCollection:
 
     def get_best_model(
         self,
-        metrics_to_minimize: list[str] = ["energy_MAE", "forces_MAE"],
+        metrics_to_minimize: list[str] | None = None,
         p: int = 1,
         split: DataSplit = DataSplit.TRAIN,
     ) -> LogEntry:
@@ -289,9 +290,32 @@ class LogCollection:
         by minimizing their ``p``-norm.
         The function returns a dictionary with information about the best model.
         """
-        available_metrics = franken.metrics.available_metrics()
+
+        if metrics_to_minimize is None:
+            metrics_to_minimize = DEFAULT_BEST_MODEL_SELECTION.copy()
+        if len(metrics_to_minimize) == 0:
+            raise ValueError(
+                "`metrics_to_minimize` (in best_model_selection) must contain at least one metric."
+            )
+
+        available_metrics = {
+            metric.name
+            for entry in self.logs
+            for metric in entry.metrics
+            if metric.split == split
+        }
+
         for metric in metrics_to_minimize:
-            assert metric in available_metrics, f"Unknown {metric=}"
+            if metric.endswith("_species") and metric not in available_metrics:
+                raise ValueError(
+                    f"Metric '{metric}' is species-resolved and cannot be minimized directly. "
+                    f"Use '{metric}_average' for the species average, or one of the per-species "
+                    f"metrics like '{metric}_<Z>'."
+                )
+            assert (
+                metric in available_metrics
+            ), f"Unknown {metric=} for split={split}. Available: {sorted(available_metrics)}"
+
         costs = np.stack(
             [self.get_metric(m, split=split) for m in metrics_to_minimize], axis=-1
         )
