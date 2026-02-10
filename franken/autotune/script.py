@@ -93,12 +93,37 @@ def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) 
     for k, v in rf_params.to_ckpt().items():
         fmt_val = format(v, ".3f" if isinstance(v, float) else "")
         hp_summary += f" {k:^7}: {fmt_val:^7} |"
-    try:
-        energy_error = current_best.log.get_metric("energy_MAE", DataSplit.VALIDATION)
-        forces_error = current_best.log.get_metric("forces_MAE", DataSplit.VALIDATION)
-    except KeyError:
-        energy_error = current_best.log.get_metric("energy_MAE", DataSplit.TRAIN)
-        forces_error = current_best.log.get_metric("forces_MAE", DataSplit.TRAIN)
+
+    def _get_first_available_metric(
+        candidates: list[str],
+        splits: list[DataSplit],
+    ) -> float | None:
+        for split in splits:
+            for name in candidates:
+                try:
+                    return current_best.log.get_metric(name, split)
+                except KeyError:
+                    pass
+        return None
+
+    energy_error = _get_first_available_metric(
+        ["energy_MAE", "energy_RMSE"],
+        [DataSplit.VALIDATION, DataSplit.TRAIN],
+    )
+    forces_error = _get_first_available_metric(
+        [
+            "forces_MAE",
+            "forces_MAE_species_average",
+            "forces_RMSE",
+            "forces_RMSE_species_average",
+        ],
+        [DataSplit.VALIDATION, DataSplit.TRAIN],
+    )
+
+    if energy_error is None:
+        energy_error = float("nan")
+    if forces_error is None:
+        forces_error = float("nan")
 
     hp_summary += (
         f" Best trial {current_best.trial_id} (energy {energy_error:.2f} meV/atom - "
