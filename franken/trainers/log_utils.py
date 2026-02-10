@@ -294,7 +294,9 @@ class LogCollection:
         if metrics_to_minimize is None:
             metrics_to_minimize = DEFAULT_BEST_MODEL_SELECTION.copy()
         if len(metrics_to_minimize) == 0:
-            raise ValueError("`metrics_to_minimize` (in best_model_selection) must contain at least one metric.")
+            raise ValueError(
+                "`metrics_to_minimize` (in best_model_selection) must contain at least one metric."
+            )
 
         available_metrics = {
             metric.name
