@@ -12,8 +12,11 @@ franken.autotune \
     --ms-gaussian.length-scale-low 1  --ms-gaussian.length-scale-high 32 \
     --force-weight=0.99 \
     --l2-penalty="(-10, -6, 5, log)" \
+    --metrics energy_MAE forces_MAE forces_MAE_species \
     --jac-chunk-size "auto"
 ```
+
+You can customize which evaluation metrics are computed via `--metrics`. If omitted, a default set of metrics is computed.
 
 This will create a folder `run_DATE_TIME_...` containing:
 * `best_ckpt.pt`  -->  model checkpoint

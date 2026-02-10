@@ -57,6 +57,7 @@ franken.autotune \
     --ms-gaussian.length-scale-low 1  --ms-gaussian.length-scale-high 32 \
     --force-weight=0.99 \
     --l2-penalty="(-10, -6, 5, log)" \
+    --metrics energy_MAE forces_MAE \
     --jac-chunk-size "auto"
 ```
 

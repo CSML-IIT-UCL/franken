@@ -15,6 +15,7 @@ from franken.config import (
     SolverConfig,
     DatasetConfig,
     HPSearchConfig,
+    DEFAULT_AUTOTUNE_METRICS,
 )
 
 
@@ -505,6 +506,12 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
     )
     parser.add_argument(
+        "--metrics",
+        nargs="+",
+        default=DEFAULT_AUTOTUNE_METRICS.copy(),
+        help=get_field_docstring(AutotuneConfig, "metrics"),
+    )
+    parser.add_argument(
         "--global-scaling",
         action="store_true",
         default=False,
@@ -574,6 +581,7 @@ def parse_cli(argv):
         save_every_model=args.save_every_model,
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
+        metrics=args.metrics,
         scale_by_species=not args.global_scaling,
         jac_chunk_size=args.jac_chunk_size,
         run_dir=args.run_dir,

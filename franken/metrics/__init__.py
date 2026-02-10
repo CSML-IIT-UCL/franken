@@ -9,7 +9,10 @@ __all__ = ["registry"]
 
 
 def available_metrics() -> list[str]:
-    return registry.available_metrics
+    metrics = registry.available_metrics
+    metrics.append("forces_MAE_species_average")
+    metrics.append("forces_RMSE_species_average")
+    return metrics
 
 
 def register(name: str, metric_class: type) -> None:

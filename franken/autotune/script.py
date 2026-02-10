@@ -19,6 +19,7 @@ from franken.config import (
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
+    DEFAULT_AUTOTUNE_METRICS,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
@@ -149,7 +150,11 @@ def run_autotune(
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
     trainer: BaseTrainer,
+    metrics: list[str] | None = None,
 ):
+    if metrics is None:
+        metrics = DEFAULT_AUTOTUNE_METRICS.copy()
+
     current_best = BestTrial(None, None)
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
     solver_param_grid = create_solver_hpsearch_grid(solver_cfg)
@@ -173,13 +178,7 @@ def run_autotune(
                 loader,
                 logs,
                 weights,
-                metrics=[
-                    "energy_MAE",
-                    "forces_MAE",
-                    "energy_RMSE",
-                    "forces_RMSE",
-                    "forces_cosim",
-                ],
+                metrics=metrics,
             )
         split_for_best_model = (
             DataSplit.VALIDATION if "val" in loaders else DataSplit.TRAIN
@@ -333,6 +332,7 @@ def autotune(cfg: AutotuneConfig):
             rf_cfg=cfg.rfs,
             solver_cfg=cfg.solver,
             loaders=loaders,
+            metrics=cfg.metrics,
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,
             trainer=trainer,
@@ -357,4 +357,4 @@ if __name__ == "__main__":
 
 
 # For sphinx docs
-get_parser_fn = build_parser()
+get_parser_fn = lambda: build_parser()  # noqa: E731
