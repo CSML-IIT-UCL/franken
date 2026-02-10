@@ -146,6 +146,7 @@ def run_autotune(
     rf_cfg: RFConfig,
     solver_cfg: SolverConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
+    metrics: list[str],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
     trainer: BaseTrainer,
@@ -173,15 +174,7 @@ def run_autotune(
                 loader,
                 logs,
                 weights,
-                metrics=[
-                    "energy_MAE",
-                    "forces_MAE",
-                    "energy_RMSE",
-                    "forces_RMSE",
-                    "forces_MAE_species",
-                    "forces_RMSE_species",
-                    "forces_cosim",
-                ],
+                metrics=metrics,
             )
         split_for_best_model = (
             DataSplit.VALIDATION if "val" in loaders else DataSplit.TRAIN
@@ -335,6 +328,7 @@ def autotune(cfg: AutotuneConfig):
             rf_cfg=cfg.rfs,
             solver_cfg=cfg.solver,
             loaders=loaders,
+            metrics=cfg.metrics,
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,
             trainer=trainer,

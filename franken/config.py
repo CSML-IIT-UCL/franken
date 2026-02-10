@@ -367,6 +367,18 @@ class AutotuneConfig:
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
+    metrics: list[str] = field(
+        default_factory=lambda: [
+            "energy_MAE",
+            "forces_MAE",
+            "energy_RMSE",
+            "forces_RMSE",
+            "forces_MAE_species",
+            "forces_cosim",
+        ]
+    )
+    """Metrics to compute during evaluation."""
+
     scale_by_species: bool = True
     """how to scale the GNN features, whether globally (across species) or individually per species."""
 
