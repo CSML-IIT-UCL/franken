@@ -311,6 +311,24 @@ class RandomFeaturesTrainer(BaseTrainer):
             metric_values[metric.name] = value
             metric_counters[metric.name] = metric.samples_counter
 
+        # Derive average metrics from species resolved ones
+        for name in metrics:
+            if "species" in name:
+                species_values = metric_values[name]  # (M, Z)
+                if species_values.ndim == 2:
+                    counts = metric_counters[name]  # (Z,)
+                    mask = counts > 0
+                    if mask.any():
+                        weighted = species_values[:, mask].mean(dim=1)
+                    else:
+                        weighted = torch.full(
+                            (num_models,),
+                            float("nan"),
+                            device=species_values.device,
+                            dtype=species_values.dtype,
+                        )
+                    metric_values[name + "_average"] = weighted
+
         # Explode metric values into list of MetricLog
         raw_logs = []
         for idx in range(num_models):

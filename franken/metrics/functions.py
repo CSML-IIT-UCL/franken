@@ -101,61 +101,6 @@ class ForcesMAE(BaseMetric):
         self.buffer_add(error, num_samples=num_samples)
 
 
-class ForcesMAEWeighted(BaseMetric):
-    """Average of MAE per species."""
-
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__(
-            "forces_MAE_weighted", device, dtype, units, requires_species=True
-        )
-
-    def update(
-        self,
-        predictions: Target,
-        targets: Target,
-        atomic_numbers: torch.Tensor,
-    ) -> None:
-
-        if targets.forces is None or predictions.forces is None:
-            raise AttributeError("Forces must be specified to compute the MAE.")
-
-        assert atomic_numbers.ndim == 1
-        assert atomic_numbers.shape[0] == targets.forces.shape[-2]
-
-        # Same num_samples logic as ForcesMAE
-        num_samples = 1
-        if targets.forces.ndim > 2:
-            num_samples = targets.forces.shape[0]
-        elif targets.forces.ndim < 2:
-            raise ValueError("Forces must be a 2D tensor or a batch of 2D tensors.")
-
-        # abs error in meV/Å
-        # shape: (M, N, 3) or (N, 3)
-        error = 1000 * torch.abs(targets.forces - predictions.forces)
-
-        # mean over force components
-        # -> (M, N) or (N,)
-        error = error.mean(dim=-1)
-
-        species = torch.unique(atomic_numbers)
-
-        # per-species mean over atoms
-        species_errors = []
-        for z in species:
-            mask = atomic_numbers == z  # (N,)
-            species_errors.append(error[..., mask].mean(dim=-1))
-
-        # mean over species
-        # -> (M,) or ()
-        error = torch.stack(species_errors, dim=0).mean(dim=0)
-
-        self.buffer_add(error, num_samples=num_samples)
-
-
 class ForcesMAESpecies(BaseMetric):
     """
     Returns force MAE computed for each species.
@@ -197,13 +142,13 @@ class ForcesMAESpecies(BaseMetric):
         assert atomic_numbers.shape[0] == targets.forces.shape[-2]
         assert atomic_numbers.max() <= self.Z_MAX
 
-        # |ΔF| averaged over Cartesian components
+        if targets.forces is None or predictions.forces is None:
+            raise AttributeError("Forces must be specified to compute the MAE.")
+        # |ΔF| in eV/Å, averaged over Cartesian components
         # shapes:
         #   single model: (N,)
         #   ensemble:     (M, N)
         error = torch.abs(targets.forces - predictions.forces).mean(dim=-1)
-
-        # ensure model dimension exists
         if error.ndim == 1:
             error = error.unsqueeze(0)  # (1, N)
 
@@ -218,8 +163,10 @@ class ForcesMAESpecies(BaseMetric):
                 dtype=self.dtype,
             )
 
+        species = torch.unique(atomic_numbers)
+
         # accumulate per species
-        for z in torch.unique(atomic_numbers):
+        for z in species:
             z_int = int(z)
             mask = atomic_numbers == z  # (N,)
 
@@ -372,5 +319,4 @@ registry.register("forces_MAE", ForcesMAE)
 registry.register("forces_RMSE", ForcesRMSE)
 registry.register("forces_RMSE2", ForcesRMSE2)
 registry.register("forces_cosim", ForcesCosineSimilarity)
-registry.register("forces_MAE_weighted", ForcesMAEWeighted)
 registry.register("forces_MAE_species", ForcesMAESpecies)
