@@ -37,8 +37,8 @@ from franken.config import AutotuneConfig
 
 cfg = AutotuneConfig(
     ...,
-    metrics=["energy_MAE", "forces_MAE_species"],
-    best_model_selection=["energy_MAE, forces_MAE"]
+    metrics=["energy_MAE", "forces_MAE", "forces_MAE_species"],
+    best_model_selection=["energy_MAE", "forces_MAE"]
 )
 ```
 
