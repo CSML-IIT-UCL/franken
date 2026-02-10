@@ -318,6 +318,14 @@ class SolverConfig:
     )
     """Controls how much weight the forces term, as opposed to the energy term has in the loss. Should be a number between 0 and 1."""
 
+DEFAULT_AUTOTUNE_METRICS = [
+    "energy_MAE",
+    "forces_MAE",
+    "energy_RMSE",
+    "forces_RMSE",
+    "forces_MAE_species",
+    "forces_cosim",
+]
 
 @dataclass
 class AutotuneConfig:
@@ -367,16 +375,7 @@ class AutotuneConfig:
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
-    metrics: list[str] = field(
-        default_factory=lambda: [
-            "energy_MAE",
-            "forces_MAE",
-            "energy_RMSE",
-            "forces_RMSE",
-            "forces_MAE_species",
-            "forces_cosim",
-        ]
-    )
+    metrics: list[str] = field(default_factory=lambda: DEFAULT_AUTOTUNE_METRICS.copy())
     """Metrics to compute during evaluation. Options: `energy_MAE`, `forces_MAE`, `energy_RMSE`, `forces_RMSE`, `forces_MAE_species`, `forces_RMSE_species`, `forces_cosim`. """
 
     scale_by_species: bool = True

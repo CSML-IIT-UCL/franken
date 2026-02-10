@@ -15,6 +15,7 @@ from franken.config import (
     SolverConfig,
     DatasetConfig,
     HPSearchConfig,
+    DEFAULT_AUTOTUNE_METRICS,
 )
 
 
@@ -507,14 +508,7 @@ def build_parser(return_groups: bool = False):
     parser.add_argument(
         "--metrics",
         nargs="+",
-        default=[
-            "energy_MAE",
-            "forces_MAE",
-            "energy_RMSE",
-            "forces_RMSE",
-            "forces_MAE_species",
-            "forces_cosim",
-        ],
+        default=DEFAULT_AUTOTUNE_METRICS.copy(),
         help=get_field_docstring(AutotuneConfig, "metrics"),
     )
     parser.add_argument(

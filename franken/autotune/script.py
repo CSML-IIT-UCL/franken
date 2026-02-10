@@ -19,6 +19,7 @@ from franken.config import (
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
+    DEFAULT_AUTOTUNE_METRICS,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
@@ -146,11 +147,14 @@ def run_autotune(
     rf_cfg: RFConfig,
     solver_cfg: SolverConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
-    metrics: list[str],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
     trainer: BaseTrainer,
+    metrics: list[str] | None = None,
 ):
+    if metrics is None:
+        metrics = DEFAULT_AUTOTUNE_METRICS.copy()
+
     current_best = BestTrial(None, None)
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
     solver_param_grid = create_solver_hpsearch_grid(solver_cfg)
