@@ -225,6 +225,7 @@ class FrankenMACE(torch.nn.Module):
         for i, (interaction, product) in enumerate(
             zip(self.interactions, self.products)
         ):
+            sc: None | torch.Tensor = None
             if self.is_mace_v3_14:
                 node_feats, sc = interaction(
                     node_attrs=node_attrs,
