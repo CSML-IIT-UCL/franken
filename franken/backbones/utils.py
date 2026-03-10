@@ -215,7 +215,6 @@ def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
                 import fairchem.core
 
                 is_fairchem_gt2 = Version(fairchem.core.__version__) >= Version("2")
-                print(f"{is_fairchem_gt2=}")
             except:  # noqa: E722
                 fairchem_importable = False
             err_msg = f"franken wasn't able to load {gnn_backbone_id}. "
@@ -256,6 +255,15 @@ def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
             logger.error(err_msg, exc_info=import_err)
             raise
         return FrankenSevenn.load_from_checkpoint(
+            ckpt_path, gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
+        )
+    elif backbone_family == "pet":
+        try:
+            from franken.backbones.wrappers.pet_wrap import PETModelWrapper
+        except ImportError as import_err:
+            logger.error(err_msg, exc_info=import_err)
+            raise
+        return PETModelWrapper.load_from_checkpoint(
             ckpt_path, gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
         )
     else:

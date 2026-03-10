@@ -351,6 +351,23 @@ class BaseAtomsDataset(torch.utils.data.Dataset, abc.ABC):
                 backbone_id,
                 precompute=True,
             )
+        elif backbone_family == "pet":
+            try:
+                from franken.data.pet import PETAtomsDataset
+            except ImportError as e:
+                logger.error(
+                    f"franken wasn't able to load {backbone_id}. Is {backbone_family} installed?",
+                    exc_info=e,
+                )
+                raise
+            return PETAtomsDataset(
+                data_path,
+                split,
+                num_random_subsamples,
+                subsample_rng,
+                backbone_id,
+                precompute=True,
+            )
         elif backbone_family is None:
             return SimpleAtomsDataset(
                 data_path, split, num_random_subsamples, subsample_rng

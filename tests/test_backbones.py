@@ -1,10 +1,12 @@
+import os
+
 import pytest
 import torch
 import importlib.util
 import e3nn
 
 from franken.backbones import REGISTRY
-from franken.backbones.utils import load_checkpoint
+from franken.backbones.utils import get_checkpoint_path, load_checkpoint
 from franken.config import BackboneConfig, GaussianRFConfig
 from franken.data import BaseAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
@@ -18,6 +20,7 @@ from franken.utils.misc import no_jit
 HAS_MACE = importlib.util.find_spec("mace") is not None
 HAS_SEVENN = importlib.util.find_spec("sevenn") is not None
 HAS_FAIRCHEM = importlib.util.find_spec("fairchem") is not None
+HAS_UPET = True
 
 # Build parametrized model list with skip marks when deps are missing
 models = []
@@ -34,6 +37,7 @@ for name in REGISTRY.keys():
         marks.append(pytest.mark.xfail(Version(e3nn.__version__) < Version("0.5.0"), reason="Known incompatibility", strict=True))
     models.append(pytest.param(name, marks=marks))
 
+
 @pytest.mark.parametrize("model_name", models)
 def test_backbone_loading(model_name):
     registry_entry = REGISTRY[model_name]
@@ -41,10 +45,30 @@ def test_backbone_loading(model_name):
         {
             "family": registry_entry["kind"],
             "path_or_id": model_name,
-            "interaction_block": 2,
         }
     )
+    ckpt_path = get_checkpoint_path(gnn_config.path_or_id)
     load_checkpoint(gnn_config)
+    assert os.path.isfile(ckpt_path), f"No file found at {ckpt_path}"
+
+
+@pytest.mark.parametrize("model_name", models)
+def test_data_loading(model_name):
+    registry_entry = REGISTRY[model_name]
+    gnn_config = BackboneConfig.from_ckpt(
+        {
+            "family": registry_entry["kind"],
+            "path_or_id": model_name,
+        }
+    )
+    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+    dataset = BaseAtomsDataset.from_path(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_config,
+    )
+    config, target = dataset[0] # pyright: ignore[reportGeneralTypeIssues]
+    assert config.atom_pos.shape == (2, 3)
 
 
 @pytest.mark.parametrize("model_name", models)
@@ -54,7 +78,6 @@ def test_descriptors(model_name):
         {
             "family": registry_entry["kind"],
             "path_or_id": model_name,
-            "interaction_block": 2,
         }
     )
     bbone = load_checkpoint(gnn_config)
@@ -66,8 +89,8 @@ def test_descriptors(model_name):
         gnn_config=gnn_config,
     )
     data, _ = dataset[0]  # type: ignore
-    expected_fdim = bbone.feature_dim()
     features = bbone.descriptors(data)
+    expected_fdim = bbone.feature_dim()
     assert features.shape[1] == expected_fdim
 
 
@@ -81,7 +104,6 @@ def test_force_maps(model_name):
         {
             "family": registry_entry["kind"],
             "path_or_id": model_name,
-            "interaction_block": 2,
         }
     )
     # Get a random data sample
