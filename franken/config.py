@@ -170,8 +170,8 @@ class BackboneConfig(ABC):
     """Path to the GNN checkpoint, or an ID corresponding to a predefined checkpoint.
     To list the available IDs please run the `franken.backbones list` command."""
 
-    interaction_block: int
-    """GNN layer out of which the features are extracted."""
+    # interaction_block: int
+    # """GNN layer out of which the features are extracted."""
 
     family: ClassVar[str]
 
@@ -206,6 +206,8 @@ class BackboneConfig(ABC):
             cls = FairchemBackboneConfig
         elif ckpt["family"].lower() == "sevenn":
             cls = SevennBackboneConfig
+        elif ckpt["family"].lower() == "pet":
+            cls = PETBackboneConfig
         else:
             raise ValueError(ckpt["family"])
         init_args = deepcopy(ckpt)
@@ -213,21 +215,21 @@ class BackboneConfig(ABC):
         return cls(**init_args)
 
 
-@dataclass
+@dataclass(slots=True)
 class MaceBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "mace"
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
 
 
-@dataclass
+@dataclass(slots=True)
 class FairchemBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "fairchem"
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
 
 
-@dataclass
+@dataclass(slots=True)
 class SevennBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "sevenn"
     interaction_block: int = 2
@@ -238,6 +240,11 @@ class SevennBackboneConfig(BackboneConfig):
 
     append_layers: bool = True
     """Whether to take only the features from the last interaction layer, or to concatenate them all."""
+
+
+@dataclass(slots=True)
+class PETBackboneConfig(BackboneConfig):
+    family: ClassVar[str] = "pet"
 
 
 @dataclass

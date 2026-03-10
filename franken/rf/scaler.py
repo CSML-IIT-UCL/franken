@@ -196,7 +196,9 @@ class FeatureScaler(torch.nn.Module):
         Returns:
             torch.Tensor: Normalized GNN features
         """
-        assert descriptors.shape[1] == self.input_dim
+        assert (
+            descriptors.shape[1] == self.input_dim
+        ), f"Found descriptors of shape {descriptors.shape[1]}. Expected of shape {self.input_dim}"
 
         if not self.scale_by_Z:
             # Global scaling, simply normalize all descriptors
