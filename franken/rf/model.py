@@ -319,7 +319,9 @@ class FrankenPotential(torch.nn.Module):
             # Scalar case, single gradient
             gradient = torch.autograd.grad(outputs=[energy], inputs=[data.atom_pos])[0]
         else:
-            # Vector case, compute gradients for each element independently
+            # Vector case, compute gradients for each element independently.
+            # This happens when several energies are computed when testing
+            # multiple models at the same time.
             gradients: list[torch.Tensor] = []
             for i in range(energy.shape[0]):
                 grad_i = torch.autograd.grad(
@@ -435,16 +437,22 @@ class FrankenPotential(torch.nn.Module):
         data: Configuration,
         weights: Optional[torch.Tensor] = None,
         add_energy_shift: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        compute_forces: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """
         See docstring of :meth:`~franken.rf.model.FrankenPotential.energy_and_forces`.
 
         This function defaults to using the 'torch.autograd' strategy which allows the model
         to be jit-compiled.
         """
-        grad_energy, energy = self.grad_energy_autograd(weights, data)
-        assert grad_energy is not None
-        forces = -grad_energy
+        if not compute_forces:
+            energy = self.energy(weights, data)
+            forces = None
+        else:
+            grad_energy, energy = self.grad_energy_autograd(weights, data)
+            assert grad_energy is not None
+            forces = -grad_energy.detach()
+            energy = energy.detach()
         if add_energy_shift:
             energy = energy + self.energy_shift(data.atomic_numbers)
-        return energy.detach(), forces.detach()
+        return energy, forces
