@@ -9,7 +9,7 @@
 Franken is an open-source library that can be used to enhance the accuracy of atomistic foundation models. It can be used for molecular dynamics simulations, and has a focus on computational efficiency.
 
 `franken` features include:
- - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [SchNet](https://github.com/facebookresearch/fairchem))
+ - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [SchNet](https://github.com/facebookresearch/fairchem), [UPET](https://github.com/lab-cosmo/upet/tree/main))
  - Automatic [hyperparameter tuning](https://franken.readthedocs.io/notebooks/autotune.html) simplifies the adaptation procedure, for an out-of-the-box user experience.
  - Several random-feature approximations to common kernels (e.g. Gaussian, polynomial) are available to flexibly fine-tune any foundation model.
  - Support for running within [LAMMPS](https://www.lammps.org/) molecular dynamics, as well as with [ASE](https://wiki.fysik.dtu.dk/ase/).
@@ -46,7 +46,7 @@ For more details read the [relevant documentation page](https://franken.readthed
 ## Quickstart
 
 ### Train
-You can directly run `franken.autotune` to get started with the `franken` library. 
+You can directly run `franken.autotune` to get started with the `franken` library.
 
 ```bash
 franken.autotune \
@@ -64,7 +64,7 @@ franken.autotune \
 For more details you can check out the [autotune tutorial](https://franken.readthedocs.io/notebooks/autotune.html) or the [getting started notebook](https://franken.readthedocs.io/notebooks/getting_started.html).
 
 ### Inference/MD
-The trained model can be used as a ASE (Atomistic Simulations Environment) calculator for easy inference. 
+The trained model can be used as a ASE (Atomistic Simulations Environment) calculator for easy inference.
 
 ```python
 from franken.calculators import FrankenCalculator
