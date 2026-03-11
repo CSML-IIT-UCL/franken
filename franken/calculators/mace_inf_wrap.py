@@ -134,7 +134,10 @@ class MaceInferenceWrapper(torch.nn.Module):
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Convert a franken model to be able to use it with LAMMPS",
+        description=(
+            "Convert a franken model to be able to use it with the MACE fork of LAMMPS. "
+            "The wrapped model can be based on MACE or PET based GNNs."
+        ),
     )
     parser.add_argument(
         "--model_path",
