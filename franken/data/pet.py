@@ -30,7 +30,8 @@ def convert(ase_frames: list[ase.Atoms], neighbor_list_opt: mta.NeighborListOpti
             natoms=torch.tensor(len(system.types)).view(1),
             pbc=system.pbc,
             cell=system.cell,
-            shifts=nl_values[:, 2:],
+            unit_shifts=nl_values[:, 2:],
+            shifts=nl_values[:, 2:].to(system.cell.dtype) @ system.cell,  # [n_edges, 3]
             edge_index=nl_values[:, :2],
         )
 

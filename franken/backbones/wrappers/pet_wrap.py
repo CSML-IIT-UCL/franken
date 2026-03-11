@@ -226,8 +226,10 @@ class PETModelWrapper(torch.nn.Module):
         # Make torch jit script happy by having everything in local variables
         edge_index = data.edge_index
         cell = data.cell
-        cell_shifts = data.shifts
-        assert cell_shifts is not None and edge_index is not None and cell is not None
+        cell_shifts = data.unit_shifts
+        assert cell_shifts is not None
+        assert edge_index is not None
+        assert cell is not None
         species = data.atomic_numbers
         # **Stage 0: Input Preparation**
         (
