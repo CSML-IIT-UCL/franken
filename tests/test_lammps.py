@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
-from franken.config import GaussianRFConfig, MaceBackboneConfig, MultiscaleGaussianRFConfig
+from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.data import BaseAtomsDataset
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
@@ -27,10 +27,13 @@ RF_PARAMETRIZE = [
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
-def test_lammps_compile(rf_cfg, device):
+@pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
+def test_lammps_compile(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
     unpatch_e3nn()  # needed in case some previous test ran the patching code
-    gnn_cfg = MaceBackboneConfig("mace_mp/small")
+    gnn_cfg = BackboneConfig.from_ckpt(
+        dict(family=backbone[0], path_or_id=backbone[1])
+    )
     temp_dir = None
     try:
         # Step 1: Create a temporary directory for saving the model
