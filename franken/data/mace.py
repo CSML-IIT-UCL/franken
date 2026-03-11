@@ -100,7 +100,7 @@ class MACEAtomsDataset(BaseAtomsDataset):
             atomic_numbers=graph.atomic_numbers,
             natoms=torch.tensor(len(graph.atomic_numbers)).view(1),
             node_attrs=graph.node_attrs,
-            edge_index=graph.edge_index,
+            edge_index=graph.edge_index.T,  # [n_edges, 2]
             shifts=graph.shifts,
             unit_shifts=graph.unit_shifts,
         )
