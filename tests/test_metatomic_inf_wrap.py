@@ -14,7 +14,7 @@ from metatomic.torch import load_atomistic_model
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
-from franken.calculators.metatomic_calc import create_metatomic
+from franken.calculators.metatomic_inf_wrap import create_metatomic
 from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.data import BaseAtomsDataset
 from franken.rf.model import FrankenPotential
