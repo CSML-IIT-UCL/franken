@@ -26,7 +26,7 @@ def are_dicts_close(dict1, dict2, rtol=1e-4, atol=1e-6, verbose=False):
 
     for key in dict1.keys():
         if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
-            if not are_dicts_close(dict1[key], dict2[key], rtol, atol):
+            if not are_dicts_close(dict1[key], dict2[key], rtol, atol, verbose=verbose):
                 return False
         elif isinstance(dict1[key], torch.Tensor) and isinstance(
             dict2[key], torch.Tensor
