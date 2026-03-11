@@ -61,7 +61,7 @@ class Configuration:
             node_attrs = node_attrs.to(device=device, dtype=dtype)
         edge_index = self.edge_index
         if edge_index is not None:
-            edge_index = edge_index.to(device=device, dtype=dtype)
+            edge_index = edge_index.to(device=device)
         shifts = self.shifts
         if shifts is not None:
             shifts = shifts.to(device=device, dtype=dtype)
@@ -79,8 +79,8 @@ class Configuration:
             pbc = pbc.to(device=device, dtype=dtype)
         return Configuration(
             atom_pos=self.atom_pos.to(device=device, dtype=dtype),
-            atomic_numbers=self.atomic_numbers.to(device=device, dtype=dtype),
-            natoms=self.natoms.to(device=device, dtype=dtype),
+            atomic_numbers=self.atomic_numbers.to(device=device),
+            natoms=self.natoms.to(device=device),
             node_attrs=node_attrs,
             edge_index=edge_index,
             shifts=shifts,
