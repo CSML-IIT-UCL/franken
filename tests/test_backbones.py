@@ -27,6 +27,9 @@ models = []
 for name in REGISTRY.keys():
     kind = REGISTRY[name]["kind"]
     marks = []
+    if name in {"PET_OMat/xl_1.0", "PET_OMat/l_1.0", "mace_off/large", "mace_omol/0_4M", "mace_mp/large-0b2", "mace_mp/large"}:
+        marks.append(pytest.mark.skip(reason=f"{name} requires too large a model"))
+        continue
     if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN) or (kind == "fairchem" and not HAS_FAIRCHEM):
         marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
     elif "SchNet" in name:
