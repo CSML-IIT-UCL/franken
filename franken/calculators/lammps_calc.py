@@ -26,11 +26,15 @@ class LammpsFrankenCalculator(torch.nn.Module):
         super().__init__()
 
         self.model = franken_model
-        self.register_buffer("atomic_numbers", self.model.gnn.atomic_numbers)
-        self.register_buffer("r_max", self.model.gnn.r_max)
-        self.register_buffer("num_interactions", self.model.gnn.num_interactions)
+        # the following buffers are all required by the LAMMPS-MACE implementation
+        self.register_buffer("atomic_numbers", self.model.gnn.supported_atomic_types())
+        self.register_buffer("r_max", torch.tensor(self.model.gnn.cutoff_radius()))
+        self.register_buffer(
+            "num_interactions", torch.tensor(self.model.gnn.num_interaction_layers())
+        )
         # this attribute is used for dtype detection in LAMMPS-MACE.
         # See: https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp#314
+        # TODO: We should fake this with a better dtype detection!
         self.model.node_embedding = self.model.gnn.node_embedding
 
         for param in self.model.parameters():
@@ -56,7 +60,9 @@ class LammpsFrankenCalculator(torch.nn.Module):
         """
         # node_attrs is a one-hot representation of the atom types. atom_nums should be the actual atomic numbers!
         # we rely on correct sorting. This is the same as in MACE.
-        atom_nums = self.atomic_numbers[torch.argmax(data["node_attrs"], dim=1)]
+        atom_nums = self.atomic_numbers[
+            torch.argmax(data["node_attrs"], dim=1)
+        ]  # pyright: ignore[reportIndexIssue]
 
         franken_data = Configuration(
             atom_pos=data["positions"].double(),
@@ -69,7 +75,8 @@ class LammpsFrankenCalculator(torch.nn.Module):
             shifts=data["shifts"],
             unit_shifts=data["unit_shifts"],
         )
-        energy, forces = self.model(franken_data)  # type: ignore
+        energy, forces = self.model(franken_data)
+        assert forces is not None
         # Kokkos doesn't like total_energy_local and only looks at node_energy.
         # We hack around this:
         node_energy = energy.repeat(len(atom_nums)).div(len(atom_nums))
@@ -111,7 +118,7 @@ class LammpsFrankenCalculator(torch.nn.Module):
 
         save_path = f"{os.path.splitext(model_path)[0]}-lammps.pt"
         print(f"Saving compiled model to '{save_path}'")
-        lammps_model_compiled.save(save_path)
+        lammps_model_compiled.save(save_path)  # pyright: ignore[reportCallIssue]
         return save_path
 
 
