@@ -4,10 +4,9 @@ import logging
 import os
 from pathlib import Path
 from packaging.version import Version
-
 import requests
-import torch
 
+from franken.backbones.wrappers.base import AtomisticModelWrapper
 from franken.config import BackboneConfig, asdict_with_classvar
 from franken.utils import distributed
 from franken.utils.file_utils import download_file
@@ -199,7 +198,7 @@ def download_checkpoint(gnn_backbone_id: str, cache_dir: str | None = None) -> N
         raise e
 
 
-def load_checkpoint(gnn_config: BackboneConfig) -> torch.nn.Module:
+def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
     gnn_config_dict = asdict_with_classvar(gnn_config)
     gnn_backbone_id = gnn_config_dict.pop("path_or_id")
     backbone_family = gnn_config_dict.pop("family")

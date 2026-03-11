@@ -1,8 +1,9 @@
-from typing import Final, Optional, Tuple
+from typing import Final, List, Optional, Tuple
 import mace
 from packaging.version import Version
 
 import torch
+import metatomic.torch
 from mace.modules.models import MACE
 from mace.modules.utils import get_edge_vectors_and_lengths
 from e3nn.util.jit import compile_mode
@@ -170,7 +171,9 @@ class FrankenMACE(torch.nn.Module):
             "atomic_numbers",
             torch.as_tensor(base_model.atomic_numbers, dtype=torch.int64),
         )
-        self.r_max = base_model.r_max
+        self.r_max: torch.Tensor = (
+            base_model.r_max
+        )  # pyright: ignore[reportAttributeAccessIssue]
         self.register_buffer(
             "num_interactions", torch.tensor(interaction_block, dtype=torch.int64)
         )
@@ -282,6 +285,22 @@ class FrankenMACE(torch.nn.Module):
         for p in self.products:
             nfeat += p.linear.irreps_out[0][0] * (2 * p.linear.irreps_out[0][1][0] + 1)
         return nfeat
+
+    def cutoff_radius(self) -> float:
+        return self.r_max.item()
+
+    def num_interaction_layers(self) -> int:
+        return self.interaction_block
+
+    def supported_atomic_types(self) -> torch.Tensor:
+        return self.atomic_numbers  # pyright: ignore[reportReturnType]
+
+    def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]:
+        return [
+            metatomic.torch.NeighborListOptions(
+                cutoff=self.cutoff_radius(), full_list=True, strict=True
+            )
+        ]
 
     @staticmethod
     def load_from_checkpoint(
