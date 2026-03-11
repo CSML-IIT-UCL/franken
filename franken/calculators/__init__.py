@@ -5,9 +5,11 @@ extended to support your favorite MD software.
 """
 
 from .ase_calc import FrankenCalculator
-from .lammps_calc import LammpsFrankenCalculator
+from .mace_inf_wrap import MaceInferenceWrapper
+from .metatomic_inf_wrap import MetatomicInferenceWrapper
 
 __all__ = (
     "FrankenCalculator",
-    "LammpsFrankenCalculator",
+    "MaceInferenceWrapper",
+    "MetatomicInferenceWrapper",
 )

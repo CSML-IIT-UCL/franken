@@ -17,7 +17,7 @@ from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 
 
-class MetatomicFrankenWrapper(torch.nn.Module):
+class MetatomicInferenceWrapper(torch.nn.Module):
     def __init__(self, franken_model: FrankenPotential):
         super().__init__()
         self.model = franken_model
@@ -56,7 +56,7 @@ class MetatomicFrankenWrapper(torch.nn.Module):
                 natoms=torch.tensor(len(system.types)).view(1),
                 pbc=system.pbc,
                 cell=system.cell,
-                shifts=nl_values[:, 2:],
+                unit_shifts=nl_values[:, 2:],
                 edge_index=nl_values[:, :2],
             )
             # Don't compute_forces. This will be done in the metatomic calculator.
@@ -103,7 +103,7 @@ def create_metatomic(
             f"GNN underlying the franken model ({franken_model.gnn_config.path_or_id}) is not compatible with Metatomic."
         )
     franken_model = franken_model.to(device="cpu", dtype=dtype)
-    mta_wrapper = MetatomicFrankenWrapper(franken_model)
+    mta_wrapper = MetatomicInferenceWrapper(franken_model)
 
     base_metadata = getattr(franken_model.gnn, "metadata", {})
     metadata = ModelMetadata(

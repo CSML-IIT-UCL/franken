@@ -9,12 +9,14 @@ from franken.rf.model import FrankenPotential
 
 
 @jit.compile_mode("script")
-class LammpsFrankenCalculator(torch.nn.Module):
+class MaceInferenceWrapper(torch.nn.Module):
     def __init__(
         self,
         franken_model: FrankenPotential,
     ):
-        """Initialize LAMMPS Calculator
+        """Wraps Franken with a MACE-compatible GNN for inference. This is compatible only with MACE-LAMMPS calculator.
+
+        This model can be jitted and exported for use with the MACE LAMMPS fork.
 
         Args:
             franken_model (FrankenPotential): The base franken model used in this MD calculator
@@ -34,9 +36,15 @@ class LammpsFrankenCalculator(torch.nn.Module):
         )
         # this attribute is used for dtype detection in LAMMPS-MACE.
         # See: https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp#314
-        # TODO: We should fake this with a better dtype detection!
-        self.model.node_embedding = self.model.gnn.node_embedding
-
+        # we setup a dummy attribute
+        dtype = torch.float64  # only supported dtype in Kokkos
+        if hasattr(self.model.gnn, "node_embedding"):
+            self.model.node_embedding = self.model.gnn.node_embedding
+        else:
+            setattr(self.model, "node_embedding", type("Attr", (), {})())
+            setattr(self.model.node_embedding, "linear", type("Attr", (), {})())
+            setattr(self.model.node_embedding.linear, "weight", type("Attr", (), {})())
+            setattr(self.model.node_embedding.linear.weight, "dtype", dtype)
         for param in self.model.parameters():
             param.requires_grad = False
 
@@ -74,6 +82,7 @@ class LammpsFrankenCalculator(torch.nn.Module):
             edge_index=data["edge_index"],
             shifts=data["shifts"],
             unit_shifts=data["unit_shifts"],
+            cell=data["cell"],
         )
         energy, forces = self.model(franken_data)
         assert forces is not None
@@ -91,8 +100,8 @@ class LammpsFrankenCalculator(torch.nn.Module):
         }
 
     @staticmethod
-    def create_lammps_model(model_path: str, rf_weight_id: int | None) -> str:
-        """Compile a franken model into a LAMMPS calculator
+    def init_wrapper(model_path: str, rf_weight_id: int | None) -> str:
+        """Compile a franken model into a wrapped model ready for use with MACE-LAMMPS
 
         Args:
             model_path (str):
@@ -113,7 +122,7 @@ class LammpsFrankenCalculator(torch.nn.Module):
         # Kokkos is hardcoded to double and will silently corrupt data if the model
         # does not use dtype double.
         franken_model = franken_model.double().to("cpu")
-        lammps_model = LammpsFrankenCalculator(franken_model)
+        lammps_model = MaceInferenceWrapper(franken_model)
         lammps_model_compiled = jit.compile(lammps_model)
 
         save_path = f"{os.path.splitext(model_path)[0]}-lammps.pt"
@@ -141,14 +150,14 @@ def build_arg_parser():
     return parser
 
 
-def create_lammps_model_cli():
+def wrap_mace_cli():
     parser = build_arg_parser()
     args = parser.parse_args()
-    LammpsFrankenCalculator.create_lammps_model(args.model_path, args.rf_weight_id)  # type: ignore
+    MaceInferenceWrapper.init_wrapper(args.model_path, args.rf_weight_id)  # type: ignore
 
 
 if __name__ == "__main__":
-    create_lammps_model_cli()
+    wrap_mace_cli()
 
 
 # For sphinx docs
