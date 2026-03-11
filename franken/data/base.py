@@ -45,6 +45,10 @@ class Configuration:
         self.atomic_numbers = atomic_numbers
         self.natoms = natoms
         self.node_attrs = node_attrs
+        if edge_index is not None:
+            assert (
+                edge_index.dim() == 2 and edge_index.shape[1] == 2
+            ), f"Incorrect edge_index shape {edge_index.shape}"
         self.edge_index = edge_index
         self.shifts = shifts
         self.unit_shifts = unit_shifts
