@@ -14,6 +14,7 @@ Backbone configuration
         franken.config.MaceBackboneConfig
         franken.config.FairchemBackboneConfig
         franken.config.SevennBackboneConfig
+        franken.config.PetBackboneConfig
 
 
 Random feature configuration

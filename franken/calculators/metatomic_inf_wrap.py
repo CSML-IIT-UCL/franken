@@ -141,7 +141,11 @@ def create_metatomic(
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Convert a franken model to be able to use it with LAMMPS",
+        description=(
+            "Convert a franken model to for use with Metatomic-compatible calculators. "
+            "This includes calculators based on LAMMPS and ASE. "
+            "The wrapped model can be based on MACE or PET based GNNs."
+        ),
     )
     parser.add_argument(
         "--model_path",
@@ -158,13 +162,13 @@ def build_arg_parser():
         "--dtype",
         type=str,
         choices=["float32", "float64"],
-        help="Data-type of the model which is being converted",
+        help="Data-type in which the model will run",
         required=True,
     )
     return parser
 
 
-def create_metatomic_calc_cli():
+def wrap_metatomic_cli():
     parser = build_arg_parser()
     args = parser.parse_args()
     dtype = torch.float32 if args.dtype == "float32" else torch.float64
@@ -172,7 +176,7 @@ def create_metatomic_calc_cli():
 
 
 if __name__ == "__main__":
-    create_metatomic_calc_cli()
+    wrap_metatomic_cli()
 
 
 # For sphinx docs

@@ -23,6 +23,8 @@ dependencies = [
     "omegaconf",
     "requests",
     "docstring_parser",
+    "metatomic-torch",
+    "metatrain",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -44,7 +46,8 @@ Repository = "https://github.com/CSML-IIT-UCL/franken"
 [project.scripts]
 "franken.backbones" = "franken.backbones.cli:main"
 "franken.autotune" = "franken.autotune.script:cli_entry_point"
-"franken.create_lammps_model" = "franken.calculators.lammps_calc:create_lammps_model_cli"
+"franken.wrap_mace_lammps" = "franken.calculators.mace_inf_wrap:wrap_mace_cli"
+"franken.wrap_metatomic" = "franken.calculators.metatomic_inf_wrap:wrap_metatomic_cli"
 
 [project.optional-dependencies]
 develop = [
