@@ -1,6 +1,7 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import warnings
 
+import metatrain.pet
 import torch
 import metatomic.torch
 import metatrain.utils.io
@@ -17,7 +18,11 @@ from franken.data import Configuration
 
 
 def systems_to_batch(
-    config: Configuration,
+    positions: torch.Tensor,
+    edge_index: torch.Tensor,
+    cell: torch.Tensor,
+    cell_shifts: torch.Tensor,
+    species: torch.Tensor,
     options: metatomic.torch.NeighborListOptions,
     species_to_species_index: torch.Tensor,
     cutoff_function: str,
@@ -62,19 +67,9 @@ def systems_to_batch(
         - `sample_labels`: Labels indicating the system and atom indices for each atom
 
     """
-    positions = config.atom_pos
-    assert (
-        config.edge_index is not None
-        and config.cell is not None
-        and config.shifts is not None
-    )
-    centers = config.edge_index[:, 0]
-    neighbors = config.edge_index[:, 1]
-    species = config.atomic_numbers
-    cells = config.cell.unsqueeze(
-        0
-    )  # Franken: unsqueeze needed to 'fake' multiple systems
-    cell_shifts = config.shifts
+    centers = edge_index[:, 0]
+    neighbors = edge_index[:, 1]
+    cells = cell.unsqueeze(0)  # Franken: unsqueeze needed to 'fake' multiple systems
 
     # somehow the backward of this operation is very slow at evaluation,
     # where there is only one cell, therefore we simplify the calculation
@@ -196,19 +191,27 @@ def systems_to_batch(
 class PETModelWrapper(torch.nn.Module):
     def __init__(self, base_model: torch.nn.Module, gnn_backbone_id):
         super().__init__()
-        self.base_model = base_model
+        self.base_model = self.get_pet_model(base_model)
         self.gnn_backbone_id = gnn_backbone_id
+        # Save useful hyperparameters here
+        self.cutoff = self.base_model.cutoff
+        self.num_layers = (
+            self.base_model.num_gnn_layers
+        )  # NOTE: this doesn't consider long-range
+        self.atomic_types = torch.tensor(
+            self.base_model.atomic_types, dtype=torch.int64
+        )
 
     def init_args(self):
         return {
             "gnn_backbone_id": self.gnn_backbone_id,
         }
 
-    def get_pet_model(self) -> torch.nn.Module:
+    def get_pet_model(self, base_model: torch.nn.Module) -> metatrain.pet.PET:
         # extract the underlying PET model. Wrapped under two layers:
         # base_model is `metatomic.torch.AtomisticModel` wrapper
         # an inner LLPR (for uncertainty quantification) wrapper is optional
-        llpr_model = self.base_model.module
+        llpr_model = base_model.module
         if hasattr(llpr_model, "model"):
             pet_model: torch.nn.Module = (
                 llpr_model.model
@@ -218,11 +221,14 @@ class PETModelWrapper(torch.nn.Module):
         return pet_model
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
-        pet_model = self.get_pet_model()
-        nl_options = pet_model.requested_neighbor_lists()[
-            0
-        ]  # pyright: ignore[reportCallIssue]
+        nl_options = self.base_model.requested_neighbor_lists()[0]
 
+        # Make torch jit script happy by having everything in local variables
+        edge_index = data.edge_index
+        cell = data.cell
+        cell_shifts = data.shifts
+        assert cell_shifts is not None and edge_index is not None and cell is not None
+        species = data.atomic_numbers
         # **Stage 0: Input Preparation**
         (
             element_indices_nodes,
@@ -233,12 +239,16 @@ class PETModelWrapper(torch.nn.Module):
             reverse_neighbor_index,
             cutoff_factors,
         ) = systems_to_batch(
-            data,
+            data.atom_pos,
+            edge_index,
+            cell,
+            cell_shifts,
+            species,
             nl_options,
-            pet_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
-            pet_model.cutoff_function,  # pyright: ignore[reportArgumentType]
-            pet_model.cutoff_width,  # pyright: ignore[reportArgumentType]
-            pet_model.num_neighbors_adaptive,  # pyright: ignore[reportArgumentType]
+            self.base_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
+            self.base_model.cutoff_function,
+            self.base_model.cutoff_width,
+            self.base_model.num_neighbors_adaptive,
         )
         # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!
         use_manual_attention = True
@@ -252,21 +262,32 @@ class PETModelWrapper(torch.nn.Module):
             padding_mask=padding_mask,
             cutoff_factors=cutoff_factors,
         )
-        node_features_list, edge_features_list = pet_model._calculate_features(
+        node_features_list, edge_features_list = self.base_model._calculate_features(
             featurizer_inputs,
             use_manual_attention=use_manual_attention,
         )  # pyright: ignore[reportCallIssue]
         return node_features_list[0]
 
     def feature_dim(self) -> int:
-        dim: int = self.get_pet_model().d_node  # pyright: ignore[reportAssignmentType]
+        dim: int = self.base_model.d_node
         return dim
+
+    def cutoff_radius(self) -> float:
+        return self.cutoff
+
+    def num_interaction_layers(self) -> int:
+        return self.num_layers
+
+    def supported_atomic_types(self) -> torch.Tensor:
+        return self.atomic_types
+
+    def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]:
+        return self.base_model.requested_neighbor_lists()
 
     @staticmethod
     def load_from_checkpoint(
         trainer_ckpt, gnn_backbone_id: str, map_location=None
     ) -> "PETModelWrapper":
-
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 action="ignore",
