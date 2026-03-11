@@ -143,6 +143,38 @@ def undo_script_mace(base: torch.jit.ScriptModule) -> MACE:
     return model
 
 
+def atom_numbers_to_node_attrs(
+    frame_nums: torch.Tensor, all_nums: torch.Tensor, dtype: torch.dtype
+) -> torch.Tensor:
+    """
+    Convert atomic numbers to one-hot node attribute vectors.
+
+    Each value in `frame_nums` is matched against `all_nums`, which defines the
+    allowed atomic numbers and their column order. The function returns a
+    one-hot encoded tensor where each row corresponds to an entry in
+    `frame_nums` and each column corresponds to an entry in `all_nums`.
+
+    Args:
+        frame_nums: Tensor of shape (N,) containing atomic numbers to encode.
+        all_nums: Tensor of shape (M,) containing the allowed atomic numbers
+            defining the one-hot encoding order.
+        dtype: Desired dtype of the returned tensor.
+
+    Returns:
+        Tensor of shape (N, M) with one-hot encoded rows.
+
+    Raises:
+        ValueError: If any value in `frame_nums` is not present in `all_nums`.
+    """
+    matches = frame_nums.unsqueeze(1) == all_nums.unsqueeze(0)  # (N, M)
+
+    # Check that every frame_num appears at least once in all_nums
+    if not torch.all(matches.any(dim=1)):
+        raise ValueError("frame_nums contains values not present in all_nums")
+
+    return matches.to(dtype)
+
+
 @compile_mode("script")
 class FrankenMACE(torch.nn.Module):
     """Wrap MACE module.
@@ -192,13 +224,28 @@ class FrankenMACE(torch.nn.Module):
         }
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
-        # assert on local variables to make torchscript happy
+        # Process inputs
         edge_index = data.edge_index
-        shifts = data.shifts
-        node_attrs = data.node_attrs
         assert edge_index is not None
+        edge_index = edge_index.T  # mace expects [2, n_edges]
+
+        shifts = data.shifts
+        if shifts is None:
+            unit_shifts = data.unit_shifts
+            cell = data.cell
+            assert unit_shifts is not None
+            assert cell is not None
+            shifts = unit_shifts.to(cell.dtype) @ cell  # n_edges, 3
         assert shifts is not None
-        assert node_attrs is not None
+
+        node_attrs = data.node_attrs
+        if node_attrs is None:
+            # one-hot embed the atomic numbers in the frame
+            node_attrs = atom_numbers_to_node_attrs(
+                data.atomic_numbers,
+                self.atomic_numbers,  # pyright: ignore[reportArgumentType]
+                dtype=data.atom_pos.dtype,
+            )
         # Embeddings
         node_feats = self.node_embedding(node_attrs)  # type: ignore
         vectors, lengths = get_edge_vectors_and_lengths(
