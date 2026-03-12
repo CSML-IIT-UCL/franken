@@ -41,7 +41,8 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         if outputs["energy"].per_atom:
             raise NotImplementedError("per atom energy is not implemented")
 
-        energy = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype)
+        device = systems[0].positions.device
+        energy = torch.zeros((len(systems), 1), dtype=systems[0].positions.dtype, device=device)
         for i, system in enumerate(systems):
             known_neighbor_lists = system.known_neighbor_lists()
             if len(known_neighbor_lists) != 1:
@@ -53,7 +54,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             franken_data = Configuration(
                 atom_pos=system.positions,
                 atomic_numbers=system.types,
-                natoms=torch.tensor(len(system.types)).view(1),
+                natoms=torch.tensor(len(system.types), dtype=torch.int32, device=device).view(1),
                 pbc=system.pbc,
                 cell=system.cell,
                 unit_shifts=nl_values[:, 2:],
@@ -69,12 +70,12 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         # add metadata to the output
         block = TensorBlock(
             values=energy,
-            samples=Labels("system", torch.arange(len(systems)).reshape(-1, 1)),
+            samples=Labels("system", torch.arange(len(systems), device=device).reshape(-1, 1)),
             components=[],
-            properties=Labels("energy", torch.tensor([[0]])),
+            properties=Labels("energy", torch.tensor([[0]], device=device)),
         )
         return {
-            "energy": TensorMap(keys=Labels("_", torch.tensor([[0]])), blocks=[block])
+            "energy": TensorMap(keys=Labels("_", torch.tensor([[0]], device=device)), blocks=[block])
         }
 
 
@@ -124,7 +125,7 @@ def create_metatomic(
         interaction_range=franken_model.gnn.cutoff_radius()
         * franken_model.gnn.num_interaction_layers(),
         length_unit="angstrom",
-        supported_devices=["cpu", "gpu"],
+        supported_devices=["cpu", "cuda"],
         dtype="float32" if dtype == torch.float32 else "float64",
     )
     wrapper = AtomisticModel(

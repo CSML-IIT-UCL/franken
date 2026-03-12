@@ -13,7 +13,6 @@ import torch
 from metatomic.torch import load_atomistic_model
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
-from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.calculators.metatomic_inf_wrap import create_metatomic
 from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.data import BaseAtomsDataset
@@ -36,7 +35,6 @@ RF_PARAMETRIZE = [
 @pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
 def test_preserves_info(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
-    unpatch_e3nn()  # needed in case some previous test ran the patching code (for MACE)
     gnn_cfg = BackboneConfig.from_ckpt(
         dict(family=backbone[0], path_or_id=backbone[1])
     )
@@ -78,7 +76,7 @@ def test_preserves_info(rf_cfg, device, backbone):
         comp_model_path = create_metatomic(model_path=model_save_path, rf_weight_id=None, dtype=dtype)
 
         # Step 4: Load saved model
-        mta_model = load_atomistic_model(comp_model_path)
+        mta_model = load_atomistic_model(comp_model_path).to(device)
         mta_franken = mta_model.module.model
 
         # Step 5: Compare rf.state_dict between the original and loaded models
@@ -107,7 +105,6 @@ def test_preserves_info(rf_cfg, device, backbone):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
 def test_calc_for_asemd(rf_cfg, device, dtype, backbone):
-    unpatch_e3nn()  # needed in case some previous test ran the patching code
     gnn_cfg = BackboneConfig.from_ckpt(
         dict(family=backbone[0], path_or_id=backbone[1])
     )
@@ -151,7 +148,7 @@ def test_calc_for_asemd(rf_cfg, device, dtype, backbone):
         primitive = ase.build.bulk(name="C", crystalstructure="diamond", a=3.567)
         atoms = ase.build.make_supercell(primitive, 3 * np.eye(3))
         ase.md.velocitydistribution.MaxwellBoltzmannDistribution(atoms, temperature_K=300)
-        atoms.calc = MetatomicCalculator(comp_model_path)
+        atoms.calc = MetatomicCalculator(comp_model_path, device=device)
         integrator = ase.md.Langevin(
             atoms,
             timestep=1.0 * ase.units.fs,
