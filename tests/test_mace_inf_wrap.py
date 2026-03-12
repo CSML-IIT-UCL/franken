@@ -79,7 +79,7 @@ def test_wrap_compile(rf_cfg, device, backbone):
         comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
 
         # Step 4: Load saved model
-        comp_model = torch.jit.load(comp_model_path, map_location=device)
+        comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
 
         # Step 4: Compare rf.state_dict between the original and loaded models
         with pytest.raises(RuntimeError) as exc:
@@ -164,15 +164,16 @@ def test_wrap_asemd(rf_cfg, device, backbone):
 
         # Step 3: Initialize MACE LAMMPS inference wrapper and re-load it
         comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
-        comp_model = torch.jit.load(comp_model_path, map_location=device)
+        comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
 
         # Step 4: run compiled model for the training dataset.
         #         we can't actually run MD because this only works with a LAMMPS calculator
         #         the comp_data dictionary would be filled in with the LAMMPS-MACE C++ code.
         for data, _ in dataset: # pyright: ignore[reportGeneralTypeIssues]
+            data = data.to(device=device)
             if data.node_attrs is None:
                 data.node_attrs = atom_numbers_to_node_attrs(
-                    frame_nums=data.atomic_numbers, all_nums=model.gnn.supported_atomic_types(), dtype=torch.float64
+                    frame_nums=data.atomic_numbers, all_nums=model.gnn.supported_atomic_types().to(device), dtype=torch.float64
                 )
             comp_data = {
                 "node_attrs": data.node_attrs,
