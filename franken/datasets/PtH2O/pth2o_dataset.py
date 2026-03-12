@@ -12,6 +12,13 @@ from franken.utils.file_utils import download_file
 
 @DATASET_REGISTRY.register("PtH2O")
 class PtH2ORegisteredDataset(BaseRegisteredDataset):
+    """
+    FigShare path: https://figshare.com/articles/dataset/Dataset_and_training_files_for_Is_the_water_Pt_111_interface_ordered_at_room_temperature_/14791755
+    Paper URL: https://pubs.aip.org/aip/jcp/article-abstract/155/22/224701/1030633/Is-the-water-Pt-111-interface-ordered-at-room
+    Citation: A. E. G Mikkelsen, J. Schiøtz, T. Vegge and K. W. Jacobsen, "Is the water/Pt(111) interface ordered at room temperature?",
+              The Journal of Chemical Physics vol. 155 (22), 2021.
+    """
+
     relative_paths = {
         "PtH2O": {
             "train": "PtH2O/train.extxyz",
@@ -41,7 +48,7 @@ class PtH2ORegisteredDataset(BaseRegisteredDataset):
         pth2o_base_path.mkdir(exist_ok=True, parents=True)
         # Download
         download_file(
-            url="https://data.dtu.dk/ndownloader/files/29141586",
+            url="https://api.figshare.com/v2/file/download/29141586",
             filename=pth2o_base_path / "data.zip",
             desc="Downloading PtH2O dataset",
             expected_md5="acd748f7f32c66961c90cb15457f7bae",
