@@ -9,6 +9,7 @@ from franken.config import (
     AutotuneConfig,
     MaceBackboneConfig,
     FairchemBackboneConfig,
+    PETBackboneConfig,
     SevennBackboneConfig,
     GaussianRFConfig,
     MultiscaleGaussianRFConfig,
@@ -360,6 +361,17 @@ def get_arg_groups():
                     ),
                     Argument.from_dataclass(
                         MaceBackboneConfig, "interaction_block", "interaction-block"
+                    ),
+                ],
+            ),
+            MutuallyExclusiveArgumentGroup(
+                "pet",
+                title="PET backbone",
+                desc="Configure the PET backbone. Specify ``--backbone=pet`` to enable.",
+                data_class=PETBackboneConfig,
+                arguments=[
+                    Argument.from_dataclass(
+                        PETBackboneConfig, "path_or_id", "path-or-id"
                     ),
                 ],
             ),
