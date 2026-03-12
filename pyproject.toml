@@ -137,3 +137,8 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
+# ignore torch jit warnings
+filterwarnings = [
+    "ignore:`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`:DeprecationWarning",
+    "ignore:`torch.jit.save` is deprecated. Please switch to `torch.export`:DeprecationWarning",
+]
