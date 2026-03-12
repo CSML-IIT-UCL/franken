@@ -1,8 +1,10 @@
+import os
 import logging
 
 import torch
 
-
+# Make sure that import of old e3nn versions succeeds.
+os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 logger = logging.getLogger("franken")
 
 
