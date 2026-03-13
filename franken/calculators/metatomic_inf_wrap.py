@@ -2,11 +2,11 @@ import argparse
 import os
 from typing import Dict, List, Optional
 
-import metatensor
+import torch
 import metatrain
 import metatrain.utils
 import metatrain.utils.sum_over_atoms
-import torch
+import metatensor.torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from metatomic.torch import (
     AtomisticModel,
@@ -118,7 +118,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         # tensor maps to get the predictions for the selected atoms only.
         if selected_atoms is not None:
             for output_name, tmap in out_tmap.items():
-                out_tmap[output_name] = metatensor.slice(
+                out_tmap[output_name] = metatensor.torch.slice(
                     tmap, axis="samples", selection=selected_atoms
                 )
 
