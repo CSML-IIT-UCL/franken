@@ -2,6 +2,7 @@ channels:
 - pytorch
 - nvidia
 - conda-forge
+- metatomic
 dependencies:
 - pytorch>=2.4
 - ase
