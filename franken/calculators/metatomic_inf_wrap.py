@@ -56,6 +56,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             values=sample_values,
         )
 
+        # Compute energy with underlying model
         device = systems[0].positions.device
         energy_lst: List[torch.Tensor] = []
         for i, system in enumerate(systems):
