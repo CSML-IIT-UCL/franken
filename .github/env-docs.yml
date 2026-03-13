@@ -2,7 +2,6 @@ channels:
 - pytorch
 - nvidia
 - conda-forge
-- metatomic
 dependencies:
 - pytorch>=2.4
 - ase
@@ -15,8 +14,7 @@ dependencies:
 - pytest
 - psutil
 - docstring_parser
-- metatomic-torch
-- metatrain
+- python-metatomic-torch
 - ipython
 - sphinx
 - sphinxawesome-theme
