@@ -14,6 +14,8 @@ dependencies:
 - pytest
 - psutil
 - docstring_parser
+- metatomic-torch
+- metatrain
 - ipython
 - sphinx
 - sphinxawesome-theme
