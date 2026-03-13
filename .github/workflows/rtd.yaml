@@ -38,7 +38,7 @@ jobs:
               - conda-forge
           create-args: >-
             python=3.12
-            pytorch=2.4
+            pytorch=2.9
             pandoc=3.6.4
       - name: Install franken
         # conda setup requires this special shell
