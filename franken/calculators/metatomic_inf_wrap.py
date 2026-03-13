@@ -3,9 +3,7 @@ import os
 from typing import Dict, List, Optional
 
 import torch
-import metatrain
-import metatrain.utils
-import metatrain.utils.sum_over_atoms
+from metatrain.utils.sum_over_atoms import sum_over_atoms
 import metatensor.torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from metatomic.torch import (
@@ -38,13 +36,6 @@ class MetatomicInferenceWrapper(torch.nn.Module):
                 f"keys: {', '.join(outputs.keys())}"
             )
 
-        # we don't want to worry about selected_atoms yet
-        # if selected_atoms is not None:
-        #     raise NotImplementedError("selected_atoms is not implemented")
-
-        # if outputs["energy"].per_atom:
-        #     raise NotImplementedError("per atom energy is not implemented")
-
         # Build sample labels.
         #  This was originally part of `concatenate_structures` in PET code
         system_indices_lst: List[torch.Tensor] = []
@@ -67,9 +58,6 @@ class MetatomicInferenceWrapper(torch.nn.Module):
 
         device = systems[0].positions.device
         energy_lst: List[torch.Tensor] = []
-        # torch.zeros(
-        #     (len(systems), 1), dtype=systems[0].positions.dtype, device=device
-        # )
         for i, system in enumerate(systems):
             known_neighbor_lists = system.known_neighbor_lists()
             if len(known_neighbor_lists) != 1:
@@ -94,13 +82,15 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             # but it doesn't seem to be actually used anywhere in the calculators (which
             # rely on performing autograd themselves)
             sys_energy, _ = self.model(franken_data, compute_forces=False)
+            # Fake per-atom energy. Needed for LAMMPS calculator
             node_energy = sys_energy.repeat(system.positions.shape[0]).div(
                 system.positions.shape[0]
             )
             energy_lst.append(node_energy)
-
+        # Concatenate energy from all systems.
         energy = torch.cat(energy_lst, 0)
 
+        # Build the weird output format required by metatomic
         energy_block = TensorBlock(
             values=energy.reshape(-1, 1),
             samples=sample_labels,
@@ -114,6 +104,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             )
         }
 
+        # Output filtering. Copied from PET model in metatomic
         # If selected atoms request is provided, we slice the atomic predictions
         # tensor maps to get the predictions for the selected atoms only.
         if selected_atoms is not None:
@@ -129,26 +120,9 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             if outputs[output_name].per_atom:
                 out_tmap[output_name] = atomic_property
             else:
-                out_tmap[output_name] = metatrain.utils.sum_over_atoms.sum_over_atoms(
-                    atomic_property
-                )
+                out_tmap[output_name] = sum_over_atoms(atomic_property)
 
         return out_tmap
-
-        # # add metadata to the output
-        # block = TensorBlock(
-        #     values=energy,
-        #     samples=Labels(
-        #         "system", torch.arange(len(systems), device=device).reshape(-1, 1)
-        #     ),
-        #     components=[],
-        #     properties=Labels("energy", torch.tensor([[0]], device=device)),
-        # )
-        # return {
-        #     "energy": TensorMap(
-        #         keys=Labels("_", torch.tensor([[0]], device=device)), blocks=[block]
-        #     )
-        # }
 
 
 def create_metatomic(
@@ -197,7 +171,7 @@ def create_metatomic(
         interaction_range=franken_model.gnn.cutoff_radius()
         * franken_model.gnn.num_interaction_layers(),
         length_unit="angstrom",
-        supported_devices=["cpu", "cuda"],
+        supported_devices=["cuda", "cpu"],
         dtype="float32" if dtype == torch.float32 else "float64",
     )
     wrapper = AtomisticModel(
