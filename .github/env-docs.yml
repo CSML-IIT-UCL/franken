@@ -15,6 +15,7 @@ dependencies:
 - psutil
 - docstring_parser
 - python-metatomic-torch
+- metatrain
 - ipython
 - sphinx
 - sphinxawesome-theme
