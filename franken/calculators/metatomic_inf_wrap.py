@@ -2,6 +2,10 @@ import argparse
 import os
 from typing import Dict, List, Optional
 
+import metatensor
+import metatrain
+import metatrain.utils
+import metatrain.utils.sum_over_atoms
 import torch
 from metatensor.torch import Labels, TensorBlock, TensorMap
 from metatomic.torch import (
@@ -35,16 +39,37 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             )
 
         # we don't want to worry about selected_atoms yet
-        if selected_atoms is not None:
-            raise NotImplementedError("selected_atoms is not implemented")
+        # if selected_atoms is not None:
+        #     raise NotImplementedError("selected_atoms is not implemented")
 
-        if outputs["energy"].per_atom:
-            raise NotImplementedError("per atom energy is not implemented")
+        # if outputs["energy"].per_atom:
+        #     raise NotImplementedError("per atom energy is not implemented")
+
+        # Build sample labels.
+        #  This was originally part of `concatenate_structures` in PET code
+        system_indices_lst: List[torch.Tensor] = []
+        atom_indices_lst: List[torch.Tensor] = []
+        for i, system in enumerate(systems):
+            system_size = len(system)
+            system_indices_lst.append(
+                torch.full((system_size,), i, device=system.positions.device)
+            )
+            atom_indices_lst.append(
+                torch.arange(system_size, device=system.positions.device)
+            )
+        system_indices = torch.cat(system_indices_lst)
+        atom_indices = torch.cat(atom_indices_lst)
+        sample_values = torch.stack([system_indices, atom_indices], dim=1)
+        sample_labels = Labels(
+            names=["system", "atom"],
+            values=sample_values,
+        )
 
         device = systems[0].positions.device
-        energy = torch.zeros(
-            (len(systems), 1), dtype=systems[0].positions.dtype, device=device
-        )
+        energy_lst: List[torch.Tensor] = []
+        # torch.zeros(
+        #     (len(systems), 1), dtype=systems[0].positions.dtype, device=device
+        # )
         for i, system in enumerate(systems):
             known_neighbor_lists = system.known_neighbor_lists()
             if len(known_neighbor_lists) != 1:
@@ -69,22 +94,61 @@ class MetatomicInferenceWrapper(torch.nn.Module):
             # but it doesn't seem to be actually used anywhere in the calculators (which
             # rely on performing autograd themselves)
             sys_energy, _ = self.model(franken_data, compute_forces=False)
-            energy[i] += sys_energy
+            node_energy = sys_energy.repeat(system.positions.shape[0]).div(
+                system.positions.shape[0]
+            )
+            energy_lst.append(node_energy)
 
-        # add metadata to the output
-        block = TensorBlock(
-            values=energy,
-            samples=Labels(
-                "system", torch.arange(len(systems), device=device).reshape(-1, 1)
-            ),
-            components=[],
+        energy = torch.cat(energy_lst, 0)
+
+        energy_block = TensorBlock(
+            values=energy.reshape(-1, 1),
+            samples=sample_labels,
+            components=torch.jit.annotate(List[Labels], []),
             properties=Labels("energy", torch.tensor([[0]], device=device)),
         )
-        return {
+        out_tmap = {
             "energy": TensorMap(
-                keys=Labels("_", torch.tensor([[0]], device=device)), blocks=[block]
+                keys=Labels("_", torch.tensor([[0]], device=device)),
+                blocks=[energy_block],
             )
         }
+
+        # If selected atoms request is provided, we slice the atomic predictions
+        # tensor maps to get the predictions for the selected atoms only.
+        if selected_atoms is not None:
+            for output_name, tmap in out_tmap.items():
+                out_tmap[output_name] = metatensor.slice(
+                    tmap, axis="samples", selection=selected_atoms
+                )
+
+        # If per-atom predictions are requested, we return the atomic predictions
+        # tensor maps. Otherwise, we sum the atomic predictions over the atoms
+        # to get the final per-structure predictions for each requested output.
+        for output_name, atomic_property in out_tmap.items():
+            if outputs[output_name].per_atom:
+                out_tmap[output_name] = atomic_property
+            else:
+                out_tmap[output_name] = metatrain.utils.sum_over_atoms.sum_over_atoms(
+                    atomic_property
+                )
+
+        return out_tmap
+
+        # # add metadata to the output
+        # block = TensorBlock(
+        #     values=energy,
+        #     samples=Labels(
+        #         "system", torch.arange(len(systems), device=device).reshape(-1, 1)
+        #     ),
+        #     components=[],
+        #     properties=Labels("energy", torch.tensor([[0]], device=device)),
+        # )
+        # return {
+        #     "energy": TensorMap(
+        #         keys=Labels("_", torch.tensor([[0]], device=device)), blocks=[block]
+        #     )
+        # }
 
 
 def create_metatomic(
