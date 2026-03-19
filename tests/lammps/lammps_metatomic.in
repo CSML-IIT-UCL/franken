@@ -15,13 +15,13 @@ variable    tstep equal 0.0005
 variable    wall equal 20.5
 
 # == DATA ==
-read_data   franken/tests/lammps/PtH2O.lammpsdata
+read_data   ./PtH2O.lammpsdata
 
 group       fixed id 37 38 39 40 41 42 43 44 45 46 47 48
 group       free subtract all fixed
 
 # == INTERACTIONS ==
-pair_style      metatomic franken/tests/lammps/run_260312_093017_b4e1eaa9/best_ckpt-metatomic.pt device cuda
+pair_style      metatomic ./run_260312_093017_b4e1eaa9/best_ckpt-metatomic.pt device cuda
 pair_coeff      * * Pt O H
 timestep        ${tstep}
 
@@ -35,7 +35,7 @@ thermo          100
 thermo_style    custom step temp press ke pe etotal vol pxx pyy pzz pxy pxz pyz
 thermo_modify   flush yes format float %10.6g
 dump            dump_all all custom 100 traj.lammps id type element x y z
-dump_modify     dump_all format float %12.8f append yes element Pt O H
+dump_modify     dump_all format float %12.8f append yes element 78 8 1
 restart         10000 lmp.restart lmp2.restart
 
 # == NVT PRODUCTION ==
