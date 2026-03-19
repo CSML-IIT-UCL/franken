@@ -50,11 +50,9 @@ def run_test_for_bbone(
 
     with open(run_path / "best.json", "r") as fh:
         best_log = json.load(fh)
-    best_ls = best_log["hyperparameters"]["random_features"]["length_scale"]
     best_l2 = best_log["hyperparameters"]["solver"]["l2_penalty"]
     best_fw = best_log["hyperparameters"]["solver"]["force_weight"]
     print("Best model hyperparameters: ")
-    print(f"\tLength-scale: {best_ls:.1f}")
     print(f"\tL2 penalty: {best_l2:.2e}")
     print(f"\tForce-weight: {best_fw:.3f}")
 
