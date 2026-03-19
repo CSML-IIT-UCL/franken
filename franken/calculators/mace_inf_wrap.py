@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 from e3nn.util import jit
 
+from franken.backbones.wrappers.base import AtomisticModelWrapper
 from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 
@@ -118,6 +119,11 @@ class MaceInferenceWrapper(torch.nn.Module):
             map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             rf_weight_id=rf_weight_id,
         )
+
+        if not isinstance(franken_model.gnn, AtomisticModelWrapper):
+            raise NotImplementedError(
+                f"GNN underlying the franken model ({franken_model.gnn_config.path_or_id}) is not compatible with MACE-LAMMPS."
+            )
         # NOTE:
         # Kokkos is hardcoded to double and will silently corrupt data if the model
         # does not use dtype double.
