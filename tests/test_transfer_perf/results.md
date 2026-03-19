@@ -94,14 +94,28 @@ Hardware: NVIDIA RTX 6000 Ada GPU
      ```
    - Accuracy
      ```
-     forces MAE: 17.695437779502264
-     energy MAE: 0.302304078093953
+     forces MAE: 17.695
+     energy MAE: 0.302
      ```
    - Timings
      ```
-     Cov/Coeff time (s): 708.3270240030251
+     Cov/Coeff time (s): 708.3
      ```
  - `mace_off/medium24` backbone
+   - Hyperparameters
+     ```
+     L2 penalty: 1.00e-10
+     Force-weight: 0.255
+     ```
+   - Accuracy
+     ```
+     forces MAE: 16.618
+     energy MAE: 0.586
+     ```
+   - Timings
+     ```
+     Cov/Coeff time (s): 1032.6
+     ```
 
 ## PET implementation branch
 
