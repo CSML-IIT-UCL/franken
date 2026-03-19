@@ -57,11 +57,11 @@ def run_test_for_bbone(
     print(f"\tForce-weight: {best_fw:.3f}")
 
     print("Best model accuracy:")
-    print(f"\tforces MAE: {best_log['metrics']['validation']['forces_MAE']}")
-    print(f"\tenergy MAE: {best_log['metrics']['validation']['energy_MAE']}")
+    print(f"\tforces MAE: {best_log['metrics']['validation']['forces_MAE']:.3f}")
+    print(f"\tenergy MAE: {best_log['metrics']['validation']['energy_MAE']:.3f}")
 
     print("Best model timings:")
-    print(f"\tCov/Coeff time (s): {best_log['timings']['cov_coeffs']}")
+    print(f"\tCov/Coeff time (s): {best_log['timings']['cov_coeffs']:.1f}")
 
 
 if __name__ == "__main__":
