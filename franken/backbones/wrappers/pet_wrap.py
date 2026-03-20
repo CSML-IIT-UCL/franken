@@ -13,7 +13,9 @@ from metatrain.pet.modules.nef import (
     get_nef_indices,
 )
 from metatrain.pet.modules.utilities import cutoff_func_bump, cutoff_func_cosine
+import vesin.metatomic
 
+from franken.backbones.wrappers.base import MetatomicModelWrapper
 from franken.data import Configuration
 
 
@@ -171,7 +173,7 @@ def systems_to_batch(
     )
 
 
-class PETModelWrapper(torch.nn.Module):
+class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
     def __init__(self, base_model: torch.nn.Module, gnn_backbone_id):
         super().__init__()
         self.base_model = self.get_pet_model(base_model)
@@ -197,12 +199,10 @@ class PETModelWrapper(torch.nn.Module):
         # an inner LLPR (for uncertainty quantification) wrapper is optional
         llpr_model = base_model.module
         if hasattr(llpr_model, "model"):
-            pet_model: torch.nn.Module = (
-                llpr_model.model
-            )  # pyright: ignore[reportAssignmentType, reportAttributeAccessIssue]
+            pet_model: torch.nn.Module = llpr_model.model # type: ignore
         else:
-            pet_model = llpr_model
-        return pet_model
+            pet_model = llpr_model # type: ignore
+        return pet_model # pyright: ignore[reportReturnType]
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
         nl_options = self.base_model.requested_neighbor_lists()[0]
@@ -287,6 +287,40 @@ class PETModelWrapper(torch.nn.Module):
     @torch.jit.export
     def franken_val(self) -> None:
         self.use_manual_attention = False
+
+    @torch.jit.unused
+    def get_neighbors(self, partial_config: Configuration) -> Configuration:
+        # 1. config to system
+        assert partial_config.cell is not None
+        assert partial_config.pbc is not None
+        sys = metatomic.torch.System(
+            positions=partial_config.atom_pos,
+            cell=partial_config.cell,
+            types=partial_config.atomic_numbers,
+            pbc=partial_config.pbc,
+        )
+        # 2. neighbor calc
+        neighbor_list_opt = self.requested_neighbor_lists()
+        vesin.metatomic.compute_requested_neighbors_from_options(
+            [sys],
+            options=neighbor_list_opt,
+            system_length_unit="Angstrom",
+            check_consistency=True,  # pyright: ignore[reportArgumentType]
+        )
+        neighbor_list = sys.get_neighbor_list(neighbor_list_opt[0])
+        nl_values = neighbor_list.samples.values
+        # 3. system to config
+        return Configuration(
+            atom_pos=partial_config.atom_pos,
+            cell=partial_config.cell,
+            atomic_numbers=partial_config.atomic_numbers,
+            pbc=partial_config.pbc,
+            natoms=partial_config.natoms,
+            unit_shifts=nl_values[:, 2:],
+            shifts=nl_values[:, 2:].to(partial_config.cell.dtype)
+            @ partial_config.cell,  # [n_edges, 3]
+            edge_index=nl_values[:, :2],
+        )
 
     @staticmethod
     def load_from_checkpoint(

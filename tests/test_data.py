@@ -5,7 +5,7 @@ import pytest
 import torch.distributed
 from torch.multiprocessing import Process, Pipe, SimpleQueue
 
-from franken.data.base import Configuration, SimpleAtomsDataset
+from franken.data import Configuration, FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 
 
@@ -67,11 +67,12 @@ def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
 
 def distributed_length_inner_fn(num_samples):
     data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-    dataset = SimpleAtomsDataset(
+    dataset = FrankenAtomsDataset(
         data_path,
         split="train",
         num_random_subsamples=num_samples,
         subsample_rng=None,
+        gnn_config=None,
     )
     assert len(dataset) == num_samples
     dataloader = dataset.get_dataloader(True)
@@ -89,11 +90,12 @@ def test_distributed_dataloader_length(num_samples, num_procs):
 
 def distributed_order_inner_fn(num_samples, num_procs, ids_queue):
     data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-    dataset = SimpleAtomsDataset(
+    dataset = FrankenAtomsDataset(
         data_path,
         split="train",
         num_random_subsamples=num_samples,
         subsample_rng=None,
+        gnn_config=None
     )
     assert len(dataset) == num_samples
     dataloader = dataset.get_dataloader(True)

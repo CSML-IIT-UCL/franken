@@ -9,7 +9,7 @@ import e3nn
 from franken.backbones import REGISTRY
 from franken.backbones.utils import get_checkpoint_path, load_checkpoint
 from franken.config import BackboneConfig, GaussianRFConfig
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.rf.model import FrankenPotential
 
@@ -64,7 +64,7 @@ def test_data_loading(model_name):
         }
     )
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -85,7 +85,7 @@ def test_descriptors(model_name):
     bbone = load_checkpoint(gnn_config)
     # Get a random data sample
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -110,7 +110,7 @@ def test_force_maps(model_name):
     )
     # Get a random data sample
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -122,8 +122,9 @@ def test_force_maps(model_name):
         rf_config=GaussianRFConfig(num_random_features=128, length_scale=1.0),
     )
     model = model.to(device)
-    data, _ = dataset[0]  # type: ignore
-    data = data.to(device)
+    dataset_el = dataset[0]
+    assert isinstance(dataset_el, tuple)
+    data = dataset_el[0].to(device)
     with torch.no_grad(), no_jit():
         # Need to call this multiple times to make sure test passes!
         emap, fmap = model.grad_feature_map(data)

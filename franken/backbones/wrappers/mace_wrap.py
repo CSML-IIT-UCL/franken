@@ -6,6 +6,7 @@ import torch
 import metatomic.torch
 from mace.modules.models import MACE
 from mace.modules.utils import get_edge_vectors_and_lengths
+from mace.data.neighborhood import get_neighborhood
 from e3nn.util.jit import compile_mode
 from e3nn import o3
 
@@ -247,14 +248,12 @@ class FrankenMACE(torch.nn.Module):
                 )
         assert shifts is not None
 
-        node_attrs = data.node_attrs
-        if node_attrs is None:
-            # one-hot embed the atomic numbers in the frame
-            node_attrs = atom_numbers_to_node_attrs(
-                data.atomic_numbers,
-                self.atomic_numbers,  # pyright: ignore[reportArgumentType]
-                dtype=data.atom_pos.dtype,
-            )
+        # one-hot embed the atomic numbers in the frame
+        node_attrs = atom_numbers_to_node_attrs(
+            data.atomic_numbers,
+            self.atomic_numbers,  # pyright: ignore[reportArgumentType]
+            dtype=data.atom_pos.dtype,
+        )
         # Embeddings
         node_feats = self.node_embedding(node_attrs)  # type: ignore
         vectors, lengths = get_edge_vectors_and_lengths(
@@ -365,6 +364,44 @@ class FrankenMACE(torch.nn.Module):
     @torch.jit.export
     def franken_val(self) -> None:
         pass
+
+    @torch.jit.unused
+    def get_neighbors(self, partial_config: Configuration) -> Configuration:
+        # 1. Convert Configuration to numpy
+        positions = partial_config.atom_pos.numpy()
+        cutoff = self.cutoff_radius()
+        pbc = None
+        if partial_config.pbc is not None:
+            pbc = (
+                bool(partial_config.pbc[0].item()),
+                bool(partial_config.pbc[1].item()),
+                bool(partial_config.pbc[2].item()),
+            )
+        cell = None
+        if partial_config.cell is not None:
+            cell = partial_config.cell.numpy()
+        # 2. Neighbors calculation
+        edge_index, shifts, unit_shifts, cell = get_neighborhood(
+            positions=positions,
+            cutoff=cutoff,
+            pbc=pbc,
+            cell=cell,
+        )
+        # 3. Convert neighbors to configuration
+        dtype = partial_config.atom_pos.dtype
+        device = partial_config.atom_pos.device
+        return Configuration(
+            atom_pos=partial_config.atom_pos,
+            cell=torch.from_numpy(cell).to(dtype=dtype, device=device),
+            atomic_numbers=partial_config.atomic_numbers,
+            pbc=partial_config.pbc,
+            natoms=partial_config.natoms,
+            unit_shifts=torch.from_numpy(unit_shifts).to(dtype=dtype, device=device),
+            shifts=torch.from_numpy(shifts).to(dtype=dtype, device=device),
+            edge_index=torch.from_numpy(edge_index)
+            .to(dtype=dtype, device=device)
+            .transpose(0, 1),
+        )
 
     @staticmethod
     def load_from_checkpoint(

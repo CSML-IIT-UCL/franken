@@ -27,7 +27,7 @@ from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from franken.trainers import BaseTrainer
 from franken.trainers.log_utils import DataSplit, LogEntry
@@ -97,12 +97,12 @@ def init_loaders(
     num_train_subsamples: int | None = None,
     subsample_rng: int | None = None,
 ) -> dict[str, torch.utils.data.DataLoader]:
-    datasets: dict[str, BaseAtomsDataset] = {}
+    datasets: dict[str, FrankenAtomsDataset] = {}
     for split, data_path in zip(
         ["train", "val", "test"], [train_path, val_path, test_path]
     ):
         if data_path is not None:
-            dset = BaseAtomsDataset.from_path(
+            datasets[split] = FrankenAtomsDataset(
                 data_path=data_path,
                 split=split,
                 gnn_config=gnn_cfg,
@@ -111,7 +111,6 @@ def init_loaders(
                 ),
                 subsample_rng=subsample_rng,
             )
-            datasets[split] = dset
 
     dataloaders = {
         split: dset.get_dataloader(distributed=torch.distributed.is_initialized())
@@ -224,7 +223,7 @@ def run_autotune(
     for trial_id, rf_params in rf_param_grid:
         logger.debug(f"Autotune iteration with RF parameters {rf_params}")
 
-        assert isinstance(loaders["train"].dataset, BaseAtomsDataset)  # for typing
+        assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
         model = FrankenPotential(
             gnn_config=gnn_cfg,
             rf_config=rf_params,
