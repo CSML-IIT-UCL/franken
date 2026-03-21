@@ -41,12 +41,6 @@ PET_OMat/xl_1.0
 
 * SEVENN
 SevenNet0/11July2024
-
-* FAIRCHEM
-SchNet/S2EF-OC20-200k
-SchNet/S2EF-OC20-2M
-SchNet/S2EF-OC20-20M
-SchNet/S2EF-OC20-All
 --------------------------------------------------------------------------------
 ```
 
