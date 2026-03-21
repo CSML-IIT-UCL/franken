@@ -12,7 +12,6 @@ from tqdm import tqdm
 import franken.utils.distributed as dist_utils
 from franken.config import BackboneConfig
 from franken.data.base import Configuration, Target
-from franken.backbones.utils import load_checkpoint
 from franken.data.distributed_sampler import SimpleUnevenDistributedSampler
 from franken.rf.atomic_energies import AtomicEnergiesShift
 
@@ -81,6 +80,8 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
 
         self.gnn = None
         if gnn_config is not None:
+            from franken.backbones.utils import load_checkpoint
+
             self.gnn = load_checkpoint(gnn_config)
 
         if precompute and len(self.ase_atoms) > 0:
@@ -250,9 +251,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
                 "The corresponding cell vectors will be set to zero.",
             )
         cell_pt = torch.zeros((3, 3), dtype=dtype)
-        cell_pt[pbc_pt] = torch.tensor(
-            cell[pbc], dtype=dtype
-        )  # pyright: ignore[reportIndexIssue]
+        cell_pt[pbc_pt] = torch.tensor(cell[pbc], dtype=dtype)  # type: ignore
 
         partial_config = Configuration(
             atom_pos=pos_pt,
