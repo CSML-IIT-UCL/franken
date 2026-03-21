@@ -18,6 +18,10 @@ class AtomisticModelWrapper(Protocol):
 
     def supported_atomic_types(self) -> torch.Tensor: ...
 
+    def franken_train(self) -> None: ...
+
+    def franken_val(self) -> None: ...
+
 
 @runtime_checkable
 class MetatomicModelWrapper(AtomisticModelWrapper, Protocol):

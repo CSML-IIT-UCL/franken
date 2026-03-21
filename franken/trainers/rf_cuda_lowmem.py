@@ -92,6 +92,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             model.energy_shift.set_from_atomic_energies(
                 self.train_dataloader.dataset.atomic_energies
             )
+        model.gnn.franken_train()
 
     @no_jit()
     def fit(
@@ -241,6 +242,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             total=tot_dset_size,
             device=self.device,
         )
+        model.gnn.franken_val()
         for i, (data, targets) in enumerate(progress_bar):
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
@@ -262,7 +264,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 if all_weights is None or all_weights.shape[0] <= 100:
                     forces_mode = "torch.autograd"
                 else:
-                    forces_mode = "torch.func"
+                    forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
                 predictions = Target(
                     *model.energy_and_forces(
                         data,

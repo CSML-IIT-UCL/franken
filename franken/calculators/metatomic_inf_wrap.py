@@ -23,6 +23,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
     def __init__(self, franken_model: FrankenPotential):
         super().__init__()
         self.model = franken_model
+        self.model.gnn.franken_val()
 
     def forward(
         self,

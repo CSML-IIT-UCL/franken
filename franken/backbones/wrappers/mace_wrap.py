@@ -349,6 +349,12 @@ class FrankenMACE(torch.nn.Module):
             )
         ]
 
+    def franken_train(self) -> None:
+        pass
+
+    def franken_val(self) -> None:
+        pass
+
     @staticmethod
     def load_from_checkpoint(
         trainer_ckpt, gnn_backbone_id: str, interaction_block: int, map_location=None
