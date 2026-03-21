@@ -61,7 +61,7 @@ class Configuration:
         self.pbc = pbc
 
     def to(
-        self, device: torch.device | str | None = None, dtype: torch.dtype | None = None
+        self, device: torch.device | None = None, dtype: torch.dtype | None = None
     ) -> "Configuration":
         # optional-type refinement must be on local variables (torch.jit.script)
         edge_index = self.edge_index
