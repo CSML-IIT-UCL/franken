@@ -49,7 +49,7 @@ class FrankenSevenn(torch.nn.Module, AtomisticModelWrapper):
             KEY.NODE_FEATURE: data.atomic_numbers,
             KEY.ATOMIC_NUMBERS: data.atomic_numbers,
             KEY.POS: data.atom_pos,
-            KEY.EDGE_IDX: data.edge_index,
+            KEY.EDGE_IDX: data.edge_index.transpose(0, 1),
             KEY.CELL: data.cell,
             KEY.CELL_SHIFT: data.shifts,  # TODO: Check this correct?
             KEY.CELL_VOLUME: torch.einsum(
@@ -163,14 +163,14 @@ class FrankenSevenn(torch.nn.Module, AtomisticModelWrapper):
         shift = torch.from_numpy(shift).to(dtype=dtype, device=device)
         edge_index = torch.stack(
             [
-                torch.from_numpy(edge_src).to(dtype=torch.int32, device=device),
-                torch.from_numpy(edge_dst).to(dtype=torch.int32, device=device),
+                torch.from_numpy(edge_src).to(dtype=torch.int64, device=device),
+                torch.from_numpy(edge_dst).to(dtype=torch.int64, device=device),
             ],
             dim=1,
         )
         return Configuration(
             atom_pos=partial_config.atom_pos,
-            atomic_numbers=partial_config.atomic_numbers,
+            atomic_numbers=partial_config.atomic_numbers.long(),
             natoms=partial_config.natoms,
             edge_index=edge_index,
             shifts=shift,
