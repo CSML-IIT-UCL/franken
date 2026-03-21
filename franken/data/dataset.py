@@ -84,6 +84,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
 
             self.gnn = load_checkpoint(gnn_config)
 
+        self.graphs = None
         if precompute and len(self.ase_atoms) > 0:
             self.graphs = self.convert_all(self.ase_atoms)
             del self.gnn
