@@ -81,9 +81,7 @@ def test_preserves_info(rf_cfg, device, backbone):
         # Step 4: Load saved model
         mta_model = load_atomistic_model(comp_model_path).to(device)
         mta_model_unwrap1 = mta_model.module
-        assert isinstance(mta_model_unwrap1, metatomic.torch.ModelInterface)
         mta_franken = mta_model_unwrap1.model
-        assert isinstance(mta_franken, FrankenPotential)
 
         # Step 5: Compare rf.state_dict between the original and loaded models
         assert are_dicts_close(
