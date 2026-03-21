@@ -399,8 +399,8 @@ class FrankenMACE(torch.nn.Module):
             unit_shifts=torch.from_numpy(unit_shifts).to(dtype=dtype, device=device),
             shifts=torch.from_numpy(shifts).to(dtype=dtype, device=device),
             edge_index=torch.from_numpy(edge_index)
-                            .to(dtype=torch.int64, device=device)
-                            .transpose(0, 1),
+            .to(dtype=torch.int64, device=device)
+            .transpose(0, 1),
         )
 
     @staticmethod

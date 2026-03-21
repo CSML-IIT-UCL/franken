@@ -10,7 +10,6 @@ import ase.build
 import ase.units
 import numpy as np
 import torch
-import metatomic.torch
 from metatomic.torch import load_atomistic_model
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
