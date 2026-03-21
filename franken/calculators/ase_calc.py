@@ -43,6 +43,7 @@ class FrankenCalculator(Calculator):
         # TODO: Remove forces_mode, torch.autograd is always the right way.
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
+        self.franken.gnn.franken_val()
         if isinstance(franken_ckpt, torch.nn.Module):
             self.franken = franken_ckpt
             if device is not None:

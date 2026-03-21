@@ -201,6 +201,7 @@ class PETModelWrapper(torch.nn.Module):
         self.atomic_types = torch.tensor(
             self.base_model.atomic_types, dtype=torch.int64
         )
+        self.use_manual_attention = True
 
     def init_args(self):
         return {
@@ -253,7 +254,6 @@ class PETModelWrapper(torch.nn.Module):
             self.base_model.num_neighbors_adaptive,
         )
         # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!
-        use_manual_attention = True
         # **Stage 1: Feature Computation via GNN Layers**
         featurizer_inputs: dict[str, torch.Tensor] = dict(
             element_indices_nodes=element_indices_nodes,
@@ -266,7 +266,7 @@ class PETModelWrapper(torch.nn.Module):
         )
         node_features_list, edge_features_list = self.base_model._calculate_features(
             featurizer_inputs,
-            use_manual_attention=use_manual_attention,
+            use_manual_attention=self.use_manual_attention,
         )  # pyright: ignore[reportCallIssue]
         return node_features_list[0]
 
@@ -285,6 +285,12 @@ class PETModelWrapper(torch.nn.Module):
 
     def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]:
         return self.base_model.requested_neighbor_lists()
+
+    def franken_train(self) -> None:
+        self.use_manual_attention = True
+
+    def franken_val(self) -> None:
+        self.use_manual_attention = False
 
     @staticmethod
     def load_from_checkpoint(

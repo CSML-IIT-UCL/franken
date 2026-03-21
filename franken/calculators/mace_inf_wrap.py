@@ -29,6 +29,7 @@ class MaceInferenceWrapper(torch.nn.Module):
         super().__init__()
 
         self.model = franken_model
+        self.model.gnn.franken_val()
         # the following buffers are all required by the LAMMPS-MACE implementation
         self.register_buffer("atomic_numbers", self.model.gnn.supported_atomic_types())
         self.register_buffer("r_max", torch.tensor(self.model.gnn.cutoff_radius()))
