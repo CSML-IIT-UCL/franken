@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+    types: [opened, reopened, synchronize]
+  schedule:
+    # Weekly tests run on main by default:
+    #   Scheduled workflows run on the latest commit on the default or base branch.
+    #   (from https://help.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Franken+LAMMPS (metatomic)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.13"]
+        pytorch-version: ["2.10"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Additional info about the build
+        shell: bash
+        run: |
+          uname -a
+          df -h
+          ulimit -a
+
+      # More info on options: https://github.com/marketplace/actions/setup-micromamba
+      - name: Create and setup mamba
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # here we specify the environment like this instead of just installing with pip to make caching easier
+          environment-file: .github/env-lammps-metatomic.yml
+          environment-name: test
+          cache-environment: true
+          cache-environment-key: environment-${{ matrix.python-version }}-${{ matrix.pytorch-version }}
+          condarc: |
+            channels:
+              - conda-forge
+          create-args: >-
+            python=${{ matrix.python-version }}
+            pytorch=${{ matrix.pytorch-version }}
+
+      - name: Install package
+        # conda setup requires this special shell
+        shell: bash -l {0}
+        run: |
+          python -m pip install . --no-deps
+          micromamba list
+
+      - name: Run tests
+        # conda setup requires this special shell
+        shell: bash -l {0}
+        run: |
+          bash tests/lammps/metatomic/run.sh 
+
