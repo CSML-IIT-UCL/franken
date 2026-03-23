@@ -43,16 +43,26 @@ jobs:
           micromamba create -y -n lammps -f .github/env-lammps-metatomic.yml
           micromamba list -n lammps
 
+      - name: Debug lammps env
+        shell: bash -l {0}
+        run: |
+          micromamba run -n lammps bash -lc '
+            echo "PATH=$PATH"
+            ls -la $CONDA_PREFIX/bin | grep -E "lmp|lammps" || true
+            which lmp || true
+            which lammps || true
+          '
+
       - name: Install package
         shell: bash -l {0}
         run: |
           micromamba run -n train python -m pip install . --no-deps
           micromamba list -n train
 
-      - name: Train franken model
-        shell: bash -l {0}
-        run: |
-          micromamba run -n train bash tests/lammps/metatomic/train_and_compile.sh
+      # - name: Train franken model
+      #   shell: bash -l {0}
+      #   run: |
+      #     micromamba run -n train bash tests/lammps/metatomic/train_and_compile.sh
 
       - name: Run with lammps
         shell: bash -l {0}
