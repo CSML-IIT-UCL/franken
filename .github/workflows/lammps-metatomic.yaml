@@ -1,4 +1,4 @@
-name: CI
+name: LAMMPS
 
 on:
   push:
@@ -37,12 +37,6 @@ jobs:
           environment-file: .github/env-dev.yml
           environment-name: train
 
-      - name: Create lammps environment
-        shell: bash -l {0}
-        run: |
-          micromamba create -y -n lammps -f .github/env-lammps-metatomic.yml
-          micromamba list -n lammps
-
       - name: Install franken
         shell: bash -l {0}
         run: |
@@ -53,6 +47,12 @@ jobs:
         shell: bash -l {0}
         run: |
           micromamba run -n train bash tests/lammps/metatomic/train_and_compile.sh
+
+      - name: Create lammps environment
+        shell: bash -l {0}
+        run: |
+          micromamba create -y -n lammps -f .github/env-lammps-metatomic.yml
+          micromamba list -n lammps
 
       - name: Run with lammps
         shell: bash -l {0}
