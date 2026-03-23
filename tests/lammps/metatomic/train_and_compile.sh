@@ -8,7 +8,7 @@
         --jac-chunk-size 16 \
         --run-dir "./" \
         --backbone=pet --pet.path-or-id "PET_MAD/xs_1.5" \
-        --rf=gaussian --gaussian.num-rf "256" --gaussian.length-scale="[5.0,10.]"
+        --rf=gaussian --gaussian.num-rf "256" --gaussian.length-scale=5.
 
 #2. Compile
 
