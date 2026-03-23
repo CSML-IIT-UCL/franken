@@ -1,0 +1,24 @@
+#1. Train franken
+    cd tests/lammps/metatomic/
+
+    PYTHONPATH='.' python franken/autotune/script.py \
+        --dataset-name water --max-train-samples 8 \
+        --l2-penalty="(-10, -5, 5, log)" \
+        --force-weight="(0.01, 0.99, 5, linear)" \
+        --jac-chunk-size 16 \
+        --run-dir "./" \
+        --backbone=pet --pet.path-or-id "PET_MAD/xs_1.5" \
+        --rf=gaussian --gaussian.num-rf "256" --gaussian.length-scale="[5.0,10.]"
+
+#2. Compile
+
+    ckpt_path=$(ls */best_ckpt.pt); ckpt_dir=${ckpt_path%/*}
+    PYTHONPATH='.' python franken/calculators/metatomic_inf_wrap.py --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
+    ln -s ${ckpt_dir}/best_ckpt-metatomic.pt best_ckpt-metatomic.pt 
+
+#3. Run lammps
+
+    in_file=lammps_metatomic.in
+    log_file=lammps_metatomic.log
+
+    lmp -i $in_file -l $log_file
