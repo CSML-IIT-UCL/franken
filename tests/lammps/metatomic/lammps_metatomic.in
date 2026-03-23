@@ -1,0 +1,49 @@
+#package kokkos newton on neigh half
+
+# == SETUP ==
+timer           timeout 86300
+atom_style      atomic
+units           metal
+boundary        p p p
+newton          on
+atom_modify map yes
+
+# == VARIABLES ==
+variable    temp equal 300
+variable    seed equal 111
+variable    nsteps equal 10
+variable    tstep equal 0.0005
+
+# == DATA ==
+read_data   ../water.lammpsdata
+
+# == MASSES ==
+mass 1 1.00794   # H
+mass 2 15.9994   # O
+
+# == INTERACTIONS ==
+pair_style      metatomic best_ckpt-metatomic.pt device cuda
+pair_coeff      * * 1 8
+timestep        ${tstep}
+
+# == MINIMIZATION ==
+#minimize        0 0.0001 1000 10000
+
+# == OUTPUT ==
+thermo          1
+thermo_style    custom step temp press ke pe etotal vol pxx pyy pzz pxy pxz pyz
+thermo_modify   flush yes format float %10.6g
+#dump            dump_all all custom 100 traj.lammps id type element x y z
+#dump_modify     dump_all format float %12.8f append yes element H O
+#restart         1000 lmp.restart lmp2.restart
+
+# == NVT PRODUCTION ==
+reset_timestep  0
+velocity        all create ${temp} ${seed} dist gaussian
+fix                 fix_nve all nve
+fix                 fix_temp all temp/csvr ${temp} ${temp} 0.1 ${seed}
+run                 ${nsteps}
+unfix           fix_nve
+unfix           fix_temp
+#write_data      final.lammpsdata
+#write_restart   final.restart
