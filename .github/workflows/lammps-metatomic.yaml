@@ -23,7 +23,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.13"]
-        pytorch-version: ["2.10"]
+        pytorch-version: ["2.9"]
 
     steps:
       - uses: actions/checkout@v4

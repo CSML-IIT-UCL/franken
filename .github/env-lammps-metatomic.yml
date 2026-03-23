@@ -1,6 +1,5 @@
 channels:
 - pytorch
-- nvidia
 - metatensor
 - conda-forge
 dependencies:
@@ -8,7 +7,6 @@ dependencies:
 - ase
 - numpy
 - omegaconf
-- cupy
 - e3nn
 - pip
 - requests
