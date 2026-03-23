@@ -3,7 +3,8 @@ channels:
 - metatensor
 - conda-forge
 dependencies:
-- pytorch>=2.4
+- python=3.12
+- pytorch=2.9.1
 - ase
 - numpy
 - omegaconf

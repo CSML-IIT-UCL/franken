@@ -18,12 +18,7 @@ on:
 jobs:
   test:
     name: Franken+LAMMPS (metatomic)
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        python-version: ["3.13"]
-        pytorch-version: ["2.9"]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -41,15 +36,7 @@ jobs:
         with:
           # here we specify the environment like this instead of just installing with pip to make caching easier
           environment-file: .github/env-lammps-metatomic.yml
-          environment-name: test
-          cache-environment: true
-          cache-environment-key: environment-${{ matrix.python-version }}-${{ matrix.pytorch-version }}
-          condarc: |
-            channels:
-              - conda-forge
-          create-args: >-
-            python=${{ matrix.python-version }}
-            pytorch=${{ matrix.pytorch-version }}
+          environment-name: tests
 
       - name: Install package
         # conda setup requires this special shell
