@@ -178,7 +178,8 @@ def test_wrap_asemd(rf_cfg, device, backbone):
             comp_data = {
                 "node_attrs": data.node_attrs,
                 "cell": data.cell,
-                "edge_index": data.edge_index,
+                # MACE Calculator provides transposed edge index
+                "edge_index": data.edge_index.transpose(0, 1),
                 "positions": data.atom_pos,
                 "shifts": data.shifts,
                 "unit_shifts": data.unit_shifts,
