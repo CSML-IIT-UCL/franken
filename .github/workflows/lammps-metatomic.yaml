@@ -46,18 +46,13 @@ jobs:
       - name: Debug lammps env
         shell: bash -l {0}
         run: |
-          micromamba run -n lammps bash -lc '
-            echo "PATH=$PATH"
-            ls -la $CONDA_PREFIX/bin | grep -E "lmp|lammps" || true
-            which lmp || true
-            which lammps || true
-          '
+          micromamba run -n lammps which lmp
 
-      - name: Install package
-        shell: bash -l {0}
-        run: |
-          micromamba run -n train python -m pip install . --no-deps
-          micromamba list -n train
+      # - name: Install package
+      #   shell: bash -l {0}
+      #   run: |
+      #     micromamba run -n train python -m pip install . --no-deps
+      #     micromamba list -n train
 
       # - name: Train franken model
       #   shell: bash -l {0}
@@ -66,6 +61,7 @@ jobs:
 
       - name: Run with lammps
         shell: bash -l {0}
+        working-directory: tests/lammps/metatomic
         run: |
-          micromamba run -n lammps bash -lc "cd tests/lammps/metatomic/ && lmp -i lammps_metatomic.in"
+          micromamba run -n lammps lmp -i lammps_metatomic.in
 
