@@ -1,20 +1,7 @@
 channels:
-- pytorch
 - metatensor
 - conda-forge
 dependencies:
-- python=3.12
-- pytorch=2.9.1
-- ase
-- numpy
-- omegaconf
-- e3nn
-- pip
-- requests
-- tqdm
-- python-metatomic-torch
-- metatrain
-- docstring_parser
 - "lammps-metatomic=*=*nompi*"
 
-name: franken
+name: lammps
