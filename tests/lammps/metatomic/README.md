@@ -2,7 +2,7 @@
 
 1. Train franken
     ```bash
-    PYTHONPATH='.' python franken/autotune/script.py \
+    franken.autotune \
         --dataset-name water --max-train-samples 64 \
         --l2-penalty="(-10, -5, 5, log)" \
         --force-weight="(0.01, 0.99, 5, linear)" \
@@ -14,7 +14,7 @@
 2. Compile
     ```bash
     ckpt_path=$(ls */best_ckpt.pt); ckpt_dir=${ckpt_path%/*}
-    PYTHONPATH='.' python franken/calculators/metatomic_inf_wrap.py --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
+    franken.wrap_metatomic --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
     ln -s ${ckpt_dir}/best_ckpt-metatomic.pt best_ckpt-metatomic.pt 
     ```
 
@@ -54,7 +54,7 @@
     #1. Train franken
         mamba activate /leonardo/pub/userexternal/lbonati1/envs/franken
 
-        PYTHONPATH='.' python franken/autotune/script.py \
+        franken.autotune \
             --dataset-name water --max-train-samples 8 \
             --l2-penalty="(-10, -5, 5, log)" \
             --force-weight="(0.01, 0.99, 5, linear)" \
@@ -66,8 +66,8 @@
     #2. Compile
 
         ckpt_path=$(ls tests/lammps/metatomic/*/best_ckpt.pt); ckpt_dir=${ckpt_path%/*}
-        PYTHONPATH='.' python franken/calculators/metatomic_inf_wrap.py --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
-        ln -s ${ckpt_dir}/best_ckpt-metatomic.pt tests/lammps/metatomic/best_ckpt-metatomic.pt 
+        franken.wrap_metatomic --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
+        ln -s ${ckpt_dir}/best_ckpt-metatomic.pt best_ckpt-metatomic.pt 
 
     #3. Run lammps
 
