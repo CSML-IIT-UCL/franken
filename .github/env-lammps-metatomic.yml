@@ -13,6 +13,7 @@ dependencies:
 - tqdm
 - python-metatomic-torch
 - metatrain
+- docstring_parser
 - "lammps-metatomic=*=*nompi*"
 
 name: franken
