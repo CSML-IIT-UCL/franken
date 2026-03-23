@@ -15,10 +15,3 @@
     ckpt_path=$(ls */best_ckpt.pt); ckpt_dir=${ckpt_path%/*}
     franken.wrap_metatomic --model_path="${ckpt_dir}"/best_ckpt.pt --dtype=float64
     ln -s ${ckpt_dir}/best_ckpt-metatomic.pt best_ckpt-metatomic.pt 
-
-#3. Run lammps
-
-    in_file=lammps_metatomic.in
-    log_file=lammps_metatomic.log
-
-    lmp -i $in_file -l $log_file
