@@ -2,9 +2,9 @@
     cd tests/lammps/metatomic/
 
     franken.autotune \
-        --dataset-name water --max-train-samples 8 \
-        --l2-penalty="(-10, -5, 5, log)" \
-        --force-weight="(0.01, 0.99, 5, linear)" \
+        --train-path ../train4.xyz \
+        --l2-penalty="1e-8" \
+        --force-weight="0.999" \
         --jac-chunk-size 16 \
         --run-dir "./" \
         --backbone=pet --pet.path-or-id "PET_MAD/xs_1.5" \
