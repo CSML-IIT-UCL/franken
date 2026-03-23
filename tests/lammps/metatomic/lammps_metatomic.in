@@ -22,7 +22,7 @@ mass 1 1.00794   # H
 mass 2 15.9994   # O
 
 # == INTERACTIONS ==
-pair_style      metatomic best_ckpt-metatomic.pt device cuda
+pair_style      metatomic best_ckpt-metatomic.pt  #device cuda
 pair_coeff      * * 1 8
 timestep        ${tstep}
 
