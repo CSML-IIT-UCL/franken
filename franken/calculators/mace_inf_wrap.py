@@ -81,7 +81,7 @@ class MaceInferenceWrapper(torch.nn.Module):
                 len(atom_nums), dtype=torch.int32, device=atom_nums.device
             ).view(1),
             node_attrs=data["node_attrs"].double(),
-            edge_index=data["edge_index"],
+            edge_index=data["edge_index"].transpose(0, 1),
             shifts=data["shifts"],
             unit_shifts=data["unit_shifts"],
             cell=data["cell"],
