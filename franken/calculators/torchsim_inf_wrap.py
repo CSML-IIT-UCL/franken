@@ -98,7 +98,9 @@ else:
             self.model = self.model.to(device=self._device, dtype=self._dtype).eval()
             self.model.gnn.franken_val()
 
-        def forward(self, state: ts.SimState, **_kwargs: Any) -> dict[str, torch.Tensor]:
+        def forward(
+            self, state: ts.SimState, **_kwargs: Any
+        ) -> dict[str, torch.Tensor]:
             """Compute energies and forces for one or more systems."""
             sim_state = state
             if sim_state.device != self._device or sim_state.dtype != self._dtype:
@@ -113,15 +115,19 @@ else:
             )
 
             wrapped_positions = (
-                ts.transforms.pbc_wrap_batched(
-                    sim_state.positions,
-                    sim_state.cell,
-                    system_idx,
-                    pbc,
+                (
+                    ts.transforms.pbc_wrap_batched(
+                        sim_state.positions,
+                        sim_state.cell,
+                        system_idx,
+                        pbc,
+                    )
+                    if pbc.any()
+                    else sim_state.positions
                 )
-                if pbc.any()
-                else sim_state.positions
-            ).detach().clone()
+                .detach()
+                .clone()
+            )
 
             cutoff = torch.tensor(
                 self.model.gnn.cutoff_radius(),

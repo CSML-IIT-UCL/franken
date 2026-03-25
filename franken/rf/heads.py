@@ -154,9 +154,13 @@ class RandomFeaturesHead(torch.nn.Module):
             assert (
                 0 <= kappa <= 1
             ), "The ratio of chemically informed feature feature map should be bounded between 0 and 1"
-            global_mean = torch.zeros((n_systems, Z.shape[1]), dtype=Z.dtype, device=Z.device)
+            global_mean = torch.zeros(
+                (n_systems, Z.shape[1]), dtype=Z.dtype, device=Z.device
+            )
             global_mean = global_mean.index_add(0, batch_ids, Z)
-            global_counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=Z.dtype)
+            global_counts = torch.bincount(batch_ids, minlength=n_systems).to(
+                dtype=Z.dtype
+            )
             global_mean = global_mean / global_counts.clamp_min(1).unsqueeze(-1)
             chemically_informed_descriptors = torch.cat(
                 (

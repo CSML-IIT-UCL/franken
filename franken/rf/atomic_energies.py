@@ -73,7 +73,9 @@ class AtomicEnergiesShift(torch.nn.Module):
         """
         if batch_ids is None:
             shift = torch.tensor(
-                0.0, dtype=self.atomic_energies.dtype, device=self.atomic_energies.device
+                0.0,
+                dtype=self.atomic_energies.dtype,
+                device=self.atomic_energies.device,
             )
             for z, atom_ene in zip(self.z_keys, self.atomic_energies):
                 mask = atomic_numbers == int(z.item())
@@ -82,10 +84,14 @@ class AtomicEnergiesShift(torch.nn.Module):
 
         batch_ids = batch_ids.to(dtype=torch.long, device=atomic_numbers.device)
         if num_systems is None:
-            num_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
+            num_systems = (
+                int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
+            )
 
         shift = torch.zeros(
-            (num_systems,), dtype=self.atomic_energies.dtype, device=self.atomic_energies.device
+            (num_systems,),
+            dtype=self.atomic_energies.dtype,
+            device=self.atomic_energies.device,
         )
         for z, atom_ene in zip(self.z_keys, self.atomic_energies):
             contrib = atom_ene * (atomic_numbers == z).to(
