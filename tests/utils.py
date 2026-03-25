@@ -46,6 +46,14 @@ def mocked_gnn(device, dtype, feature_dim: int = 32, backbone_id: str = "test"):
     # A bunch of code to initialize a mock for the GNN
     gnn = MagicMock()
     gnn.feature_dim = MagicMock(return_value=feature_dim)
+    gnn.cutoff_radius = MagicMock(return_value=6.0)
+    gnn.num_interaction_layers = MagicMock(return_value=2)
+    gnn.supported_atomic_types = MagicMock(
+        return_value=torch.tensor([1, 6, 8], dtype=torch.int64)
+    )
+    gnn.franken_train = MagicMock(return_value=None)
+    gnn.franken_val = MagicMock(return_value=None)
+
     fake_gnn_weight = torch.randn(3, feature_dim, device=device, dtype=dtype)
 
     def mock_descriptors(data):

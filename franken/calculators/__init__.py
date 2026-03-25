@@ -7,9 +7,11 @@ extended to support your favorite MD software.
 from .ase_calc import FrankenCalculator
 from .mace_inf_wrap import MaceInferenceWrapper
 from .metatomic_inf_wrap import MetatomicInferenceWrapper
+from .torchsim_inf_wrap import FrankenTorchSimModel
 
 __all__ = (
     "FrankenCalculator",
     "MaceInferenceWrapper",
     "MetatomicInferenceWrapper",
+    "FrankenTorchSimModel",
 )

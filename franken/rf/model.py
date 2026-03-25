@@ -167,10 +167,10 @@ class FrankenPotential(torch.nn.Module):
             return model
 
     def feature_map(self, data: Configuration):
-        """Obtain an embedding of each atom, and map it through
-        random features. The RF mapping computes an average so
-        the final feature map is per-configuration, instead of
-        per-atom.
+        """Obtain an embedding of each atom, and map it through random features.
+
+        The RF mapping computes an average so the final feature map is
+        per-configuration, instead of per-atom.
         """
         gnn_descriptors = self.gnn.descriptors(data)
 
@@ -181,7 +181,32 @@ class FrankenPotential(torch.nn.Module):
         return self.rf.feature_map(
             normalized_descriptors,
             atomic_numbers=data.atomic_numbers,
+            batch_ids=None,
         )
+
+    def feature_map_batched(self, data: Configuration) -> torch.Tensor:
+        """Compute one random-feature map per system in a batched configuration.
+
+        Expects ``data.batch_ids`` to map each atom to a system index.
+        """
+        batch_ids = data.batch_ids
+        if batch_ids is None:
+            return self.feature_map(data).view(1, -1)
+
+        batch_ids = batch_ids.to(dtype=torch.long)
+        gnn_descriptors = self.gnn.descriptors(data)
+        normalized_descriptors = self.input_scaler(
+            gnn_descriptors,
+            atomic_numbers=data.atomic_numbers,
+        )
+        fmaps = self.rf.feature_map(
+            normalized_descriptors,
+            atomic_numbers=data.atomic_numbers,
+            batch_ids=batch_ids,
+        )
+        if fmaps.ndim == 1:
+            return fmaps.view(1, -1)
+        return fmaps
 
     def _feature_map_aux(self, atom_pos: torch.Tensor, data: Configuration):
         old_atom_pos = data.atom_pos
@@ -239,6 +264,86 @@ class FrankenPotential(torch.nn.Module):
         energy = data.natoms * torch.tensordot(weights, feature_map, dims=1)
 
         return energy
+
+    def energy_batched(
+        self, weights: Optional[torch.Tensor], data: Configuration
+    ) -> torch.Tensor:
+        """Compute per-system energies for a batched configuration.
+
+        Returns a tensor of shape ``[n_systems]`` for a single RF model and
+        ``[n_linear_models, n_systems]`` for multiple RF weight vectors.
+        """
+        if weights is None:
+            weights = self.rf.weights
+        if weights.ndim == 1:
+            weights = weights.unsqueeze(0)
+
+        feature_map = self.feature_map_batched(data).to(dtype=weights.dtype)
+        natoms = data.natoms.to(dtype=weights.dtype).view(-1)
+
+        # [S, F] @ [F, M] -> [S, M], then transpose to [M, S]
+        energies = torch.matmul(feature_map, weights.transpose(0, 1)).transpose(0, 1)
+        energies = energies * natoms.unsqueeze(0)
+
+        if energies.shape[0] == 1:
+            return energies[0]
+        return energies
+
+    def energy_and_forces_batched(
+        self,
+        data: Configuration,
+        weights: Optional[torch.Tensor] = None,
+        add_energy_shift: bool = True,
+        compute_forces: bool = True,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Infer per-system energies and per-atom forces for batched inputs."""
+        batch_ids = data.batch_ids
+        if batch_ids is None:
+            batch_ids = torch.zeros(
+                data.atomic_numbers.shape[0],
+                dtype=torch.long,
+                device=data.atomic_numbers.device,
+            )
+
+        if compute_forces:
+            if weights is not None and weights.ndim == 2 and weights.shape[0] > 1:
+                raise ValueError(
+                    "Batched force computation supports one RF model at a time."
+                )
+            if (
+                self.rf.weights.ndim == 2
+                and self.rf.weights.shape[0] > 1
+                and weights is None
+            ):
+                raise ValueError(
+                    "Batched force computation supports one RF model at a time."
+                )
+            data.atom_pos.requires_grad_(True)
+
+        energy = self.energy_batched(weights, data)
+
+        if compute_forces:
+            total_energy = energy.sum()
+            grad_energy = torch.autograd.grad(
+                outputs=[total_energy],
+                inputs=[data.atom_pos],
+            )[0]
+            forces = -grad_energy.detach()
+        else:
+            forces = None
+
+        if add_energy_shift:
+            shift = self.energy_shift(
+                data.atomic_numbers,
+                batch_ids=batch_ids.to(dtype=torch.long),
+                num_systems=int(data.natoms.numel()),
+            )
+            if energy.ndim == 1:
+                energy = energy + shift
+            else:
+                energy = energy + shift.unsqueeze(0)
+
+        return energy.detach(), forces
 
     def _energy_aux(
         self,

@@ -21,13 +21,15 @@ def systems_to_batch(
     positions: torch.Tensor,
     edge_index: torch.Tensor,
     cell: torch.Tensor,
-    cell_shifts: torch.Tensor,
+    unit_shifts: torch.Tensor,
     species: torch.Tensor,
     options: metatomic.torch.NeighborListOptions,
     species_to_species_index: torch.Tensor,
     cutoff_function: str,
     cutoff_width: float,
     num_neighbors_adaptive: Optional[float] = None,
+    cartesian_shifts: torch.Tensor | None = None,
+    edge_system_idx: torch.Tensor | None = None,
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -43,38 +45,25 @@ def systems_to_batch(
         and are not used for feature computation. 2. input is taken as a config, and no concatenation is needed.
     Converts a list of systems to a batch required for the PET model.
 
-    :param systems: List of systems to convert to a batch.
-    :param options: Options for the neighbor list.
-    :param all_species_list: List of all atomic species in the dataset.
-    :param species_to_species_index: Mapping from atomic species to species indices.
-    :param cutoff_function: Type of the smoothing function at the cutoff.
-    :param cutoff_width: Width of the cutoff function for a cutoff mask.
-    :param num_neighbors_adaptive: Optional maximum number of neighbors per atom.
-        If provided, the adaptive cutoff scheme will be used for each atom to
-        approximately select this number of neighbors.
-    :return: A tuple containing the batch tensors.
-        The batch consists of the following tensors:
-        - `element_indices_nodes`: The atomic species of the central atoms
-        - `element_indices_neighbors`: The atomic species of the neighboring atoms
-        - `edge_vectors`: The cartesian edge vectors between the central atoms and their
-            neighbors
-        - `edge_distances`: The distances between the central atoms and their neighbors
-        - `padding_mask`: A padding mask indicating which neighbors are real, and which
-            are padded
-        - `reverse_neighbor_index`: The reversed neighbor list for each central atom
-        - `cutoff_factors`: The cutoff function values for each edge
-        - `system_indices`: The system index for each atom in the batch
-        - `sample_labels`: Labels indicating the system and atom indices for each atom
-
+    `unit_shifts` must contain integer cell shifts and is used to reconstruct
+    corresponding edge pairs. If `cartesian_shifts` is provided, it is used
+    directly for edge-vector computation.
     """
     centers = edge_index[:, 0]
     neighbors = edge_index[:, 1]
-    cells = cell.unsqueeze(0)  # Franken: unsqueeze needed to 'fake' multiple systems
 
-    # somehow the backward of this operation is very slow at evaluation,
-    # where there is only one cell, therefore we simplify the calculation
-    # for that case
-    cell_contributions = cell_shifts.to(cells.dtype) @ cells[0]
+    if cartesian_shifts is None:
+        if cell.ndim == 2:
+            cell_contributions = unit_shifts.to(cell.dtype) @ cell
+        else:
+            assert edge_system_idx is not None
+            edge_cells = cell[edge_system_idx]
+            cell_contributions = torch.einsum(
+                "ni,nij->nj", unit_shifts.to(edge_cells.dtype), edge_cells
+            )
+    else:
+        cell_contributions = cartesian_shifts.to(dtype=positions.dtype)
+
     edge_vectors = positions[neighbors] - positions[centers] + cell_contributions
     edge_distances = torch.norm(edge_vectors, dim=-1) + 1e-15
 
@@ -103,7 +92,7 @@ def systems_to_batch(
             centers = centers[cutoff_mask]
             neighbors = neighbors[cutoff_mask]
             edge_vectors = edge_vectors[cutoff_mask]
-            cell_shifts = cell_shifts[cutoff_mask]
+            unit_shifts = unit_shifts[cutoff_mask]
             edge_distances = edge_distances[cutoff_mask]
     else:
         pair_cutoffs = options.cutoff * torch.ones(
@@ -115,10 +104,6 @@ def systems_to_batch(
     max_edges_per_node = (
         int(torch.max(num_neighbors)) if num_neighbors.numel() > 0 else 0
     )
-
-    # uncomment these to print out stats on the adaptive cutoff behavior
-    # print("adaptive_cutoffs", *pair_cutoffs.tolist())
-    # print("num_neighbors", *num_neighbors.tolist())
 
     if cutoff_function.lower() == "bump":
         # use bump switching function for adaptive cutoff
@@ -151,7 +136,7 @@ def systems_to_batch(
 
     corresponding_edges = get_corresponding_edges(
         torch.concatenate(
-            [centers.unsqueeze(-1), neighbors.unsqueeze(-1), cell_shifts],
+            [centers.unsqueeze(-1), neighbors.unsqueeze(-1), unit_shifts],
             dim=-1,
         )
     )
@@ -227,10 +212,22 @@ class PETModelWrapper(torch.nn.Module):
         # Make torch jit script happy by having everything in local variables
         edge_index = data.edge_index
         cell = data.cell
-        cell_shifts = data.unit_shifts
-        assert cell_shifts is not None
+        unit_shifts = data.unit_shifts
+        cartesian_shifts = data.shifts
+        assert unit_shifts is not None
         assert edge_index is not None
         assert cell is not None
+
+        batch_ids = data.batch_ids
+        edge_system_idx: torch.Tensor | None = None
+        if cell.ndim == 3:
+            if batch_ids is None:
+                edge_system_idx = torch.zeros(
+                    edge_index.shape[0], dtype=torch.long, device=edge_index.device
+                )
+            else:
+                edge_system_idx = batch_ids.to(dtype=torch.long)[edge_index[:, 0]]
+
         species = data.atomic_numbers
         # **Stage 0: Input Preparation**
         (
@@ -245,13 +242,15 @@ class PETModelWrapper(torch.nn.Module):
             data.atom_pos,
             edge_index,
             cell,
-            cell_shifts,
+            unit_shifts,
             species,
             nl_options,
             self.base_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
             self.base_model.cutoff_function,
             self.base_model.cutoff_width,
             self.base_model.num_neighbors_adaptive,
+            cartesian_shifts=cartesian_shifts,
+            edge_system_idx=edge_system_idx,
         )
         # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!
         # **Stage 1: Feature Computation via GNN Layers**
