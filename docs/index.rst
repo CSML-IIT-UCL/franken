@@ -69,6 +69,7 @@ Advantages of Franken
    topics/metrics.md
    topics/multigpu.md
    topics/lammps.md
+   topics/torchsim.md
 
 .. toctree::
     :maxdepth: 2
