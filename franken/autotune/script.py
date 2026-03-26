@@ -382,6 +382,7 @@ def autotune(cfg: AutotuneConfig):
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,
             trainer=trainer,
+            eval_splits=cfg.eval_splits,
         )
     except Exception as e:
         logger.error("Error encountered in autotune. Exiting.", exc_info=e)

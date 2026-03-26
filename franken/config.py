@@ -3,7 +3,7 @@ import ast
 from copy import deepcopy
 from dataclasses import dataclass, field
 import logging
-from typing import Any, ClassVar, Literal, Sequence, Union
+from typing import Any, ClassVar, Literal, Optional, Sequence, Union
 
 logger = logging.getLogger("franken")
 
@@ -411,3 +411,6 @@ class AutotuneConfig:
 
     console_logging_level: Literal["DEBUG", "INFO", "WARN", "ERROR"] = "INFO"
     """Controls verbosity"""
+
+    eval_splits: Optional[list[str]] = None
+    """Evaluate only the specified splits e.g. ['val', 'test']. The default value of None runs the evaluation on all splits."""
