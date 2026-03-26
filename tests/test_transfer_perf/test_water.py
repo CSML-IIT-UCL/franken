@@ -13,7 +13,6 @@ from git import Repo
 import ase.build
 import ase.md.velocitydistribution
 import ase.units
-import ase.io
 import numpy as np
 import torch
 
@@ -30,7 +29,7 @@ from franken.backbones.utils import CacheDir
 from franken.rf.model import FrankenPotential
 
 
-def training(
+def train_eval_franken(
     gnn_config: BackboneConfig,
     dset: str,
     n_train_samples: int,  # 128
@@ -40,9 +39,10 @@ def training(
     train_path = DATASET_REGISTRY.get_path(dset, "train", base_path=CacheDir.get())
     val_path = DATASET_REGISTRY.get_path(dset, "val", base_path=CacheDir.get())
 
-    dataset_cfg = DatasetConfig(train_path=str(train_path),
-                                max_train_samples=n_train_samples,
-                                val_path=str(val_path)
+    dataset_cfg = DatasetConfig(
+        train_path=str(train_path),
+        max_train_samples=n_train_samples,
+        val_path=str(val_path),
     )
 
     rf_config = MultiscaleGaussianRFConfig(
@@ -65,7 +65,8 @@ def training(
         seed=seed,
         jac_chunk_size='auto',
         run_dir="./results",
-        console_logging_level="DEBUG",
+        console_logging_level="WARN",
+        eval_splits=["val"],
     )
 
     run_path = autotune(autotune_cfg)
@@ -248,6 +249,7 @@ def run(db_path):
     if os.path.isfile(db_path):
         with open(db_path, "rb") as fh:
             db = pickle.load(fh)
+        print(f"Loaded DB from {db_path}")
 
     for gnn_ckpt in gnn_ckpts:
         train_info, franken_model = None, None
@@ -270,7 +272,7 @@ def run(db_path):
             # Train (only once for all compile options)
             if train_info is None or franken_model is None:
                 print(f"[{logtime()}] starting training of {gnn_config.path_or_id}")
-                train_info, franken_model = training(
+                train_info, franken_model = train_eval_franken(
                     gnn_config=gnn_config,
                     **train_options
                 )
