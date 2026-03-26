@@ -1,4 +1,6 @@
+from functools import partial
 import os
+import platform
 import pytest
 import torch.distributed
 from torch.multiprocessing import Process, Pipe, SimpleQueue
@@ -29,9 +31,10 @@ class ThrowingProcess(Process):
 
 def init_processes(rank, size, fn, backend='gloo'):
     """ Initialize the distributed environment. """
-    os.environ['MASTER_ADDR'] = '127.0.0.64'
-    os.environ['MASTER_PORT'] = '26512'
-    os.environ['GLOO_SOCKET_IFNAME'] = "lo"
+    loopback_address = "lo" if platform.system() == "Linux" else "lo0"
+    os.environ['MASTER_ADDR'] = '127.0.0.1'
+    os.environ['MASTER_PORT'] = '26515'
+    os.environ['GLOO_SOCKET_IFNAME'] = loopback_address
     torch.distributed.init_process_group(backend, rank=rank, world_size=size)
     fn()
 
@@ -61,54 +64,61 @@ def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
     return data
 
 
+def distributed_length_inner_fn(num_samples):
+    data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
+    dataset = SimpleAtomsDataset(
+        data_path,
+        split="train",
+        num_random_subsamples=num_samples,
+        subsample_rng=None,
+    )
+    assert len(dataset) == num_samples
+    dataloader = dataset.get_dataloader(True)
+    rank = torch.distributed.get_rank()
+    ws = torch.distributed.get_world_size()
+    assert len(dataloader) == (len(dataset) // ws) + int(len(dataset) % ws > rank)
+
+
 @pytest.mark.parametrize("num_samples", [1, 7, 19])
 @pytest.mark.parametrize("num_procs", [1, 4])
 def test_distributed_dataloader_length(num_samples, num_procs):
-    def inner_fn():
-        data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-        dataset = SimpleAtomsDataset(
-            data_path,
-            split="train",
-            num_random_subsamples=num_samples,
-            subsample_rng=None,
-        )
-        assert len(dataset) == num_samples
-        dataloader = dataset.get_dataloader(True)
-        rank = torch.distributed.get_rank()
-        ws = torch.distributed.get_world_size()
-        assert len(dataloader) == (len(dataset) // ws) + int(len(dataset) % ws > rank)
+    fn_ = partial(distributed_length_inner_fn, num_samples)
+    init_distributed_cpu(num_procs, fn_)
 
-    init_distributed_cpu(num_procs, inner_fn)
+
+def distributed_order_inner_fn(num_samples, num_procs, ids_queue):
+    data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
+    dataset = SimpleAtomsDataset(
+        data_path,
+        split="train",
+        num_random_subsamples=num_samples,
+        subsample_rng=None,
+    )
+    assert len(dataset) == num_samples
+    dataloader = dataset.get_dataloader(True)
+    rank = torch.distributed.get_rank()
+    dl_elements = [el for el in dataloader]
+    dl_id = 0
+    for i in range(rank, num_samples, num_procs):
+        expected = dataset[i]
+        assert isinstance(expected, tuple)
+        torch.testing.assert_close(
+            dl_elements[dl_id][0].atom_pos, expected[0].atom_pos
+        )
+        torch.testing.assert_close(
+            dl_elements[dl_id][1].forces, expected[1].forces
+        )
+        dl_id += 1
+        ids_queue.put(i)
+    assert dl_id == len(dl_elements)
 
 
 def test_distributed_dataloader_order():
     num_samples = 7
     num_procs = 3
     ids_queue = SimpleQueue()
-    def inner_fn():
-        data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-        dataset = SimpleAtomsDataset(
-            data_path,
-            split="train",
-            num_random_subsamples=num_samples,
-            subsample_rng=None,
-        )
-        assert len(dataset) == num_samples
-        dataloader = dataset.get_dataloader(True)
-        rank = torch.distributed.get_rank()
-        dl_elements = [el for el in dataloader]
-        dl_id = 0
-        for i in range(rank, num_samples, num_procs):
-            torch.testing.assert_close(
-                dl_elements[dl_id][0].atom_pos, dataset[i][0].atom_pos
-            )
-            torch.testing.assert_close(
-                dl_elements[dl_id][1].forces, dataset[i][1].forces
-            )
-            dl_id += 1
-            ids_queue.put(i)
-        assert dl_id == len(dl_elements)
-    init_distributed_cpu(num_procs, inner_fn)
+    fn_ = partial(distributed_order_inner_fn, num_samples, num_procs, ids_queue)
+    init_distributed_cpu(num_procs, fn_)
     # Assert all IDs were processed - only once
     all_ids = []
     while not ids_queue.empty():
