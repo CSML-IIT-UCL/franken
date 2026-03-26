@@ -199,7 +199,7 @@ class BackboneConfig(ABC):
         return asdict_with_classvar(self)
 
     @staticmethod
-    def from_ckpt(ckpt):
+    def from_ckpt(ckpt: dict):
         if ckpt["family"].lower() == "mace":
             cls = MaceBackboneConfig
         elif ckpt["family"].lower() == "fairchem":
