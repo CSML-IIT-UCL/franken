@@ -65,8 +65,8 @@ def train_eval_franken(
         seed=seed,
         jac_chunk_size='auto',
         run_dir="./results",
-        console_logging_level="WARN",
-        eval_splits=["val"],
+        console_logging_level="DEBUG",
+        # eval_splits=["val"],  # TODO: eval_splits doesn't work!
     )
 
     run_path = autotune(autotune_cfg)
@@ -158,16 +158,25 @@ def molecular_dynamics_ase(
     # 3. Run MD (collect timings)
     times = []
     eval_every = 10
-    for i in range(num_steps // eval_every):
-        t_s = time.time()
-        integrator.run(eval_every)  # run for 10 steps at a time
-        t_e = time.time()
-        if i > 3:  # warmup for time collection
-            times.append(t_e - t_s)
-        energy = atoms.get_total_energy()
-        assert not np.any(np.isnan(energy))
+    stable = True
+    i = 0
+    try:
+        for i in range(num_steps // eval_every):
+            t_s = time.time()
+            integrator.run(eval_every)  # run for 10 steps at a time
+            t_e = time.time()
+            if i > 3:  # warmup for time collection
+                times.append(t_e - t_s)
+            energy = atoms.get_total_energy()
+            print(f"{i=} Energy: {float(energy):.4f}")
+            assert not np.any(np.isnan(energy))
+    except AssertionError:
+        print("Unstable MD!")
+        stable = False
     return {
-        "md_time_per_atom": np.mean(times) / eval_every / num_atoms
+        "md_time_per_atom": np.mean(times) / eval_every / num_atoms,
+        "stable": stable,
+        "num_iterations": i,
     }
 
 
