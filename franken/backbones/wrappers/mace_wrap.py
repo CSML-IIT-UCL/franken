@@ -349,9 +349,11 @@ class FrankenMACE(torch.nn.Module):
             )
         ]
 
+    @torch.jit.export
     def franken_train(self) -> None:
         pass
 
+    @torch.jit.export
     def franken_val(self) -> None:
         pass
 

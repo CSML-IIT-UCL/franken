@@ -286,9 +286,11 @@ class PETModelWrapper(torch.nn.Module):
     def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]:
         return self.base_model.requested_neighbor_lists()
 
+    @torch.jit.export
     def franken_train(self) -> None:
         self.use_manual_attention = True
 
+    @torch.jit.export
     def franken_val(self) -> None:
         self.use_manual_attention = False
 
