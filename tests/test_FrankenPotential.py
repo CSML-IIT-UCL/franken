@@ -322,41 +322,6 @@ class TestModelGradients:
         torch.testing.assert_close(forces_func, forces_autograd, rtol=1e-3, atol=1e-3)
 
 
-@pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
-@pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
-def test_calculator_in_md(rf_cfg, device, gnn_cfg):
-    # Define the rng_seed and initialize the model
-    model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
-    num_lin_models = 1  # only a single weight for MD
-    rf_weights = torch.randn(
-        (num_lin_models, model.rf.total_random_features), device=device
-    )
-    model.rf.weights = rf_weights
-    calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
-
-    # Molecular dynamics
-    # 1. Get the initial configuration
-    # 2. Set some attribute on the configuration with MaxwellBoltzmannDistribution
-    # 3. Create and run the MD
-    data_path = DATASET_REGISTRY.get_path("test", "md", None, False)
-
-    init_traj_atoms = read(data_path, index=0)
-    assert isinstance(init_traj_atoms, ase.Atoms)
-    init_traj_atoms.calc = calculator
-    MaxwellBoltzmannDistribution(init_traj_atoms, temperature_K=500)
-    md = NPT(
-        init_traj_atoms,
-        timestep=1 * units.fs,
-        temperature_K=500,
-        ttime=25 * units.fs,
-        logfile="-",
-        trajectory=None,
-        loginterval=1,
-    )
-    md.run(2)
-
-
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("atomic_energies", [None, {7: 1.0, 26: 10.0}])

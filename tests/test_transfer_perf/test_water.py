@@ -111,6 +111,7 @@ def molecular_dynamics_ase(
     atoms: ase.Atoms, 
     device,
     num_steps: int,
+    seed: int,
 ):
     num_atoms = len(atoms)
     # 1. Ase calculator
@@ -120,12 +121,14 @@ def molecular_dynamics_ase(
     )
     atoms.calc = ase_calc
     # 2. Setup MD
+    rng = np.random.default_rng(seed=seed)
     ase.md.velocitydistribution.MaxwellBoltzmannDistribution(atoms, temperature_K=300)
     integrator = ase.md.Langevin(
         atoms,
         timestep=1.0 * ase.units.fs,
         temperature_K=300,
         friction=0.1 / ase.units.fs,
+        rng=rng
     )
     # 3. Run MD (collect timings)
     times = []
@@ -183,6 +186,7 @@ def run(db_path):
     }
     md_options = {
         "num_steps": 1000,
+        "seed": 1,
     }
     train_options = {
         "n_train_samples": 128,

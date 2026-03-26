@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Literal, Union
+from typing import Union
 
 import numpy as np
 import torch
 from ase.calculators.calculator import Calculator, all_changes
 
+from franken.config import BackboneConfig
 from franken.data import BaseAtomsDataset, Configuration
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
@@ -27,7 +28,7 @@ class FrankenCalculator(Calculator):
         franken_ckpt: Union[FrankenPotential, str, Path],
         device=None,
         rf_weight_id: int | None = None,
-        forces_mode: Literal["torch.func", "torch.autograd"] = "torch.autograd",
+        gnn_config: BackboneConfig | None = None,
         **calc_kwargs,
     ):
         """Initialize FrankenCalculator class from a franken model.
@@ -40,7 +41,6 @@ class FrankenCalculator(Calculator):
             rf_weight_id : ID of the random feature weights.
                 Can generally be left to ``None`` unless the checkpoint contains multiple trained models.
         """
-        # TODO: Remove forces_mode, torch.autograd is always the right way.
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
         if isinstance(franken_ckpt, torch.nn.Module):
@@ -61,15 +61,23 @@ class FrankenCalculator(Calculator):
                 )
         self.franken.gnn.franken_val()
 
+        if hasattr(self.franken, "gnn_config"):
+            gnn_config = self.franken.gnn_config
+        elif gnn_config is None:
+            raise ValueError(
+                "Franken model does not have a GNN configuration."
+                " This can happen if the model is scripted. "
+                "Please pass an explicit gnn_config object instead."
+            )
+
         self.dataset = BaseAtomsDataset.from_path(
             data_path=None,
             split="md",
-            gnn_config=self.franken.gnn_config,
+            gnn_config=gnn_config,
         )
         self.device = (
             device if device is not None else next(self.franken.parameters()).device
         )
-        self.forces_mode = forces_mode
 
     def calculate(
         self,
@@ -79,10 +87,6 @@ class FrankenCalculator(Calculator):
     ):
         if properties is None:
             properties = self.implemented_properties
-        if "forces" not in properties:
-            forces_mode = "no_forces"
-        else:
-            forces_mode = self.forces_mode
 
         super().calculate(atoms, properties, system_changes)
 
@@ -92,7 +96,7 @@ class FrankenCalculator(Calculator):
         assert isinstance(cpu_data, Configuration)
         data = cpu_data.to(self.device)
 
-        energy, forces = self.franken.energy_and_forces(data, forces_mode=forces_mode)
+        energy, forces = self.franken(data, compute_forces="forces" in properties)
 
         if energy.ndim == 0:
             self.results["energy"] = energy.item()
