@@ -21,6 +21,11 @@ GNN_CONFIGS = [
     PETBackboneConfig("PET_MAD/xs_1.5")
 ]
 
+EXPECTED_ENERGIES = {
+    "mace_mp/small": -0.614428,
+    "PET_MAD/xs_1.5": 0.6831,
+}
+
 def init_md(calc):
     # Molecular dynamics
     # 1. Get the initial configuration
@@ -46,17 +51,24 @@ def init_md(calc):
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
 def test_calculator_in_md(device, gnn_cfg):
+    np.random.seed(1)
+    torch.manual_seed(1)
     rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
+    torch.manual_seed(1)
+    torch.cuda.manual_seed(1)
     rf_weights = torch.randn(
-        (num_lin_models, model.rf.total_random_features), device=device
-    )
+        (num_lin_models, model.rf.total_random_features)
+    ).to(device=device)  # random number gen on CPU for consistency
     model.rf.weights = rf_weights
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_md(calculator)
     md.run(2)
+    energy = md.atoms.get_total_energy()
+    np.testing.assert_allclose(energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-3)
+    
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -64,37 +76,42 @@ def test_calculator_in_md(device, gnn_cfg):
 def test_calculator_jitscript(device, gnn_cfg):
     # unpatching is needed for MACE models in case the patch has already been applied.
     unpatch_e3nn()
+    np.random.seed(1)
+    torch.manual_seed(1)
     rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
     rf_weights = torch.randn(
-        (num_lin_models, model.rf.total_random_features), device=device
-    )
+        (num_lin_models, model.rf.total_random_features)
+    ).to(device=device)
     model.rf.weights = rf_weights
-    model = torch.jit.script(model)
-    print("Scripted")
-    print(model.gnn.__dict__)
-    print(model.gnn.franken_val)
+    jit_model = torch.jit.script(model)
     calculator = FrankenCalculator(
-        model, device=device, forces_mode="torch.autograd", gnn_config=gnn_cfg
+        jit_model, device=device, forces_mode="torch.autograd", gnn_config=gnn_cfg
     )
     md = init_md(calculator)
     md.run(2)
+    jit_energy = md.atoms.get_total_energy()
+    np.testing.assert_allclose(jit_energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-3)
 
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
 def test_calculator_compile(device, gnn_cfg):
+    np.random.seed(1)
+    torch.manual_seed(1)
     rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
     rf_weights = torch.randn(
-        (num_lin_models, model.rf.total_random_features), device=device
-    )
+        (num_lin_models, model.rf.total_random_features)
+    ).to(device=device)
     model.rf.weights = rf_weights
     model = torch.compile(model)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_md(calculator)
     md.run(2)
+    compiled_energy = md.atoms.get_total_energy()
+    np.testing.assert_allclose(compiled_energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-3)
