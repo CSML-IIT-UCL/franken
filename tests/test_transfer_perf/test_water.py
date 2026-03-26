@@ -210,7 +210,7 @@ def run(db_path):
     # 0. Options
     md_data_info = {
         "data_type": "water",
-        "num_molecules": 50,
+        "num_molecules": 100,
         # "cell_reps": 5,  # 5^3 * 2 = 250 atoms
     }
     md_options = {
@@ -233,13 +233,68 @@ def run(db_path):
             "interaction_block": 2,
         },
         {
+            "family": "mace",
+            "path_or_id": "mace_mp/medium-0b3",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_mpa/medium-0",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_omat/small-0",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_omat/medium-0",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_matpes/pbe-0",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_mh/0",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_mh/1",
+            "interaction_block": 2,
+        },
+        {
+            "family": "mace",
+            "path_or_id": "mace_off/medium24",
+            "interaction_block": 2,
+        },
+        {
             "family": "pet",
             "path_or_id": "PET_MAD/xs_1.5",
         },
         {
-            "family": "mace",
-            "path_or_id": "mace_mp/medium",
-            "interaction_block": 2,
+            "family": "pet",
+            "path_or_id": "PET_MAD/s_1.5",
+        },
+        {
+            "family": "pet",
+            "path_or_id": "PET_OMat/xs_1.0",
+        },
+        {
+            "family": "pet",
+            "path_or_id": "PET_OMat/s_1.0",
+        },
+        {
+            "family": "pet",
+            "path_or_id": "PET_OMat/m_1.0",
+        },
+        {
+            "family": "pet",
+            "path_or_id": "PET_OMat/l_1.0",
         },
     ]
     repo = Repo(pathlib.Path(__file__).parent.resolve(), search_parent_directories=True)
