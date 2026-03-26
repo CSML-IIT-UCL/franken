@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import time
 from packaging.version import Version
 import requests
 
@@ -199,6 +200,7 @@ def download_checkpoint(gnn_backbone_id: str, cache_dir: str | None = None) -> N
 
 
 def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
+    t_start = time.time()
     gnn_config_dict = asdict_with_classvar(gnn_config)
     gnn_backbone_id = gnn_config_dict.pop("path_or_id")
     backbone_family = gnn_config_dict.pop("family")
@@ -232,7 +234,7 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
                 )
             logger.error(err_msg, exc_info=import_err)
             raise
-        return FrankenSchNetWrap.load_from_checkpoint(
+        model = FrankenSchNetWrap.load_from_checkpoint(
             str(ckpt_path), gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
         )
     elif backbone_family == "mace":
@@ -241,7 +243,7 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
         except ImportError as import_err:
             logger.error(err_msg, exc_info=import_err)
             raise
-        return FrankenMACE.load_from_checkpoint(
+        model = FrankenMACE.load_from_checkpoint(
             str(ckpt_path),
             gnn_backbone_id=gnn_backbone_id,
             map_location="cpu",
@@ -253,7 +255,7 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
         except ImportError as import_err:
             logger.error(err_msg, exc_info=import_err)
             raise
-        return FrankenSevenn.load_from_checkpoint(
+        model = FrankenSevenn.load_from_checkpoint(
             ckpt_path, gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
         )
     elif backbone_family == "pet":
@@ -262,8 +264,10 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
         except ImportError as import_err:
             logger.error(err_msg, exc_info=import_err)
             raise
-        return PETModelWrapper.load_from_checkpoint(
+        model = PETModelWrapper.load_from_checkpoint(
             ckpt_path, gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
         )
     else:
         raise ValueError(f"Unknown backbone family {backbone_family}")
+    logger.debug(f"Loaded model from {ckpt_path} in {time.time() - t_start:.2f}s")
+    return model
