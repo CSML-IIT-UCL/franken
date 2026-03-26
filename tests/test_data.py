@@ -8,6 +8,7 @@ from torch.multiprocessing import Process, Pipe, SimpleQueue
 from franken.data.base import Configuration, SimpleAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 
+
 class ThrowingProcess(Process):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

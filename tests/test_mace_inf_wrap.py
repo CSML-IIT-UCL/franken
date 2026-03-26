@@ -4,13 +4,8 @@ Test the model conversion to LAMMPS (essentially testing torch-scriptability, no
 
 import os
 
-import numpy as np
 import pytest
 import torch
-import ase
-import ase.md.velocitydistribution
-import ase.build
-import ase.units
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.backbones.wrappers.mace_wrap import atom_numbers_to_node_attrs
@@ -37,7 +32,6 @@ RF_PARAMETRIZE = [
 @pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
 def test_wrap_compile(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
-    unpatch_e3nn()  # needed in case some previous test ran the patching code
     gnn_cfg = BackboneConfig.from_ckpt(
         dict(family=backbone[0], path_or_id=backbone[1])
     )
@@ -76,6 +70,7 @@ def test_wrap_compile(rf_cfg, device, backbone):
         model.save(model_save_path)
 
         # Step 3: Run create_lammps_model
+        unpatch_e3nn()  # needed in case some previous test ran the patching code
         comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
 
         # Step 4: Load saved model
@@ -163,6 +158,7 @@ def test_wrap_asemd(rf_cfg, device, backbone):
         model.save(model_save_path)
 
         # Step 3: Initialize MACE LAMMPS inference wrapper and re-load it
+        unpatch_e3nn()  # needed in case some previous test ran the patching code
         comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
         comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
 
