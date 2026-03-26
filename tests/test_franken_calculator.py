@@ -57,8 +57,6 @@ def test_calculator_in_md(device, gnn_cfg):
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
-    torch.manual_seed(1)
-    torch.cuda.manual_seed(1)
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)  # random number gen on CPU for consistency
