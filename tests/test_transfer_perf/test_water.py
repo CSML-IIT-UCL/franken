@@ -24,7 +24,7 @@ from franken.config import (
     MultiscaleGaussianRFConfig, SolverConfig, HPSearchConfig, 
     AutotuneConfig
 )
-
+from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.backbones.utils import CacheDir
 from franken.rf.model import FrankenPotential
@@ -131,6 +131,7 @@ def get_md_data(data_type: Literal["water", "diamond"], **kwargs) -> ase.Atoms:
 def molecular_dynamics_ase(
     model: FrankenPotential, 
     atoms: ase.Atoms, 
+    gnn_config: BackboneConfig,
     device,
     num_steps: int,
     seed: int,
@@ -140,6 +141,7 @@ def molecular_dynamics_ase(
     ase_calc = FrankenCalculator(
         franken_ckpt=model,
         device=device,
+        gnn_config=gnn_config,
     )
     atoms.calc = ase_calc
     # 2. Setup MD
@@ -180,7 +182,9 @@ def check_db_has_config(db: Sequence[dict[str, Any]], config: dict[str, Any]) ->
     for db_info in db:
         is_equal = True
         db_info_c = copy(db_info)
-        db_info_c.pop("results")  # don't care about results!
+        for k in list(db_info_c.keys()):
+            if k.startswith("results_"):
+                db_info_c.pop(k)  # don't care about results!
         for new_k, new_v in config.items():
             try:
                 db_info_v = db_info_c.pop(new_k)
@@ -223,13 +227,13 @@ def run(db_path):
     # 1. Define all gnn configs we're interested in
     gnn_ckpts = [
         {
-            "family": "pet",
-            "path_or_id": "PET_MAD/xs_1.5",
-        },
-        {
             "family": "mace",
             "path_or_id": "mace_mp/small",
             "interaction_block": 2,
+        },
+        {
+            "family": "pet",
+            "path_or_id": "PET_MAD/xs_1.5",
         },
         {
             "family": "mace",
@@ -273,13 +277,17 @@ def run(db_path):
             # 2. Define preprocessing steps for the franken-potential e.g. compile
             if compile == "jit":
                 print(f"[{logtime()}] jit compiling {gnn_config.path_or_id}")
+                try:
+                    unpatch_e3nn()
+                except:
+                    pass
                 franken_model = torch.jit.script(franken_model)
             elif compile == "compile":
                 print(f"[{logtime()}] torch compiling {gnn_config.path_or_id}")
                 franken_model = torch.compile(franken_model)
             print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
             md_info = molecular_dynamics_ase(
-                franken_model, md_data, device=device, **md_options
+                franken_model, md_data, gnn_config=gnn_config, device=device, **md_options
             )
             results_info = add_prefix(md_info | train_info, "results")
             all_info = key_info | results_info # type: ignore
