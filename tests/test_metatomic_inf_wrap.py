@@ -30,7 +30,6 @@ RF_PARAMETRIZE = [
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
 
-
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
