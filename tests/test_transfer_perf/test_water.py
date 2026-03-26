@@ -86,19 +86,42 @@ def training(
     return best_info, best_model
 
 
+def box_size_from_n_molecules(n_mol, volume_per_mol=30.0):
+    total_volume = n_mol * volume_per_mol
+    L = total_volume ** (1/3)
+    return L
+
+
+def build_water_box(n_mol):
+    h2o = ase.build.molecule("H2O")
+    L = box_size_from_n_molecules(n_mol)
+
+    atoms = ase.Atoms(cell=[L, L, L], pbc=True)
+
+    for _ in range(n_mol):
+        mol = h2o.copy()
+
+        # random position
+        mol.translate(np.random.rand(3) * L)
+
+        # random orientation
+        mol.rotate(np.random.rand() * 360, 'x')
+        mol.rotate(np.random.rand() * 360, 'y')
+        mol.rotate(np.random.rand() * 360, 'z')
+
+        atoms += mol
+
+    return atoms
+
+
 def get_md_data(data_type: Literal["water", "diamond"], **kwargs) -> ase.Atoms:
     if data_type == "diamond":
         num_primitive_reps = kwargs.pop("cell_reps", 3)
         primitive = ase.build.bulk(name="C", crystalstructure="diamond", a=3.567)
         atoms = ase.build.make_supercell(primitive, num_primitive_reps * np.eye(3))
     elif data_type == "water":
-        val_path = DATASET_REGISTRY.get_path("water", "val", base_path=CacheDir.get())
-        read_ase_atoms = ase.io.read(val_path, index=":")
-        if isinstance(read_ase_atoms, ase.Atoms):
-            # workaround edge case of a single configuration
-            atoms = read_ase_atoms
-        else:
-            atoms = read_ase_atoms[0]
+        num_molecules = kwargs.pop("num_molecules", 100)
+        atoms = build_water_box(num_molecules)
     else:
         raise ValueError(data_type)
     for key in kwargs.keys():
@@ -178,11 +201,13 @@ def check_db_has_config(db: Sequence[dict[str, Any]], config: dict[str, Any]) ->
 def logtime():
     return datetime.datetime.now().isoformat()
 
+
 def run(db_path):
     # 0. Options
     md_data_info = {
-        "data_type": "diamond",
-        "cell_reps": 5,  # 5^3 * 2 = 250 atoms
+        "data_type": "water",
+        "num_molecules": 50,
+        # "cell_reps": 5,  # 5^3 * 2 = 250 atoms
     }
     md_options = {
         "num_steps": 1000,
