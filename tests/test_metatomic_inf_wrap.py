@@ -13,6 +13,7 @@ import torch
 from metatomic.torch import load_atomistic_model
 from metatomic.torch.ase_calculator import MetatomicCalculator
 
+from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.calculators.metatomic_inf_wrap import create_metatomic
 from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.data import BaseAtomsDataset
@@ -73,6 +74,7 @@ def test_preserves_info(rf_cfg, device, backbone):
         model.save(model_save_path)
 
         # Step 3: Run create_metatomic
+        unpatch_e3nn()  # MACE needs it before jit script
         comp_model_path = create_metatomic(model_path=model_save_path, rf_weight_id=None, dtype=dtype)
 
         # Step 4: Load saved model
@@ -142,6 +144,7 @@ def test_calc_for_asemd(rf_cfg, device, dtype, backbone):
         model.save(model_save_path)
 
         # Step 3: Run create_metatomic
+        unpatch_e3nn()  # MACE needs it before jit script
         comp_model_path = create_metatomic(model_path=model_save_path, rf_weight_id=None, dtype=dtype)
 
         # Step 4: Crease ASE structure for MD
