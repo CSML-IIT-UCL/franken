@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import sys
+import time
 import warnings
 from pathlib import Path
 from typing import Generator, Literal, NamedTuple
@@ -178,6 +179,7 @@ def run_autotune(
     trainer: BaseTrainer,
     metrics: list[str] | None = None,
     best_model_selection: list[str] | None = None,
+    eval_splits: list[str] | None = None,
 ):
     if metrics is None:
         metrics = DEFAULT_AUTOTUNE_METRICS.copy()
@@ -202,6 +204,8 @@ def run_autotune(
 
         logs, weights = trainer.fit(model, solver_param_grid)
         for split_name, loader in loaders.items():
+            if eval_splits is not None and split_name not in eval_splits:
+                continue
             logs = trainer.evaluate(
                 model,
                 loader,
@@ -336,13 +340,17 @@ def autotune(cfg: AutotuneConfig):
             logger.info(f"Run folder: {run_dir}")
             dist_utils.barrier()
 
+        t_start = time.time()
         train_path, val_path, test_path = get_dataset_paths(
             cfg.dataset.train_path,
             cfg.dataset.val_path,
             cfg.dataset.test_path,
             cfg.dataset.name,
         )
+        t_end = time.time()
+        logger.debug(f"Fetched datasets in {t_end - t_start:.2f}s")
 
+        t_start = time.time()
         loaders = init_loaders(
             cfg.backbone,
             train_path,
@@ -351,6 +359,8 @@ def autotune(cfg: AutotuneConfig):
             cfg.dataset.max_train_samples,
             cfg.seed,
         )
+        t_end = time.time()
+        logger.debug(f"Initialized data-loaders in {t_end - t_start:.2f}s")
 
         trainer = RandomFeaturesTrainer(
             train_dataloader=loaders["train"],
