@@ -1,4 +1,5 @@
 import os
+from packaging.version import Version
 
 import pytest
 import torch
@@ -11,8 +12,6 @@ from franken.config import BackboneConfig, GaussianRFConfig
 from franken.data import BaseAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.rf.model import FrankenPotential
-
-from packaging.version import Version
 
 from franken.utils.misc import no_jit
 
