@@ -163,7 +163,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             try:
                 weights = self.solve(**hp_val)
             except torch.linalg.LinAlgError as e:
-                weights = torch.full_like(all_weights[hp_idx], torch.inf)
+                weights = torch.zeros_like(all_weights[hp_idx])
                 num_failed += 1
                 logger.debug(f"Hyperparameter {hp_val} failed. Error: {e}")
             finally:
