@@ -44,8 +44,6 @@ def training(
                                 max_train_samples=n_train_samples,
                                 val_path=str(val_path)
     )
-    print("Dataset configuration")
-    print(dataset_cfg)
 
     rf_config = MultiscaleGaussianRFConfig(
         num_random_features=n_rf,
@@ -67,6 +65,7 @@ def training(
         seed=seed,
         jac_chunk_size='auto',
         run_dir="./results",
+        console_logging_level="DEBUG",
     )
 
     run_path = autotune(autotune_cfg)
