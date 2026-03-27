@@ -14,4 +14,5 @@
 micromamba activate franken-dev
 cd /leonardo/home/userexternal/gmeanti0/franken
 
-PYTHONPATH='.' python tests/test_transfer_perf/test_water.py --db-path=tests/test_transfer_perf/results_2603.pkl
+export PYTHONUNBUFFERED=1
+PYTHONPATH='.' python tests/test_transfer_perf/test_water.py --db-path=tests/test_transfer_perf/results_2703.pkl

@@ -67,7 +67,7 @@ def train_eval_franken(
         jac_chunk_size='auto',
         run_dir="./results",
         console_logging_level="DEBUG",
-        # eval_splits=["val"],  # TODO: eval_splits doesn't work!
+        eval_splits=["val"],  # TODO: eval_splits doesn't work!
     )
 
     run_path = autotune(autotune_cfg)
@@ -224,7 +224,7 @@ def run(db_path):
         # "cell_reps": 5,  # 5^3 * 2 = 250 atoms
     }
     md_options = {
-        "num_steps": 100,
+        "num_steps": 1000,
         "seed": 1,
     }
     train_options = {
@@ -336,6 +336,8 @@ def run(db_path):
 
             # Train (only once for all compile options)
             if train_info is None or franken_model is None:
+                torch.manual_seed(train_options["seed"])
+                np.random.seed(train_options["seed"])
                 print(f"[{logtime()}] starting training of {gnn_config.path_or_id}")
                 train_info, franken_model = train_eval_franken(
                     gnn_config=gnn_config,
@@ -356,6 +358,8 @@ def run(db_path):
                 else:
                     franken_model_comp = franken_model
                 print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
+                torch.manual_seed(md_options["seed"])
+                np.random.seed(md_options["seed"])
                 md_info = molecular_dynamics_ase(
                     franken_model_comp, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
                 )
