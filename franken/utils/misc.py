@@ -289,6 +289,10 @@ def setup_logger(
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    # Remove all previously existing handlers
+    for handler in flogger.handlers:
+        flogger.removeHandler(handler)
+
     # Create console handler
     ch = logging.StreamHandler(stream=sys.stdout)
     ch.setLevel(level)
