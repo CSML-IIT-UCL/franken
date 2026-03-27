@@ -1,11 +1,12 @@
 import argparse
-from copy import copy
+from copy import copy, deepcopy
 import datetime
 import json
 import os
 import pathlib
 import pickle
 import time
+import traceback
 from typing import Any, Literal, Mapping, Sequence
 import warnings
 from git import Repo
@@ -175,8 +176,8 @@ def molecular_dynamics_ase(
         stable = False
     return {
         "md_time_per_atom": np.mean(times) / eval_every / num_atoms,
-        "stable": stable,
-        "num_iterations": i,
+        "md_stable": stable,
+        "md_iterations": i,
     }
 
 
@@ -340,21 +341,29 @@ def run(db_path):
                     gnn_config=gnn_config,
                     **train_options
                 )
-            # 2. Define preprocessing steps for the franken-potential e.g. compile
-            if compile == "jit":
-                print(f"[{logtime()}] jit compiling {gnn_config.path_or_id}")
-                try:
-                    unpatch_e3nn()
-                except:
-                    pass
-                franken_model = torch.jit.script(franken_model)
-            elif compile == "compile":
-                print(f"[{logtime()}] torch compiling {gnn_config.path_or_id}")
-                franken_model = torch.compile(franken_model)
-            print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
-            md_info = molecular_dynamics_ase(
-                franken_model, md_data, gnn_config=gnn_config, device=device, **md_options
-            )
+            try:
+                # 2. Define preprocessing steps for the franken-potential e.g. compile
+                if compile == "jit":
+                    print(f"[{logtime()}] jit compiling {gnn_config.path_or_id}")
+                    try:
+                        unpatch_e3nn()
+                    except:
+                        pass
+                    franken_model = torch.jit.script(franken_model)
+                elif compile == "compile":
+                    print(f"[{logtime()}] torch compiling {gnn_config.path_or_id}")
+                    franken_model = torch.compile(franken_model)
+                print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
+                md_info = molecular_dynamics_ase(
+                    franken_model, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
+                )
+            except Exception as e:
+                md_info = {
+                    "exception": traceback.format_exc(),
+                    "md_stable": False,
+                    "md_iterations": 0,
+                    "md_time_per_atom": 0,
+                }
             results_info = add_prefix(md_info | train_info, "results")
             all_info = key_info | results_info # type: ignore
             db.append(all_info)
