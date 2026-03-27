@@ -40,6 +40,10 @@ class FrankenCalculator(Calculator):
                 (e.g. "cuda:0" for GPU placement or "cpu" for CPU placement).
             rf_weight_id : ID of the random feature weights.
                 Can generally be left to ``None`` unless the checkpoint contains multiple trained models.
+            gnn_config : Configuration object for the backbone implemented by the Franken checkpoint.
+                Normal behavior is to automatically detect the GNN from the loaded franken model.
+                This may not be always possible, in particular if the provided model is JIT scripted.
+                In those cases passing the correct `gnn_config` is needed.
         """
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
