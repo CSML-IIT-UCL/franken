@@ -158,7 +158,7 @@ def molecular_dynamics_ase(
     )
     # 3. Run MD (collect timings)
     times = []
-    eval_every = 10
+    eval_every = 1
     stable = True
     i = 0
     try:
