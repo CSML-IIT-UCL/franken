@@ -21,12 +21,11 @@ def patch_e3nn():
         # Then _spherical_harmonics is a scripted function, we need to undo this!
         new_locals = {"Tensor": torch.Tensor}
         exec(e3nn.o3._spherical_harmonics._spherical_harmonics.code, None, new_locals)
-        new_sh = new_locals["_spherical_harmonics"]
 
         def _spherical_harmonics(
             lmax: int, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor
         ) -> torch.Tensor:
-            return new_sh(torch.tensor(lmax), x, y, z)
+            return new_locals["_spherical_harmonics"](torch.tensor(lmax), x, y, z)
 
         # Save to allow undoing later
         setattr(
