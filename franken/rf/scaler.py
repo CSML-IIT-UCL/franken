@@ -207,7 +207,7 @@ class FeatureScaler(torch.nn.Module):
         # Normalize per atomic number (Z)
         assert atomic_numbers is not None, "atomic_numbers required when scaling by Z"
         for idx, Z in enumerate(self.z_keys):
-            mask = atomic_numbers == Z#int(Z.item())
+            mask = atomic_numbers == Z  # int(Z.item())
             descriptors[mask] = (descriptors[mask] - self.mean[idx]) / (
                 self.std[idx] * math.sqrt(self.input_dim)
             )
