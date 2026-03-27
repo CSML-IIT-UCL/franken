@@ -175,7 +175,7 @@ def molecular_dynamics_ase(
         print("Unstable MD!")
         stable = False
     return {
-        "md_time_per_atom": np.mean(times) / eval_every / num_atoms,
+        "md_time_per_atom": float(np.mean(times) / eval_every / num_atoms),
         "md_stable": stable,
         "md_iterations": i,
     }
@@ -224,7 +224,7 @@ def run(db_path):
         # "cell_reps": 5,  # 5^3 * 2 = 250 atoms
     }
     md_options = {
-        "num_steps": 1000,
+        "num_steps": 100,
         "seed": 1,
     }
     train_options = {
@@ -349,13 +349,15 @@ def run(db_path):
                         unpatch_e3nn()
                     except:
                         pass
-                    franken_model = torch.jit.script(franken_model)
+                    franken_model_comp = torch.jit.script(franken_model)
                 elif compile == "compile":
                     print(f"[{logtime()}] torch compiling {gnn_config.path_or_id}")
-                    franken_model = torch.compile(franken_model)
+                    franken_model_comp = torch.compile(franken_model)
+                else:
+                    franken_model_comp = franken_model
                 print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
                 md_info = molecular_dynamics_ase(
-                    franken_model, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
+                    franken_model_comp, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
                 )
             except Exception as e:
                 md_info = {

@@ -46,7 +46,7 @@ class FrankenCalculator(Calculator):
         if isinstance(franken_ckpt, torch.nn.Module):
             self.franken = franken_ckpt
             if device is not None:
-                self.franken.to(device)
+                self.franken = self.franken.to(device)
         else:
             # Handle jitted torchscript archives and normal files
             try:
