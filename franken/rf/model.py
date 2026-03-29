@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Literal, Mapping, Optional, Tuple, Union
+from typing import List, Literal, Mapping, Optional, Tuple, Union
 
 import torch
 
@@ -170,7 +170,11 @@ class FrankenPotential(torch.nn.Module):
         """Obtain an embedding of each atom, and map it through random features.
 
         The RF mapping computes an average so the final feature map is
-        per-configuration, instead of per-atom.
+        per-structure, instead of per-atom. In case data contains multiple
+        structures, multiple feature maps are computed.
+
+        Returns:
+            feature_map: Tensor of size [n_structures, n_random_features]
         """
         gnn_descriptors = self.gnn.descriptors(data)
 
@@ -181,39 +185,16 @@ class FrankenPotential(torch.nn.Module):
         return self.rf.feature_map(
             normalized_descriptors,
             atomic_numbers=data.atomic_numbers,
-            batch_ids=None,
+            batch_ids=data.batch_ids,
         )
-
-    def feature_map_batched(self, data: Configuration) -> torch.Tensor:
-        """Compute one random-feature map per system in a batched configuration.
-
-        Expects ``data.batch_ids`` to map each atom to a system index.
-        """
-        batch_ids = data.batch_ids
-        if batch_ids is None:
-            return self.feature_map(data).view(1, -1)
-
-        batch_ids = batch_ids.to(dtype=torch.long)
-        gnn_descriptors = self.gnn.descriptors(data)
-        normalized_descriptors = self.input_scaler(
-            gnn_descriptors,
-            atomic_numbers=data.atomic_numbers,
-        )
-        fmaps = self.rf.feature_map(
-            normalized_descriptors,
-            atomic_numbers=data.atomic_numbers,
-            batch_ids=batch_ids,
-        )
-        if fmaps.ndim == 1:
-            return fmaps.view(1, -1)
-        return fmaps
 
     def _feature_map_aux(self, atom_pos: torch.Tensor, data: Configuration):
         old_atom_pos = data.atom_pos
         data.atom_pos = atom_pos
         random_features = self.feature_map(data)
         data.atom_pos = old_atom_pos
-        return random_features, random_features
+        # the differentiable output is summed over structures
+        return random_features.sum(0), random_features
 
     def grad_feature_map(
         self, data: Configuration
@@ -222,8 +203,8 @@ class FrankenPotential(torch.nn.Module):
         its gradient with respect to atomic positions
 
         Returns:
-         - forces_fmap : Tensor of size [n_random_features, n_atoms * 3]
-         - energy_fmap : Tensor of size [n_random_features]
+            forces_fmap : Tensor of size [n_random_features, n_atoms * 3]
+            energy_fmap : Tensor of size [n_structures, n_random_features]
         """
         if self._grad_fmap_jacfn is None:
             jac_chunk_size = self.get_jacobian_chunk_size(
@@ -254,96 +235,19 @@ class FrankenPotential(torch.nn.Module):
         Args:
             weights: The linear coefficients of the energy model.
             configuration: The molecular configuration whose energy to compute.
+        Returns:
+            energies : A tensor of size [n_models, n_structures].
+                ``n_models`` denotes the number of models present in the ``weights`` attribute;
+                ``n_structures`` the number of different structures present in the input data.
         """
         if weights is None:
             weights = self.rf.weights
-
-        feature_map = self.feature_map(data).to(dtype=weights.dtype)
-
-        # Contract the last dim of weights with the first of feature_map
-        energy = data.natoms * torch.tensordot(weights, feature_map, dims=1)
-
-        return energy
-
-    def energy_batched(
-        self, weights: Optional[torch.Tensor], data: Configuration
-    ) -> torch.Tensor:
-        """Compute per-system energies for a batched configuration.
-
-        Returns a tensor of shape ``[n_systems]`` for a single RF model and
-        ``[n_linear_models, n_systems]`` for multiple RF weight vectors.
-        """
-        if weights is None:
-            weights = self.rf.weights
-        if weights.ndim == 1:
-            weights = weights.unsqueeze(0)
-
-        feature_map = self.feature_map_batched(data).to(dtype=weights.dtype)
-        natoms = data.natoms.to(dtype=weights.dtype).view(-1)
-
-        # [S, F] @ [F, M] -> [S, M], then transpose to [M, S]
-        energies = torch.matmul(feature_map, weights.transpose(0, 1)).transpose(0, 1)
-        energies = energies * natoms.unsqueeze(0)
-
-        if energies.shape[0] == 1:
-            return energies[0]
+        # weights: [num weights(M), num features(F)]
+        feature_map = self.feature_map(data).to(dtype=weights.dtype)  # [N, F]
+        natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
+        energies = torch.matmul(feature_map, weights.T).T  # [M, N]
+        energies = natoms[None, :] * energies
         return energies
-
-    def energy_and_forces_batched(
-        self,
-        data: Configuration,
-        weights: Optional[torch.Tensor] = None,
-        add_energy_shift: bool = True,
-        compute_forces: bool = True,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        """Infer per-system energies and per-atom forces for batched inputs."""
-        batch_ids = data.batch_ids
-        if batch_ids is None:
-            batch_ids = torch.zeros(
-                data.atomic_numbers.shape[0],
-                dtype=torch.long,
-                device=data.atomic_numbers.device,
-            )
-
-        if compute_forces:
-            if weights is not None and weights.ndim == 2 and weights.shape[0] > 1:
-                raise ValueError(
-                    "Batched force computation supports one RF model at a time."
-                )
-            if (
-                self.rf.weights.ndim == 2
-                and self.rf.weights.shape[0] > 1
-                and weights is None
-            ):
-                raise ValueError(
-                    "Batched force computation supports one RF model at a time."
-                )
-            data.atom_pos.requires_grad_(True)
-
-        energy = self.energy_batched(weights, data)
-
-        if compute_forces:
-            total_energy = energy.sum()
-            grad_energy = torch.autograd.grad(
-                outputs=[total_energy],
-                inputs=[data.atom_pos],
-            )[0]
-            forces = -grad_energy.detach()
-        else:
-            forces = None
-
-        if add_energy_shift:
-            shift = self.energy_shift(
-                data.atomic_numbers,
-                batch_ids=batch_ids.to(dtype=torch.long),
-                num_systems=int(data.natoms.numel()),
-            )
-            if energy.ndim == 1:
-                energy = energy + shift
-            else:
-                energy = energy + shift.unsqueeze(0)
-
-        return energy.detach(), forces
 
     def _energy_aux(
         self,
@@ -353,9 +257,9 @@ class FrankenPotential(torch.nn.Module):
     ):
         old_atom_pos = data.atom_pos
         data.atom_pos = atom_pos
-        energy = self.energy(weights, data)
+        energy = self.energy(weights, data)  # [M, N]
         data.atom_pos = old_atom_pos
-        return energy, energy
+        return energy.sum(1), energy
 
     def grad_energy_func(
         self, weights: Optional[torch.Tensor], data: Configuration
@@ -393,7 +297,9 @@ class FrankenPotential(torch.nn.Module):
             self._grad_energy_jacfn = jacfwd(
                 self._energy_aux, argnums=1, has_aux=True, chunk_size=jac_chunk_size
             )
-        out = self._grad_energy_jacfn(weights, data.atom_pos, data)
+        out = self._grad_energy_jacfn(
+            weights, data.atom_pos, data
+        )  # ([M, A, 3], [M, N])
         return out
 
     def grad_energy_autograd(
@@ -418,28 +324,27 @@ class FrankenPotential(torch.nn.Module):
         # Ensure atom positions require gradients
         data.atom_pos.requires_grad_(True)
         # Compute the energy
-        energy = self.energy(weights, data)
-
-        if energy.ndim == 0:
-            # Scalar case, single gradient
-            gradient = torch.autograd.grad(outputs=[energy], inputs=[data.atom_pos])[0]
-        else:
-            # Vector case, compute gradients for each element independently.
-            # This happens when several energies are computed when testing
-            # multiple models at the same time.
-            gradients: list[torch.Tensor] = []
-            for i in range(energy.shape[0]):
-                grad_i = torch.autograd.grad(
-                    outputs=[energy[i]],
-                    inputs=[data.atom_pos],
-                    retain_graph=True,
-                )[0]
-                assert grad_i is not None
-                gradients.append(grad_i)
-            # Stack gradients along a new dimension
-            gradient = torch.stack(gradients, dim=0)
-
-        return gradient, energy
+        energy = self.energy(weights, data)  # [M, N]
+        n_sols, n_sys = energy.shape
+        n_atoms = data.atom_pos.shape[0]
+        # Compute energy gradients for each model (M) independently.
+        gradients: List[torch.Tensor] = []
+        for i in range(n_sols):
+            cur_energy: torch.Tensor = energy[i]
+            # complex type annotation required by the obsolete jit.script system
+            grad_out: List[Optional[torch.Tensor]] = [torch.ones_like(cur_energy)]
+            grad_i = torch.autograd.grad(
+                outputs=[cur_energy],
+                inputs=[data.atom_pos],
+                grad_outputs=grad_out,
+                retain_graph=i < n_sols - 1,
+            )[0]
+            assert grad_i is not None
+            gradients.append(grad_i)
+        # Stack gradients along a new dimension
+        gradient = torch.stack(gradients, dim=0)
+        gradient = gradient.view(n_sols, n_atoms, 3)
+        return gradient, energy  # ([M, A, 3], [M, N])
 
     def get_jacobian_chunk_size(self, func, func_inputs, argnums=0) -> int:
         if hasattr(self, "_auto_jac_chunk_size"):
@@ -495,6 +400,7 @@ class FrankenPotential(torch.nn.Module):
             given configuration. If multiple models are given, the forces will have shape :code:`[n_linear_models, n_atoms, 3]`,
             otherwise they will have shape :code:`[n_atoms, 3]`.
         """
+        natoms = torch.atleast_1d(data.natoms)
         if forces_mode == "torch.func":
             with torch.no_grad():
                 grad_energy, energy = self.grad_energy_func(weights, data)
@@ -510,8 +416,12 @@ class FrankenPotential(torch.nn.Module):
             raise ValueError(f"forces_mode '{forces_mode}' is not valid.")
 
         if add_energy_shift:
-            energy = energy + self.energy_shift(data.atomic_numbers)
-        return energy.detach(), forces
+            energy = energy + self.energy_shift(
+                data.atomic_numbers,
+                batch_ids=data.batch_ids,
+                num_systems=int(natoms.numel()),
+            )
+        return energy, forces  # ([M, N], [M, A, 3])
 
     def energy_and_forces_from_fmaps(
         self,
@@ -521,21 +431,54 @@ class FrankenPotential(torch.nn.Module):
         weights: Optional[torch.Tensor] = None,
         add_energy_shift: bool = True,
     ):
+        """Compute energies and forces from pre-computed featuremaps.
+        This function does not require calling the underlying GNN.
+
+        Args:
+            data : Configuration object describing one or more atomic structures
+            energy_fmap : Tensor of size [n_structures, num_random_features] containing the
+                original feature map
+            forces_fmap : Tensor of size [num_random_features, num_atoms * 3] containing the
+                gradients of the original feature map
+            weights: Optional tensor of size [num_models, num_random_features]. This contains
+                the weights of a trained RF model. If no weights are provided, the weights
+                contained in the RF model attached to this class will be used. Energies and forces
+                can be computed for multiple models simulatenously by passing in multiple weight
+                vectors (arranged in 2D).
+        Returns:
+            energies : Tensor of size [n_models, n_structures]
+            forces   : Tensor of size [n_models, n_atoms, 3]
+        """
         if weights is None:
             weights = self.rf.weights
-        energy = torch.tensordot(
-            weights,
-            data.natoms * energy_fmap,
-            dims=([1], [0]),  # type: ignore
-        )
-        forces = torch.tensordot(
-            weights,
-            data.natoms * forces_fmap.view(forces_fmap.shape[0], -1, 3),
-            dims=([1], [0]),  # type: ignore
-        )
+        natoms = torch.atleast_1d(data.natoms)
+        # Consistency checks
+        assert energy_fmap.ndim == 2, f"Energy map dimensions {energy_fmap.shape}"
+        assert forces_fmap.ndim == 2, f"Forces map dimensions {forces_fmap.shape}"
+        assert weights.ndim == 2, f"Weights dimensions {weights.shape}"
+        assert (
+            energy_fmap.shape[1] == forces_fmap.shape[0]
+        ), f"{forces_fmap.shape=} {energy_fmap.shape=}"
+        assert (
+            weights.shape[1] == forces_fmap.shape[0]
+        ), f"{weights.shape=} {forces_fmap.shape=}"
+
+        energies = natoms[None, :] * torch.matmul(energy_fmap, weights.T).T  # [M, N]
+        forces = torch.matmul(weights, forces_fmap)  # [M, A*3]
+        forces = forces.view(forces.shape[0], -1, 3)  # [M, A, 3]
+        if data.batch_ids is None:
+            forces = forces * natoms
+        else:
+            natoms_mul = torch.gather(natoms, 0, data.batch_ids)
+            forces = forces * natoms_mul[None, :, None]
+
         if add_energy_shift:
-            energy = energy + self.energy_shift(data.atomic_numbers)
-        return energy, forces
+            energies = energies + self.energy_shift(
+                data.atomic_numbers,
+                batch_ids=data.batch_ids,
+                num_systems=int(natoms.numel()),
+            )
+        return energies, forces
 
     def forward(
         self,
@@ -556,8 +499,13 @@ class FrankenPotential(torch.nn.Module):
         else:
             grad_energy, energy = self.grad_energy_autograd(weights, data)
             assert grad_energy is not None
-            forces = -grad_energy.detach()
             energy = energy.detach()
+            forces = -grad_energy.detach()
         if add_energy_shift:
-            energy = energy + self.energy_shift(data.atomic_numbers)
+            natoms = torch.atleast_1d(data.natoms)
+            energy = energy + self.energy_shift(
+                data.atomic_numbers,
+                batch_ids=data.batch_ids,
+                num_systems=int(natoms.numel()),
+            )
         return energy, forces
