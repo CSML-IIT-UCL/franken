@@ -75,16 +75,29 @@ class RandomFeaturesHead(torch.nn.Module):
         a simple average, or will use a chemically-informed averaging method where features
         are averaged within each atomic type and concatenated across atomic types.
 
-        If ``batch_ids`` is ``None``, this behaves as before and returns a single
-        feature vector of shape ``[total_feature_dim]``.
-
-        If ``batch_ids`` is specified, this computes a per-system feature map and
-        returns a tensor of shape ``[n_systems, total_feature_dim]``.
+        Returns a feature per-system feature map of shape ``[n_systems, total_feature_dim]``.
         """
-        if batch_ids is None:
-            if self.num_species is None:
-                return Z.mean(0)
+        # Z: [Atoms(A), Features(F)]
+        # Out: [Systems(N), Features(F)[*(1+Species(S))]]
+        n_systems = 1
+        if batch_ids is not None:
+            batch_ids = batch_ids.to(dtype=torch.long)
+            n_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
+        dt = Z.dtype
+        dev = Z.device
+        n_species = self.num_species
+        n_rf = self.num_random_features
 
+        if n_systems <= 1:
+            global_mean = Z.mean(0, keepdim=True)
+        else:
+            assert batch_ids is not None
+            out = torch.zeros((n_systems, Z.shape[1]), dtype=dt, device=dev)
+            out = out.index_add(0, batch_ids, Z)
+            counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=dt)
+            global_mean = out / counts.clamp_min(1).unsqueeze(-1)
+
+        if n_species is not None:  # will return [N, S * F]
             assert (
                 atomic_numbers is not None
             ), "atomic_number should be specified when self.num_species is not None"
@@ -92,85 +105,37 @@ class RandomFeaturesHead(torch.nn.Module):
                 atomic_numbers, sorted=True, return_inverse=True
             )
             assert (
-                len(species_map) == self.num_species
-            ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {self.num_species}"
+                len(species_map) == n_species
+            ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {n_species}"
 
-            scatter_idxs = scatter_idxs.unsqueeze(-1).expand(
-                Z.size()
-            )  # ~[natoms, random_features_per_species] Broadcasting for backprop.
-            chemically_informed_descriptors = (
-                torch.zeros((self.num_species, self.num_random_features), dtype=Z.dtype)
-                .to(Z.device)
-                .scatter_reduce_(0, scatter_idxs, Z, "mean")
-            ) / self.num_species  # Normalize.
+            if n_systems > 1:
+                assert batch_ids is not None
+                # batched scatter indices
+                scatter_idxs = batch_ids * n_species + scatter_idxs  # [A]
+
+            # Scatter ids must be of the same size as Z for scatter_reduce_
+            scatter_idxs = scatter_idxs.unsqueeze(-1).expand_as(Z)
+            out = (
+                torch.zeros(
+                    (n_systems * n_species, n_rf), dtype=dt, device=dev
+                ).scatter_reduce_(0, scatter_idxs, Z, "mean", include_self=False)
+            ) / n_species  # [N*S, F]
+            chem_informed_features = out.view(n_systems, n_species, n_rf)  # [N, S, F]
 
             if self.chemically_informed_ratio is not None:
                 kappa = self.chemically_informed_ratio
                 assert (
                     0 <= kappa <= 1
                 ), "The ratio of chemically informed feature feature map should be bounded between 0 and 1"
-                chemically_informed_descriptors = torch.cat(
+                chem_informed_features = torch.cat(
                     (
-                        (1 - kappa) * Z.mean(0, keepdim=True),
-                        kappa * chemically_informed_descriptors,
-                    )
+                        (1 - kappa) * global_mean.unsqueeze(1),
+                        kappa * chem_informed_features,
+                    ),
+                    dim=1,
                 )
-            return chemically_informed_descriptors.view(-1)
-
-        batch_ids = batch_ids.to(dtype=torch.long)
-        n_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
-
-        if self.num_species is None:
-            out = torch.zeros((n_systems, Z.shape[1]), dtype=Z.dtype, device=Z.device)
-            out = out.index_add(0, batch_ids, Z)
-            counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=Z.dtype)
-            return out / counts.clamp_min(1).unsqueeze(-1)
-
-        assert (
-            atomic_numbers is not None
-        ), "atomic_number should be specified when self.num_species is not None"
-        species_map, scatter_idxs = torch.unique(
-            atomic_numbers, sorted=True, return_inverse=True
-        )
-        assert (
-            len(species_map) == self.num_species
-        ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {self.num_species}"
-
-        flat_scatter = (batch_ids * self.num_species + scatter_idxs).to(torch.long)
-        n_bins = n_systems * self.num_species
-        out = torch.zeros((n_bins, Z.shape[1]), dtype=Z.dtype, device=Z.device)
-        out = out.index_add(0, flat_scatter, Z)
-        counts = torch.bincount(flat_scatter, minlength=n_bins).to(dtype=Z.dtype)
-        out = out / counts.clamp_min(1).unsqueeze(-1)
-        chemically_informed_descriptors = out.view(
-            n_systems, self.num_species, self.num_random_features
-        )
-        chemically_informed_descriptors = (
-            chemically_informed_descriptors / self.num_species
-        )  # Normalize.
-
-        if self.chemically_informed_ratio is not None:
-            kappa = self.chemically_informed_ratio
-            assert (
-                0 <= kappa <= 1
-            ), "The ratio of chemically informed feature feature map should be bounded between 0 and 1"
-            global_mean = torch.zeros(
-                (n_systems, Z.shape[1]), dtype=Z.dtype, device=Z.device
-            )
-            global_mean = global_mean.index_add(0, batch_ids, Z)
-            global_counts = torch.bincount(batch_ids, minlength=n_systems).to(
-                dtype=Z.dtype
-            )
-            global_mean = global_mean / global_counts.clamp_min(1).unsqueeze(-1)
-            chemically_informed_descriptors = torch.cat(
-                (
-                    ((1 - kappa) * global_mean).unsqueeze(1),
-                    kappa * chemically_informed_descriptors,
-                ),
-                dim=1,
-            )
-
-        return chemically_informed_descriptors.view(n_systems, -1)
+            return chem_informed_features.reshape(n_systems, -1)  # [N, S*F]
+        return global_mean  # [N, F]
 
     def init_args(self):
         """Returns the arguments needed to re-initialize this class."""

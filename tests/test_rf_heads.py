@@ -128,5 +128,73 @@ class TestEdgeCaseInputs:
                 init_rf(rf_type, input_dim=32, length_scale_low=-1.1)
 
 
+class TestScatterSum:
+    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
+    def test_batched_simple(self, rf_type):
+        torch.manual_seed(1)
+        rf = init_rf(
+            rf_type,
+            input_dim=32,
+            num_random_features=128,
+            num_species=None,
+            chemically_informed_ratio=None,
+        )
+        dt = torch.float32
+        data = torch.randn(10, 32, dtype=dt)
+        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
+
+        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
+        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
+        fmap_single = torch.cat([
+            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
+            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
+        ])
+        torch.testing.assert_close(fmap_batched, fmap_single)
+
+    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
+    def test_batched_perspecies(self, rf_type):
+        torch.manual_seed(1)
+        rf = init_rf(
+            rf_type,
+            input_dim=8,
+            num_random_features=4,
+            num_species=4,
+            chemically_informed_ratio=None,
+        )
+        dt = torch.float32
+        data = torch.randn(10, 8, dtype=dt)
+        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
+
+        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
+        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
+        fmap_single = torch.cat([
+            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
+            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
+        ])
+        torch.testing.assert_close(fmap_batched, fmap_single)
+
+    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
+    def test_batched_chemratio(self, rf_type):
+        torch.manual_seed(1)
+        rf = init_rf(
+            rf_type,
+            input_dim=32,
+            num_random_features=128,
+            num_species=4,
+            chemically_informed_ratio=0.2,
+        )
+        dt = torch.float32
+        data = torch.randn(10, 32, dtype=dt)
+        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
+
+        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
+        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
+        fmap_single = torch.cat([
+            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
+            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
+        ])
+        torch.testing.assert_close(fmap_batched, fmap_single)
+
+
 if __name__ == "__main__":
     pytest.main()
