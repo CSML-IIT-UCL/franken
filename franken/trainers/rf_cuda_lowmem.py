@@ -13,7 +13,7 @@ from torch import Tensor
 import franken.metrics
 from franken.metrics.base import BaseMetric
 import franken.utils.distributed as dist_utils
-from franken.data.base import Target
+from franken.data.base import Configuration, Target
 from franken.rf.model import FrankenPotential
 from franken.trainers import BaseTrainer
 from franken.trainers.log_utils import (
@@ -254,12 +254,12 @@ class RandomFeaturesTrainer(BaseTrainer):
                 predictions = Target(
                     *model.energy_and_forces_from_fmaps(
                         data,
-                        energy_fmap=self.energy_fmap[i],
+                        energy_fmap=self.energy_fmap[i][None, ...],
                         forces_fmap=self.forces_fmap[i],
                         weights=all_weights,
                         add_energy_shift=False,  # since it's always train here
                     )
-                )
+                ).detach()
             else:
                 if all_weights is None or all_weights.shape[0] <= 100:
                     forces_mode = "torch.autograd"
@@ -272,7 +272,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                         forces_mode=forces_mode,
                         add_energy_shift=(False if split == DataSplit.TRAIN else True),
                     )
-                )
+                ).detach()
             if torch.any(torch.isnan(predictions.energy)):
                 logger.warning(
                     f"Configuration {i} - {split_name} has NaNs in energy predictions"
@@ -284,10 +284,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Configuration {i} - {split_name} has NaNs in force predictions"
                 )
             for metric in metric_objects:
-                if metric.requires_species:
-                    metric.update(predictions, targets, data.atomic_numbers)
-                else:
-                    metric.update(predictions, targets)
+                metric.update(predictions, targets, data)
 
         num_models = (
             all_weights.shape[0]
@@ -330,17 +327,12 @@ class RandomFeaturesTrainer(BaseTrainer):
                     # scalar metric
                     results.append(dict(name=name, value=v.item()))
                 else:
-                    # per-species metric:
+                    # per-species metric "<metric_name>_<species>: <metric_val>"
                     counts = metric_counters[name]
 
                     for z in range(v.shape[0]):
                         if counts[z] > 0:
-                            results.append(
-                                dict(
-                                    name=f"{name}_{z}",
-                                    value=v[z].item(),
-                                )
-                            )
+                            results.append(dict(name=f"{name}_{z}", value=v[z].item()))
             raw_logs.append(results)
 
         assert len(raw_logs) == len(log_collection)
@@ -412,15 +404,19 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
 
         for i, (data, targets) in enumerate(progress_bar):
+            assert isinstance(data, Configuration)
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
 
             energy_per_atom = targets.energy / data.natoms
             forces_per_atom = targets.forces / data.natoms
 
-            forces_fmap, energy_fmap = model.grad_feature_map(data)
-            energy_fmap = energy_fmap.to(dtype=self.buffer_dt)
+            assert data.natoms.numel() == 1, "Batched training is not supported"
+            forces_fmap, energy_fmap = model.grad_feature_map(
+                data
+            )  # ([F, A, 3], [N, F])
 
+            energy_fmap = energy_fmap.squeeze(0).to(dtype=self.buffer_dt)
             rank1_update(self.covariance, self.diag_energy, energy_fmap, upper=True)
             self.coeffs_energy.add_(energy_fmap, alpha=energy_per_atom.item())
 
