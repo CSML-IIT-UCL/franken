@@ -25,6 +25,78 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         self.model = franken_model
         self.model.gnn.franken_val()
 
+    def concatenate_structures(
+        self,
+        systems: List[System],
+    ) -> tuple[Configuration, torch.Tensor]:
+        """
+        Concatenate a list of systems into a single batch.
+
+        :param systems: List of systems to concatenate.
+        :param neighbor_list_options: Options for the neighbor list.
+        :return: A tuple containing the concatenated positions, centers, neighbors,
+            species, cells, cell shifts, system indices, and sample labels.
+        """
+
+        positions: List[torch.Tensor] = []
+        centers: List[torch.Tensor] = []
+        neighbors: List[torch.Tensor] = []
+        species: List[torch.Tensor] = []
+        cell_shifts: List[torch.Tensor] = []
+        shifts: List[torch.Tensor] = []
+        cells: List[torch.Tensor] = []
+        system_indices: List[torch.Tensor] = []
+        atom_indices: List[torch.Tensor] = []
+        pbcs: List[torch.Tensor] = []
+        node_counter = 0
+
+        for i, system in enumerate(systems):
+            known_neighbor_lists = system.known_neighbor_lists()
+            if len(known_neighbor_lists) != 1:
+                raise NotImplementedError(
+                    f"Requested {len(known_neighbor_lists)} neighbor lists. We only support 1."
+                )
+            neighbor_list = system.get_neighbor_list(known_neighbor_lists[0])
+            nl_values = neighbor_list.samples.values
+
+            centers_values = nl_values[:, 0]
+            neighbors_values = nl_values[:, 1]
+            cell_shifts_values = nl_values[:, 2:]
+
+            system_size = len(system)
+            positions.append(system.positions)
+            species.append(system.types)
+            pbcs.append(system.pbc)
+
+            centers.append(centers_values + node_counter)
+            neighbors.append(neighbors_values + node_counter)
+            cell_shifts.append(cell_shifts_values)
+            cells.append(system.cell)
+            shifts.append(cell_shifts_values.to(system.cell.dtype) @ system.cell)
+
+            node_counter += system_size
+            system_indices.append(
+                torch.full((system_size,), i, device=system.positions.device)
+            )
+            atom_indices.append(
+                torch.arange(system_size, device=system.positions.device)
+            )
+
+        batch_ids = torch.cat(system_indices)
+        return Configuration(
+            atom_pos=torch.cat(positions),
+            edge_index=torch.stack([torch.cat(centers), torch.cat(neighbors)], dim=1),
+            natoms=torch.bincount(batch_ids, minlength=len(systems)).to(
+                dtype=torch.int64
+            ),
+            atomic_numbers=torch.cat(species),
+            cell=torch.stack(cells, dim=0),
+            unit_shifts=torch.cat(cell_shifts),
+            shifts=torch.cat(shifts),
+            batch_ids=batch_ids,
+            pbc=torch.stack(pbcs),
+        ), torch.cat(atom_indices)
+
     def forward(
         self,
         systems: List[System],
@@ -37,62 +109,22 @@ class MetatomicInferenceWrapper(torch.nn.Module):
                 f"keys: {', '.join(outputs.keys())}"
             )
 
-        # Build sample labels.
-        #  This was originally part of `concatenate_structures` in PET code
-        system_indices_lst: List[torch.Tensor] = []
-        atom_indices_lst: List[torch.Tensor] = []
-        for i, system in enumerate(systems):
-            system_size = len(system)
-            system_indices_lst.append(
-                torch.full((system_size,), i, device=system.positions.device)
-            )
-            atom_indices_lst.append(
-                torch.arange(system_size, device=system.positions.device)
-            )
-        system_indices = torch.cat(system_indices_lst)
-        atom_indices = torch.cat(atom_indices_lst)
-        sample_values = torch.stack([system_indices, atom_indices], dim=1)
-        sample_labels = Labels(
-            names=["system", "atom"],
-            values=sample_values,
-        )
-
-        # Compute energy with underlying model
         device = systems[0].positions.device
-        energy_lst: List[torch.Tensor] = []
-        for i, system in enumerate(systems):
-            known_neighbor_lists = system.known_neighbor_lists()
-            if len(known_neighbor_lists) != 1:
-                raise NotImplementedError(
-                    f"Requested {len(known_neighbor_lists)} neighbor lists. We only support 1."
-                )
-            neighbor_list = system.get_neighbor_list(known_neighbor_lists[0])
-            nl_values = neighbor_list.samples.values
-            franken_data = Configuration(
-                atom_pos=system.positions,
-                atomic_numbers=system.types,
-                natoms=torch.tensor(
-                    len(system.types), dtype=torch.int32, device=device
-                ).view(1),
-                pbc=system.pbc,
-                cell=system.cell,
-                unit_shifts=nl_values[:, 2:],
-                edge_index=nl_values[:, :2],
-            )
-            # Don't compute_forces. This will be done in the metatomic calculator.
-            # in theory we could set the `explicit_gradients` capability in the model
-            # but it doesn't seem to be actually used anywhere in the calculators (which
-            # rely on performing autograd themselves)
-            sys_energy, _ = self.model(franken_data, compute_forces=False)
-            # Fake per-atom energy. Needed for LAMMPS calculator
-            node_energy = sys_energy.repeat(system.positions.shape[0]).div(
-                system.positions.shape[0]
-            )
-            energy_lst.append(node_energy)
-        # Concatenate energy from all systems.
-        energy = torch.cat(energy_lst, 0)
+        # Concatenate systems into a single Configuration object
+        concat_data, atom_indices = self.concatenate_structures(systems)
+        batch_ids = concat_data.batch_ids
+        assert batch_ids is not None
+        # Compute energy with underlying model. This is per-system energy
+        energy = self.model.energy(None, concat_data)  # [M, N]
+        # Convert it to per-atom energy
+        energy = energy / concat_data.natoms[None, ...]  # [M, N]
+        energy = torch.gather(energy, dim=1, index=batch_ids[None, ...])  # [M, A]
 
         # Build the weird output format required by metatomic
+        # 1. Build sample labels
+        sample_values = torch.stack([batch_ids, atom_indices], dim=1)
+        sample_labels = Labels(names=["system", "atom"], values=sample_values)
+        # 2. Energy block
         energy_block = TensorBlock(
             values=energy.reshape(-1, 1),
             samples=sample_labels,

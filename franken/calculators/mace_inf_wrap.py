@@ -90,6 +90,7 @@ class MaceInferenceWrapper(torch.nn.Module):
         assert forces is not None
         # Kokkos doesn't like total_energy_local and only looks at node_energy.
         # We hack around this:
+        energy = energy.squeeze()  # [M, N] -> [1]
         node_energy = energy.repeat(len(atom_nums)).div(len(atom_nums))
         virials: Optional[torch.Tensor] = None
         if compute_virials:
