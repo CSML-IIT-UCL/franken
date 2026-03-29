@@ -1,9 +1,7 @@
-"""torch-sim interface for FrankenPotential."""
-
 from pathlib import Path
 import traceback
-import warnings
 from typing import Any, Callable
+import warnings
 
 import torch
 
@@ -13,35 +11,31 @@ from franken.rf.model import FrankenPotential
 
 
 try:
-    import torch_sim as ts
+    import torch_sim.state
+    import torch_sim.typing
+    import torch_sim.transforms
     from torch_sim.models.interface import ModelInterface
     from torch_sim.neighbors import torchsim_nl
-except ImportError as exc:
+except ImportError:
     warnings.warn(
         f"torch-sim import failed: {traceback.format_exc()}",
         stacklevel=2,
     )
-
-    class FrankenTorchSimModel(torch.nn.Module):
-        """Placeholder class when torch-sim is not installed."""
-
-        def __init__(self, err: ImportError = exc, *_args: Any, **_kwargs: Any) -> None:
-            raise err
-
+    ModelInterface = object
 else:
 
     class FrankenTorchSimModel(ModelInterface):
         """Wrap a FrankenPotential model with the torch-sim ``ModelInterface`` API.
 
         This adapter returns per-system energies and per-atom forces. Stress is not
-        supported in this first version.
+        supported.
         """
 
         def __init__(
             self,
             franken_model: FrankenPotential | str | Path,
             *,
-            device: torch.device | str | None = None,
+            device: torch.device | str,
             dtype: torch.dtype = torch.float32,
             rf_weight_id: int | None = None,
             neighbor_list_fn: Callable = torchsim_nl,
@@ -55,17 +49,10 @@ else:
                     "FrankenTorchSimModel does not support stress in this version."
                 )
 
-            resolved_device: torch.device
-            if device is None:
-                resolved_device = torch.device(
-                    "cuda" if torch.cuda.is_available() else "cpu"
-                )
-            elif isinstance(device, str):
-                resolved_device = torch.device(device)
+            if isinstance(device, str):
+                self._device = torch.device(device)
             else:
-                resolved_device = device
-
-            self._device = resolved_device
+                self._device = device
             self._dtype = dtype
             self._compute_forces = compute_forces
             self._compute_stress = False
@@ -85,11 +72,6 @@ else:
                     "franken_model must be a FrankenPotential instance or a checkpoint path"
                 )
 
-            family = getattr(self.model.gnn_config, "family", None)
-            if family not in ("mace", "pet"):
-                raise NotImplementedError(
-                    f"FrankenTorchSimModel supports only MACE/PET backbones, found {family!r}."
-                )
             if not isinstance(self.model.gnn, AtomisticModelWrapper):
                 raise NotImplementedError(
                     "Underlying Franken backbone does not implement AtomisticModelWrapper."
@@ -99,34 +81,33 @@ else:
             self.model.gnn.franken_val()
 
         def forward(
-            self, state: ts.SimState, **_kwargs: Any
+            self,
+            state: torch_sim.state.SimState | torch_sim.typing.StateDict,
+            **_kwargs: Any,
         ) -> dict[str, torch.Tensor]:
             """Compute energies and forces for one or more systems."""
-            sim_state = state
+
+            sim_state = (
+                state
+                if isinstance(state, torch_sim.state.SimState)
+                else torch_sim.state.SimState(
+                    **state, masses=torch.ones_like(state["positions"])
+                )
+            )
+
             if sim_state.device != self._device or sim_state.dtype != self._dtype:
                 sim_state = sim_state.to(device=self._device, dtype=self._dtype)
 
-            system_idx = sim_state.system_idx.to(dtype=torch.long)
-            pbc = sim_state.pbc
-            pbc_batched = (
-                pbc.unsqueeze(0).expand(sim_state.n_systems, -1)
-                if pbc.ndim == 1
-                else pbc
-            )
-
+            # Wrap positions into the unit cell
             wrapped_positions = (
-                (
-                    ts.transforms.pbc_wrap_batched(
-                        sim_state.positions,
-                        sim_state.cell,
-                        system_idx,
-                        pbc,
-                    )
-                    if pbc.any()
-                    else sim_state.positions
+                torch_sim.transforms.pbc_wrap_batched(
+                    sim_state.positions,
+                    sim_state.cell,
+                    sim_state.system_idx,
+                    sim_state.pbc,
                 )
-                .detach()
-                .clone()
+                if sim_state.pbc.any()
+                else sim_state.positions
             )
 
             cutoff = torch.tensor(
@@ -134,42 +115,41 @@ else:
                 dtype=self._dtype,
                 device=self._device,
             )
+            # Batched neighbor list using linked-cell algorithm
             edge_index, mapping_system, unit_shifts = self.neighbor_list_fn(
                 positions=wrapped_positions,
                 cell=sim_state.row_vector_cell,
-                pbc=pbc_batched,
+                pbc=sim_state.pbc,
                 cutoff=cutoff,
-                system_idx=system_idx,
+                system_idx=sim_state.system_idx,
             )
-
-            shifts = ts.transforms.compute_cell_shifts(
-                sim_state.row_vector_cell,
-                unit_shifts,
-                mapping_system,
+            # Convert unit cell shift indices to Cartesian shifts
+            shifts = torch_sim.transforms.compute_cell_shifts(
+                sim_state.row_vector_cell, unit_shifts, mapping_system
             )
 
             data = Configuration(
                 atom_pos=wrapped_positions,
                 atomic_numbers=sim_state.atomic_numbers,
-                natoms=torch.bincount(system_idx, minlength=sim_state.n_systems).to(
-                    dtype=torch.int64
-                ),
+                natoms=torch.bincount(
+                    sim_state.system_idx, minlength=sim_state.n_systems
+                ).long(),
                 edge_index=edge_index.transpose(0, 1),
                 shifts=shifts,
                 unit_shifts=unit_shifts,
                 cell=sim_state.row_vector_cell,
-                batch_ids=system_idx,
+                batch_ids=sim_state.system_idx,
                 pbc=sim_state.pbc,
             )
 
-            energy, forces = self.model.energy_and_forces_batched(
+            energy, forces = self.model(
                 data,
                 compute_forces=self._compute_forces,
                 add_energy_shift=True,
             )
 
-            results: dict[str, torch.Tensor] = {"energy": energy.detach()}
+            results: dict[str, torch.Tensor] = {"energy": energy.detach().squeeze(0)}
             if self._compute_forces:
                 assert forces is not None
-                results["forces"] = forces.detach()
+                results["forces"] = forces.detach().squeeze(0)
             return results

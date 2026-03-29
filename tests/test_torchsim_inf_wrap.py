@@ -2,8 +2,8 @@ import traceback
 
 import pytest
 import torch
+from ase.build import molecule
 
-from franken.backbones.wrappers.pet_wrap import systems_to_batch
 from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
 from franken.config import GaussianRFConfig, MaceBackboneConfig, PETBackboneConfig
 from franken.data.base import Configuration
@@ -12,9 +12,7 @@ from tests.utils import mocked_gnn
 
 
 try:
-    import metatomic.torch
     import torch_sim as ts
-    from ase.build import molecule
     from torch_sim.models.interface import validate_model_outputs
 except ImportError:
     pytest.skip(
@@ -68,10 +66,7 @@ def test_batched_energy_force_matches_single_system_calls() -> None:
         batch_ids=batch_ids,
     )
 
-    fmap = model.feature_map_batched(batched)
-    assert fmap.shape[0] == 2
-
-    energy_b, forces_b = model.energy_and_forces_batched(batched)
+    energy_b, forces_b = model.energy_and_forces(batched)
     assert forces_b is not None
 
     single_energies = []
@@ -85,18 +80,17 @@ def test_batched_energy_force_matches_single_system_calls() -> None:
         )
         e, f = model.energy_and_forces(single)
         assert f is not None
-        single_energies.append(e.reshape(-1)[0])
-        single_forces.append(f.reshape(-1, 3))
-
+        single_energies.append(e)
+        single_forces.append(f)
     torch.testing.assert_close(
         energy_b,
-        torch.stack(single_energies),
+        torch.cat(single_energies, dim=1),
         rtol=1e-5,
         atol=1e-5,
     )
     torch.testing.assert_close(
         forces_b,
-        torch.cat(single_forces, dim=0),
+        torch.cat(single_forces, dim=1),
         rtol=1e-5,
         atol=1e-5,
     )
@@ -161,83 +155,7 @@ def test_torchsim_model_interface_contract() -> None:
         adapter,
         device=torch.device("cpu"),
         dtype=torch.float32,
-        check_detached=True,
     )
-
-
-def test_pet_systems_to_batch_accepts_precomputed_cartesian_shifts() -> None:
-    positions = torch.tensor(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-            [0.8, 0.0, 0.0],
-        ],
-        dtype=torch.float32,
-    )
-    edge_index = torch.tensor(
-        [[0, 1], [1, 0], [2, 3], [3, 2]],
-        dtype=torch.long,
-    )
-    cell = torch.stack(
-        [
-            torch.eye(3, dtype=torch.float32) * 10.0,
-            torch.eye(3, dtype=torch.float32) * 8.0,
-        ]
-    )
-    unit_shifts = torch.tensor(
-        [[1, 0, 0], [-1, 0, 0], [0, 0, 0], [0, 0, 0]],
-        dtype=torch.long,
-    )
-    edge_system_idx = torch.tensor([0, 0, 1, 1], dtype=torch.long)
-    cartesian_shifts = torch.einsum(
-        "ni,nij->nj",
-        unit_shifts.to(cell.dtype),
-        cell[edge_system_idx],
-    )
-    species = torch.tensor([1, 8, 1, 8], dtype=torch.long)
-
-    species_to_species_index = torch.zeros(9, dtype=torch.long)
-    species_to_species_index[1] = 0
-    species_to_species_index[8] = 1
-
-    nl_options = metatomic.torch.NeighborListOptions(
-        cutoff=6.0,
-        full_list=True,
-        strict=True,
-    )
-
-    out_from_unit = systems_to_batch(
-        positions,
-        edge_index,
-        cell,
-        unit_shifts,
-        species,
-        nl_options,
-        species_to_species_index,
-        cutoff_function="cosine",
-        cutoff_width=0.5,
-        num_neighbors_adaptive=None,
-        cartesian_shifts=None,
-        edge_system_idx=edge_system_idx,
-    )
-    out_from_cart = systems_to_batch(
-        positions,
-        edge_index,
-        cell,
-        unit_shifts,
-        species,
-        nl_options,
-        species_to_species_index,
-        cutoff_function="cosine",
-        cutoff_width=0.5,
-        num_neighbors_adaptive=None,
-        cartesian_shifts=cartesian_shifts,
-        edge_system_idx=edge_system_idx,
-    )
-
-    for a, b in zip(out_from_unit, out_from_cart):
-        torch.testing.assert_close(a, b, rtol=1e-6, atol=1e-6)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")

@@ -1,10 +1,12 @@
 
 import torch
+import metatomic.torch
 
 from franken.backbones.utils import load_checkpoint
 from franken.config import PETBackboneConfig
 from franken.data.base import BaseAtomsDataset, Configuration
 from franken.datasets.registry import DATASET_REGISTRY
+from franken.backbones.wrappers.pet_wrap import systems_to_batch
 
 
 def test_batched_inference():
@@ -38,3 +40,80 @@ def test_batched_inference():
     grad_actual = torch.autograd.grad(desc_actual[1].sum(), cfg1.atom_pos)
     grad_expected = torch.autograd.grad(desc_expected[1].sum(), cfg1.atom_pos)
     torch.testing.assert_close(grad_actual, grad_expected, msg="Batched inference gradients (2) not equal")
+
+
+def test_pet_systems_to_batch_accepts_precomputed_cartesian_shifts() -> None:
+    """LLM generated, unclear what's being tested."""
+    positions = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.8, 0.0, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    edge_index = torch.tensor(
+        [[0, 1], [1, 0], [2, 3], [3, 2]],
+        dtype=torch.long,
+    )
+    cell = torch.stack(
+        [
+            torch.eye(3, dtype=torch.float32) * 10.0,
+            torch.eye(3, dtype=torch.float32) * 8.0,
+        ]
+    )
+    unit_shifts = torch.tensor(
+        [[1, 0, 0], [-1, 0, 0], [0, 0, 0], [0, 0, 0]],
+        dtype=torch.long,
+    )
+    batch_ids = torch.tensor([0, 0, 1, 1])
+
+    cartesian_shifts = torch.einsum(
+        "ni,nij->nj", 
+        unit_shifts.to(positions.dtype), 
+        cell[batch_ids[edge_index[:, 0]]]
+    )
+    species = torch.tensor([1, 8, 1, 8], dtype=torch.long)
+
+    species_to_species_index = torch.zeros(9, dtype=torch.long)
+    species_to_species_index[1] = 0
+    species_to_species_index[8] = 1
+
+    nl_options = metatomic.torch.NeighborListOptions(
+        cutoff=6.0,
+        full_list=True,
+        strict=True,
+    )
+
+    out_from_unit = systems_to_batch(
+        positions,
+        edge_index,
+        cell,
+        unit_shifts,
+        species,
+        nl_options,
+        species_to_species_index,
+        cutoff_function="cosine",
+        cutoff_width=0.5,
+        num_neighbors_adaptive=None,
+        cartesian_shifts=None,
+        batch_ids=batch_ids,
+    )
+    out_from_cart = systems_to_batch(
+        positions,
+        edge_index,
+        cell,
+        unit_shifts,
+        species,
+        nl_options,
+        species_to_species_index,
+        cutoff_function="cosine",
+        cutoff_width=0.5,
+        num_neighbors_adaptive=None,
+        cartesian_shifts=cartesian_shifts,
+        batch_ids=batch_ids
+    )
+
+    for a, b in zip(out_from_unit, out_from_cart):
+        torch.testing.assert_close(a, b, rtol=1e-6, atol=1e-6)
