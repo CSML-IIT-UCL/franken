@@ -2,7 +2,7 @@ from typing import Mapping
 import torch
 
 import franken.utils.distributed as dist_utils
-from franken.data.base import Target
+from franken.data.base import Configuration, Target
 
 
 class BaseMetric:
@@ -35,11 +35,7 @@ class BaseMetric:
         self.buffer += value
         self.samples_counter += num_samples
 
-    def update(
-        self,
-        predictions: Target,
-        targets: Target,
-    ) -> None:
+    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         """Update the metric buffer with new batch results"""
         raise NotImplementedError()
 
