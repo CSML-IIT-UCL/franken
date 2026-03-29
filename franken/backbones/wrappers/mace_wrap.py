@@ -228,6 +228,7 @@ class FrankenMACE(torch.nn.Module):
         edge_index = data.edge_index
         assert edge_index is not None
         edge_index = edge_index.T  # mace expects [2, n_edges]
+        batch_ids = data.batch_ids
 
         shifts = data.shifts
         if shifts is None:
@@ -235,7 +236,15 @@ class FrankenMACE(torch.nn.Module):
             cell = data.cell
             assert unit_shifts is not None
             assert cell is not None
-            shifts = unit_shifts.to(cell.dtype) @ cell  # n_edges, 3
+            if cell.ndim == 2:
+                shifts = unit_shifts.to(cell.dtype) @ cell  # n_edges, 3
+            else:
+                assert batch_ids is not None
+                shifts = torch.einsum(
+                    "ni,nij->nj",
+                    unit_shifts.to(cell.dtype),
+                    cell[batch_ids[edge_index[0]]],
+                )
         assert shifts is not None
 
         node_attrs = data.node_attrs
