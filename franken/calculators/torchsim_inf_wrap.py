@@ -21,10 +21,15 @@ except ImportError:
         f"torch-sim import failed: {traceback.format_exc()}",
         stacklevel=2,
     )
-    ModelInterface = object
+
+    class FrankenTorchSimModel:
+        # dummy class in case imports failed
+        def __init__(self):
+            raise
+
 else:
 
-    class FrankenTorchSimModel(ModelInterface):
+    class FrankenTorchSimModel(ModelInterface):  # type: ignore
         """Wrap a FrankenPotential model with the torch-sim ``ModelInterface`` API.
 
         This adapter returns per-system energies and per-atom forces. Stress is not

@@ -21,4 +21,5 @@ dependencies:
 - metatrain
 - docstring_parser
 - packaging
+- torch-sim-atomistic
 name: franken

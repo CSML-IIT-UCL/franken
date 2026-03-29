@@ -29,4 +29,5 @@ dependencies:
 - myst-parser
 - nbsphinx
 - packaging
+- torch-sim-atomistic
 name: franken
