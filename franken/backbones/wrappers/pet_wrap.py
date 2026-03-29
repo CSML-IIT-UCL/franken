@@ -27,9 +27,9 @@ def systems_to_batch(
     species_to_species_index: torch.Tensor,
     cutoff_function: str,
     cutoff_width: float,
+    batch_ids: torch.Tensor,
     num_neighbors_adaptive: Optional[float] = None,
     cartesian_shifts: torch.Tensor | None = None,
-    edge_system_idx: torch.Tensor | None = None,
 ) -> Tuple[
     torch.Tensor,
     torch.Tensor,
@@ -56,10 +56,8 @@ def systems_to_batch(
         if cell.ndim == 2:
             cell_contributions = unit_shifts.to(cell.dtype) @ cell
         else:
-            assert edge_system_idx is not None
-            edge_cells = cell[edge_system_idx]
             cell_contributions = torch.einsum(
-                "ni,nij->nj", unit_shifts.to(edge_cells.dtype), edge_cells
+                "ni,nij->nj", unit_shifts.to(positions.dtype), cell[batch_ids[centers]]
             )
     else:
         cell_contributions = cartesian_shifts.to(dtype=positions.dtype)
@@ -219,14 +217,11 @@ class PETModelWrapper(torch.nn.Module):
         assert cell is not None
 
         batch_ids = data.batch_ids
-        edge_system_idx: torch.Tensor | None = None
-        if cell.ndim == 3:
-            if batch_ids is None:
-                edge_system_idx = torch.zeros(
-                    edge_index.shape[0], dtype=torch.long, device=edge_index.device
-                )
-            else:
-                edge_system_idx = batch_ids.to(dtype=torch.long)[edge_index[:, 0]]
+        if batch_ids is None:
+            # single system
+            batch_ids = torch.zeros(
+                data.atom_pos.shape[0], dtype=torch.int, device=data.atom_pos.device
+            )
 
         species = data.atomic_numbers
         # **Stage 0: Input Preparation**
@@ -248,9 +243,9 @@ class PETModelWrapper(torch.nn.Module):
             self.base_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
             self.base_model.cutoff_function,
             self.base_model.cutoff_width,
-            self.base_model.num_neighbors_adaptive,
+            batch_ids=batch_ids,
+            num_neighbors_adaptive=self.base_model.num_neighbors_adaptive,
             cartesian_shifts=cartesian_shifts,
-            edge_system_idx=edge_system_idx,
         )
         # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!
         # **Stage 1: Feature Computation via GNN Layers**
