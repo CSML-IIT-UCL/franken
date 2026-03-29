@@ -3,7 +3,7 @@ import dataclasses
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch.utils.data
@@ -94,6 +94,69 @@ class Configuration:
             pbc=pbc,
         )
 
+    @staticmethod
+    def concatenate(configs: Sequence["Configuration"]) -> "Configuration":
+        positions: list[torch.Tensor] = []
+        edge_indices: list[Tensor] = []
+        species: list[torch.Tensor] = []
+        unit_shifts: list[torch.Tensor] = []
+        shifts: list[torch.Tensor] = []
+        cells: list[torch.Tensor] = []
+        all_batch_ids: list[torch.Tensor] = []
+        pbcs: list[torch.Tensor] = []
+        node_counter = 0
+
+        # Check that all are consistent
+        pbc_none = np.asarray([c.pbc is None for c in configs])
+        if not np.all(pbc_none == pbc_none[0]):
+            raise ValueError("PBC inconsistent")
+        edge_index_none = np.asarray([c.edge_index is None for c in configs])
+        if not np.all(edge_index_none == edge_index_none[0]):
+            raise ValueError("Edge index inconsistent")
+        shifts_none = np.asarray([c.shifts is None for c in configs])
+        if not np.all(shifts_none == shifts_none[0]):
+            raise ValueError("Shifts inconsistent")
+        unit_shifts_none = np.asarray([c.unit_shifts is None for c in configs])
+        if not np.all(unit_shifts_none == unit_shifts_none[0]):
+            raise ValueError("Unit shifts inconsistent")
+        cell_none = np.asarray([c.cell is None for c in configs])
+        if not np.all(cell_none == cell_none[0]):
+            raise ValueError("Cell inconsistent")
+
+        for i, config in enumerate(configs):
+            system_size = len(config.atom_pos)
+            positions.append(config.atom_pos)
+            species.append(config.atomic_numbers)
+            if config.pbc is not None:
+                pbcs.append(config.pbc)
+            if config.edge_index is not None:
+                edge_indices.append(config.edge_index + node_counter)
+            if config.unit_shifts is not None:
+                unit_shifts.append(config.unit_shifts)
+            if config.cell is not None:
+                cells.append(config.cell)
+            if config.shifts is not None:
+                shifts.append(config.shifts)
+            all_batch_ids.append(
+                torch.full((system_size,), i, device=config.atom_pos.device)
+            )
+            node_counter += system_size
+
+        batch_ids = torch.cat(all_batch_ids)
+        return Configuration(
+            atom_pos=torch.cat(positions),
+            edge_index=torch.cat(edge_indices) if len(edge_indices) > 0 else None,
+            natoms=torch.bincount(batch_ids, minlength=len(configs)).to(
+                dtype=torch.int64
+            ),
+            atomic_numbers=torch.cat(species),
+            cell=torch.stack(cells, dim=0) if len(cells) > 0 else None,
+            unit_shifts=torch.cat(unit_shifts) if len(unit_shifts) > 0 else None,
+            shifts=torch.cat(shifts) if len(shifts) > 0 else None,
+            batch_ids=batch_ids,
+            pbc=torch.stack(pbcs) if len(pbcs) > 0 else None,
+        )
+
 
 @dataclasses.dataclass
 class Target:
@@ -111,6 +174,32 @@ class Target:
                 else None
             ),
         )
+
+    def detach(self) -> "Target":
+        return Target(
+            energy=self.energy.detach(),
+            forces=self.forces.detach() if self.forces is not None else None,
+        )
+
+    # @staticmethod
+    # def concatenate(targets: Sequence['Target']):
+    #     energies: list[Tensor] = []
+    #     forcess: list[Tensor] = []
+
+    #     forces_none = np.asarray([t.forces is None for t in targets])
+    #     if not np.all(forces_none == forces_none[0]):
+    #         raise ValueError("Forces inconsistent")
+
+    #     for target in targets:
+    #         energies.append(target.energy)
+    #         if target.forces is not None:
+    #             forcess.append(target.forces)
+
+    #     return Configuration(
+    #         atom_pos=torch.cat(positions),
+    #         edge_index=torch.cat(edge_indices) if len(edge_indices) > 0 else None,
+
+    #     torch.cat([prd1.energy, prd2.energy], dim=1), torch.cat([prd1.forces, prd2.forces], dim=1)
 
 
 class BaseAtomsDataset(torch.utils.data.Dataset, abc.ABC):
