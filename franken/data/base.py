@@ -103,10 +103,10 @@ class Configuration:
         shifts: list[torch.Tensor] = []
         cells: list[torch.Tensor] = []
         all_batch_ids: list[torch.Tensor] = []
-        pbcs: list[torch.Tensor] = []
+        pbc: torch.Tensor | None = None
         node_counter = 0
 
-        # Check that all are consistent
+        # Check that all are consistently None or not None
         pbc_none = np.asarray([c.pbc is None for c in configs])
         if not np.all(pbc_none == pbc_none[0]):
             raise ValueError("PBC inconsistent")
@@ -127,8 +127,12 @@ class Configuration:
             system_size = len(config.atom_pos)
             positions.append(config.atom_pos)
             species.append(config.atomic_numbers)
+            # All PBCs must be equal across configs! They will not be stacked.
             if config.pbc is not None:
-                pbcs.append(config.pbc)
+                if pbc is None:
+                    pbc = config.pbc
+                else:
+                    assert torch.all(pbc == config.pbc)
             if config.edge_index is not None:
                 edge_indices.append(config.edge_index + node_counter)
             if config.unit_shifts is not None:
@@ -154,7 +158,7 @@ class Configuration:
             unit_shifts=torch.cat(unit_shifts) if len(unit_shifts) > 0 else None,
             shifts=torch.cat(shifts) if len(shifts) > 0 else None,
             batch_ids=batch_ids,
-            pbc=torch.stack(pbcs) if len(pbcs) > 0 else None,
+            pbc=pbc,
         )
 
 
