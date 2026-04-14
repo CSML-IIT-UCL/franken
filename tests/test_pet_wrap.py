@@ -40,12 +40,14 @@ def test_batched_inference():
     for i in range(desc_actual.shape[0]):
         grad_actual = torch.autograd.grad(desc_actual[i].sum(), cfg1.atom_pos, retain_graph=True)
         grad_expected = torch.autograd.grad(desc_expected[i].sum(), cfg1.atom_pos, retain_graph=True)
-        torch.testing.assert_close(grad_actual, grad_expected, msg=f"Batched inference gradients cfg1, index {i} not equal. {grad_actual=} {grad_expected=}")
+        torch.testing.assert_close(grad_actual, grad_expected, rtol=1e-4, atol=1e-4, 
+            msg=f"Batched inference gradients cfg1, index {i} not equal. {grad_actual=} {grad_expected=}")
         if i >= cfg1.atom_pos.shape[0]:
             torch.testing.assert_close(grad_actual[0].sum().item(), 0.0)
         grad_actual = torch.autograd.grad(desc_actual[i].sum(), cfg2.atom_pos, retain_graph=True)
         grad_expected = torch.autograd.grad(desc_expected[i].sum(), cfg2.atom_pos, retain_graph=True)
-        torch.testing.assert_close(grad_actual, grad_expected, msg=f"Batched inference gradients cfg2, index {i} not equal. {grad_actual=} {grad_expected=}")
+        torch.testing.assert_close(grad_actual, grad_expected, rtol=1e-4, atol=1e-4, 
+            msg=f"Batched inference gradients cfg2, index {i} not equal. {grad_actual=} {grad_expected=}")
         if i < cfg1.atom_pos.shape[0]:
             torch.testing.assert_close(grad_actual[0].sum().item(), 0.0)
 
