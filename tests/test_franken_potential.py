@@ -330,13 +330,13 @@ class TestModelGradients:
         energy_autograd_batched, forces_autograd_batched = model.energy_and_forces(
             cfg_batched, weights=weights, forces_mode="torch.autograd"
         )
-        torch.testing.assert_close(energy_autograd_batched, energy_autograd, msg="Batched energies not equal")
-        torch.testing.assert_close(forces_autograd_batched, forces_autograd, msg="Batched forces not equal")
+        torch.testing.assert_close(energy_autograd_batched, energy_autograd, msg=f"Batched energies not equal: actual={energy_autograd_batched}  expected={energy_autograd}")
+        torch.testing.assert_close(forces_autograd_batched, forces_autograd, msg=f"Batched forces (autograd) not equal: actual={forces_autograd_batched}  expected={forces_autograd}")
         energy_func_batched, forces_func_batched = model.energy_and_forces(
             cfg_batched, weights=weights, forces_mode="torch.func"
         )
-        torch.testing.assert_close(energy_func_batched, energy_autograd, msg="Batched energies not equal")
-        torch.testing.assert_close(forces_func_batched, forces_autograd, msg="Batched forces not equal")
+        torch.testing.assert_close(energy_func_batched, energy_autograd, msg=f"Batched energies not equal: actual={energy_autograd_batched}  expected={energy_autograd}")
+        torch.testing.assert_close(forces_func_batched, forces_autograd, msg=f"Batched forces (func) not equal: actual={forces_autograd_batched}  expected={forces_autograd}")
 
     @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
     def test_gradients_real(self, rf_cfg, device, multiweights: bool, gnn_cfg):
@@ -504,13 +504,14 @@ class TestEnergyShift:
         e_ag2, f_ag2 = model.energy_and_forces(
             cfg2, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
         )
+        assert f_ag1 is not None and f_ag2 is not None
         e_ag = torch.cat([e_ag1, e_ag2], dim=1)
         f_ag = torch.cat([f_ag1, f_ag2], dim=1)
         e_ag_batch, f_ag_batch = model.energy_and_forces(
             cfg_batched, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
         )
-        torch.testing.assert_close(e_ag, e_ag_batch, msg="Batched energies not equal")
-        torch.testing.assert_close(f_ag, f_ag_batch, msg="Batched forces not equal")
+        torch.testing.assert_close(e_ag, e_ag_batch, msg=f"Batched energies not equal: actual={e_ag}  expected={e_ag_batch}")
+        torch.testing.assert_close(f_ag, f_ag_batch, msg=f"Batched forces not equal: actual={f_ag}  expected={f_ag_batch}")
 
 
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
