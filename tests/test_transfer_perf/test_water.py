@@ -30,6 +30,7 @@ from franken.data.base import Configuration
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.backbones.utils import CacheDir
 from franken.rf.model import FrankenPotential
+from franken.utils.misc import is_cuda_out_of_memory
 
 
 def train_eval_franken(
@@ -179,12 +180,15 @@ def batched_throughput_torchsim(
                 _ = ts_wrap(batch_tsstate)
                 torch.cuda.synchronize()
                 t_e = time.time()
-                if i > 3:  # warmup for time collection
+                if i > warmup_steps:  # warmup for time collection
                     times.append(t_e - t_s)
             ts_info[f"ts_time_per_atom_{batch_size}"] = float(np.mean(times) / len(atoms) / batch_size),
-        except Exception:
+        except Exception as e:
             ts_info[f"ts_time_per_atom_{batch_size}"] = np.nan
-            ts_info[f"ts_exception_{batch_size}"] = traceback.format_exc()
+            if is_cuda_out_of_memory(e):
+                ts_info[f"ts_exception_{batch_size}"] = "OOM"
+            else:
+                ts_info[f"ts_exception_{batch_size}"] = traceback.format_exc()
     return ts_info
 
 
@@ -297,7 +301,7 @@ def run(db_path):
     ts_options = {
         "num_steps": 100,
         "warmup_steps": 10,
-        "batch_sizes": [4, 16, 64, 256],
+        "batch_sizes": [1, 2, 4, 16, 64, 128],
     }
     md_data = get_md_data(**md_data_info)  
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
