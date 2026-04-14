@@ -231,8 +231,12 @@ def is_cuda_out_of_memory(exception: BaseException) -> bool:
     return (
         isinstance(exception, RuntimeError)
         and len(exception.args) == 1
-        and "CUDA" in exception.args[0]
-        and "out of memory" in exception.args[0]
+        and ((
+            "CUDA" in exception.args[0]
+            and "out of memory" in exception.args[0]
+        ) or (
+            "CUDACachingAllocator.cpp" in exception.args[0]
+        ))
     )
 
 
