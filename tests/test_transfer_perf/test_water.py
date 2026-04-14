@@ -19,12 +19,14 @@ import torch
 
 from franken.autotune import autotune
 from franken.calculators.ase_calc import FrankenCalculator
+from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
 from franken.config import (
     BackboneConfig, DatasetConfig, 
     MultiscaleGaussianRFConfig, SolverConfig, HPSearchConfig, 
     AutotuneConfig
 )
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
+from franken.data.base import Configuration
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.backbones.utils import CacheDir
 from franken.rf.model import FrankenPotential
@@ -130,6 +132,62 @@ def get_md_data(data_type: Literal["water", "diamond"], **kwargs) -> ase.Atoms:
     return atoms
 
 
+def batched_throughput_torchsim(
+    model: FrankenPotential, 
+    atoms: ase.Atoms, 
+    batch_sizes: Sequence[int],
+    device,
+    num_steps: int,
+    warmup_steps: int,
+):
+    # Test the througput of torch-sim batched model
+    import torch_sim.state
+    if warmup_steps >= num_steps:
+        raise ValueError("warmup steps invalid")
+    
+    # Create batched torch-sim state (replicate atoms `batch_size` times)
+    cell = torch.zeros((3, 3), dtype=torch.float32, device=device)
+    pbc = torch.tensor(atoms.get_pbc(), dtype=torch.bool, device=device)
+    cell[pbc] = torch.tensor(atoms.get_cell()[atoms.get_pbc()], dtype=torch.float32, device=device) # type: ignore
+    one_cfg = Configuration(
+        atom_pos=torch.tensor(atoms.get_positions(), dtype=torch.float32, device=device),
+        atomic_numbers=torch.tensor(atoms.get_atomic_numbers(), device=device, dtype=torch.int32),
+        natoms=torch.tensor(len(atoms), device=device, dtype=torch.int32),
+        cell=cell,
+        batch_ids=torch.zeros(atoms.get_positions().shape[0], dtype=torch.int32, device=device),
+        pbc=pbc,
+    )
+    ts_info = {}
+    for batch_size in batch_sizes:
+        try:
+            batch_cfg = Configuration.concatenate([deepcopy(one_cfg) for _ in range(batch_size)])
+            assert batch_cfg.cell is not None and batch_cfg.pbc is not None
+            batch_tsstate = torch_sim.state.SimState(
+                positions=batch_cfg.atom_pos,
+                masses=torch.ones_like(batch_cfg.atom_pos),
+                cell=batch_cfg.cell,
+                pbc=batch_cfg.pbc,
+                atomic_numbers=batch_cfg.atomic_numbers,
+                system_idx=batch_cfg.batch_ids,
+            )
+            # Wrap the franken model into torch-sim
+            ts_wrap = FrankenTorchSimModel(model, device=device, dtype=torch.float32)
+            times = []
+            torch.cuda.synchronize()
+            for i in range(num_steps):
+                t_s = time.time()
+                _ = ts_wrap(batch_tsstate)
+                torch.cuda.synchronize()
+                t_e = time.time()
+                if i > 3:  # warmup for time collection
+                    times.append(t_e - t_s)
+            ts_info[f"ts_time_per_atom_{batch_size}"] = float(np.mean(times) / len(atoms) / batch_size),
+        except Exception:
+            ts_info[f"ts_time_per_atom_{batch_size}"] = np.nan
+            ts_info[f"ts_exception_{batch_size}"] = traceback.format_exc()
+    return ts_info
+
+
 def molecular_dynamics_ase(
     model: FrankenPotential, 
     atoms: ase.Atoms, 
@@ -217,6 +275,9 @@ def logtime():
 
 
 def run(db_path):
+    """
+
+    """
     # 0. Options
     md_data_info = {
         "data_type": "water",
@@ -232,6 +293,11 @@ def run(db_path):
         "n_rf": 8192,
         "seed": 1,
         "dset": "water",
+    }
+    ts_options = {
+        "num_steps": 100,
+        "warmup_steps": 10,
+        "batch_sizes": [4, 16, 64, 256],
     }
     md_data = get_md_data(**md_data_info)  
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -328,6 +394,7 @@ def run(db_path):
                 **add_prefix(gnn_ckpt, "gnn"),
                 **add_prefix(md_data_info, "md_data"),
                 **add_prefix(md_options, "md"),
+                **add_prefix(ts_options, "ts"),
                 **add_prefix(train_options, "train"),
             }
             if check_db_has_config(db, key_info):
@@ -343,6 +410,7 @@ def run(db_path):
                     gnn_config=gnn_config,
                     **train_options
                 )
+
             try:
                 # 2. Define preprocessing steps for the franken-potential e.g. compile
                 if compile == "jit":
@@ -357,20 +425,36 @@ def run(db_path):
                     franken_model_comp = torch.compile(franken_model)
                 else:
                     franken_model_comp = franken_model
-                print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
-                torch.manual_seed(md_options["seed"])
-                np.random.seed(md_options["seed"])
-                md_info = molecular_dynamics_ase(
-                    franken_model_comp, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
-                )
             except Exception as e:
-                md_info = {
-                    "exception": traceback.format_exc(),
-                    "md_stable": False,
-                    "md_iterations": 0,
-                    "md_time_per_atom": 0,
-                }
-            results_info = add_prefix(md_info | train_info, "results")
+                print(f"[{logtime()}] failed to compile {gnn_config.path_or_id} with option '{compile}'")
+                franken_model_comp = None
+                md_info = {}
+                ts_info = {}
+            else:
+                try:
+                    # 3. Run molecular dynamics
+                    print(f"[{logtime()}] starting MD for {gnn_config.path_or_id}")
+                    torch.manual_seed(md_options["seed"])
+                    np.random.seed(md_options["seed"])
+                    md_info = molecular_dynamics_ase(
+                        franken_model_comp, deepcopy(md_data), gnn_config=gnn_config, device=device, **md_options
+                    )
+                except Exception:
+                    md_info = {
+                        "md_exception": traceback.format_exc(),
+                        "md_stable": False,
+                        "md_iterations": 0,
+                        "md_time_per_atom": 0,
+                    }
+                # 4. Run batched throughput
+                ts_info = batched_throughput_torchsim(
+                    model=franken_model_comp,
+                    atoms=deepcopy(md_data),
+                    device=device,
+                    **ts_options
+                )
+            # End. Log results
+            results_info = add_prefix(md_info | train_info | ts_info, "results")
             all_info = key_info | results_info # type: ignore
             db.append(all_info)
             with open(db_path, "wb") as fh:
