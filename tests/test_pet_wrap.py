@@ -1,4 +1,6 @@
 
+from copy import deepcopy
+
 import torch
 import metatomic.torch
 
@@ -22,6 +24,7 @@ def test_batched_inference():
     data1, data2 = dataset[0], dataset[1]
     assert isinstance(data1, tuple)
     assert isinstance(data2, tuple)
+    # setup data-concat
     cfg1 = data1[0]
     cfg2 = data2[0]
     cfg1.atom_pos.requires_grad_(True)
@@ -33,13 +36,18 @@ def test_batched_inference():
         [pet_gnn.descriptors(cfg1), pet_gnn.descriptors(cfg2)], dim=0
     )
     torch.testing.assert_close(desc_actual, desc_expected, msg="Batched inference values not equal")
-
-    grad_actual = torch.autograd.grad(desc_actual[0].sum(), cfg1.atom_pos, retain_graph=True)
-    grad_expected = torch.autograd.grad(desc_expected[0].sum(), cfg1.atom_pos, retain_graph=True)
-    torch.testing.assert_close(grad_actual, grad_expected, msg="Batched inference gradients (1) not equal")
-    grad_actual = torch.autograd.grad(desc_actual[1].sum(), cfg1.atom_pos)
-    grad_expected = torch.autograd.grad(desc_expected[1].sum(), cfg1.atom_pos)
-    torch.testing.assert_close(grad_actual, grad_expected, msg="Batched inference gradients (2) not equal")
+    
+    for i in range(desc_actual.shape[0]):
+        grad_actual = torch.autograd.grad(desc_actual[i].sum(), cfg1.atom_pos, retain_graph=True)
+        grad_expected = torch.autograd.grad(desc_expected[i].sum(), cfg1.atom_pos, retain_graph=True)
+        torch.testing.assert_close(grad_actual, grad_expected, msg=f"Batched inference gradients cfg1, index {i} not equal. {grad_actual=} {grad_expected=}")
+        if i >= cfg1.atom_pos.shape[0]:
+            torch.testing.assert_close(grad_actual[0].sum().item(), 0.0)
+        grad_actual = torch.autograd.grad(desc_actual[i].sum(), cfg2.atom_pos, retain_graph=True)
+        grad_expected = torch.autograd.grad(desc_expected[i].sum(), cfg2.atom_pos, retain_graph=True)
+        torch.testing.assert_close(grad_actual, grad_expected, msg=f"Batched inference gradients cfg2, index {i} not equal. {grad_actual=} {grad_expected=}")
+        if i < cfg1.atom_pos.shape[0]:
+            torch.testing.assert_close(grad_actual[0].sum().item(), 0.0)
 
 
 def test_pet_systems_to_batch_accepts_precomputed_cartesian_shifts() -> None:
