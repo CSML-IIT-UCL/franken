@@ -64,22 +64,18 @@ else:
             self._memory_scales_with = "n_atoms_x_density"
             self.neighbor_list_fn = neighbor_list_fn
 
-            if isinstance(franken_model, FrankenPotential):
-                self.model = franken_model
-            elif isinstance(franken_model, (str, Path)):
+            if isinstance(franken_model, (str, Path)):
                 self.model = FrankenPotential.load(
                     franken_model,
                     map_location=self._device,
                     rf_weight_id=rf_weight_id,
                 )
             else:
-                raise TypeError(
-                    "franken_model must be a FrankenPotential instance or a checkpoint path"
-                )
+                self.model = franken_model
 
             if not isinstance(self.model.gnn, AtomisticModelWrapper):
                 raise NotImplementedError(
-                    "Underlying Franken backbone does not implement AtomisticModelWrapper."
+                    f"Underlying Franken backbone does not implement AtomisticModelWrapper. Found type {type(self.model.gnn)}"
                 )
 
             self.model = self.model.to(device=self._device, dtype=self._dtype).eval()
