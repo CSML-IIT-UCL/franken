@@ -182,8 +182,10 @@ def batched_throughput_torchsim(
                 t_e = time.time()
                 if i > warmup_steps:  # warmup for time collection
                     times.append(t_e - t_s)
-            ts_info[f"ts_time_per_atom_{batch_size}"] = float(np.mean(times) / len(atoms) / batch_size),
+            ts_info[f"ts_time_per_atom_{batch_size}"] = float(np.mean(times) / len(atoms) / batch_size)
         except Exception as e:
+            print(f"[{logtime()}] TorchSim error at batch size {batch_size}:")
+            print(e)
             ts_info[f"ts_time_per_atom_{batch_size}"] = np.nan
             if is_cuda_out_of_memory(e):
                 ts_info[f"ts_exception_{batch_size}"] = "OOM"
@@ -451,6 +453,7 @@ def run(db_path):
                         "md_time_per_atom": 0,
                     }
                 # 4. Run batched throughput
+                print(f"[{logtime()}] starting TorchSim throughput test for {gnn_config.path_or_id}")
                 ts_info = batched_throughput_torchsim(
                     model=franken_model_comp,
                     atoms=deepcopy(md_data),
@@ -464,7 +467,7 @@ def run(db_path):
             with open(db_path, "wb") as fh:
                 pickle.dump(db, fh)
                 fh.flush()
-            print(f"[{logtime()}] Finished experiment MD...")
+            print(f"[{logtime()}] Finished experiments...")
             print(all_info)
             print()
 
