@@ -141,7 +141,6 @@ class ForcesMAESpecies(BaseMetric):
             device=device,
             dtype=dtype,
             units=units,
-            requires_species=True,
         )
 
         # buffers will be initialized later once we know n_models
@@ -237,7 +236,6 @@ class ForcesRMSESpecies(BaseMetric):
             device=device,
             dtype=dtype,
             units=units,
-            requires_species=True,
         )
 
         # buffers will be initialized later once we know n_models
