@@ -28,7 +28,6 @@ except ImportError:
             raise
 
 else:
-
     class FrankenTorchSimModel(ModelInterface):  # type: ignore
         """Wrap a FrankenPotential model with the torch-sim ``ModelInterface`` API.
 
@@ -83,7 +82,7 @@ else:
 
         def forward(
             self,
-            state: torch_sim.state.SimState | torch_sim.typing.StateDict,
+            state: torch_sim.state.SimState | torch_sim.typing.StateLike,
             **_kwargs: Any,
         ) -> dict[str, torch.Tensor]:
             """Compute energies and forces for one or more systems."""
