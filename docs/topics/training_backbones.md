@@ -1,5 +1,5 @@
 (model-registry)=
-# Backbones Registry
+# GNN backbones
 
 The available pre-trained GNNs can be listed by running `franken.backbones list`.
 As of today, the available models are:
