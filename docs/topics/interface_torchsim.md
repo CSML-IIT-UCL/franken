@@ -2,7 +2,7 @@
 
 | **Software** | **Backbones** | **Usage** |
 | --- | --- | --- |
-| torch-sim | MACE, PET | Python: `FrankenTorchSimModel` |
+| torch-sim | MACE, PET | Python: [`FrankenTorchSimModel`](../reference/franken-api/stubs/franken.calculators.FrankenTorchSimModel.rst) |
 
 This interface enables to use Franken models in [torch-sim](https://github.com/TorchSim/torch-sim).
 
@@ -46,7 +46,9 @@ franken = FrankenPotential.load("path/to/best_ckpt.pt", map_location="cuda")
 model = FrankenTorchSimModel(franken, device="cuda", dtype=torch.float32)
 ```
 
-## Run a forward pass on a batched state
+## Run 
+
+### Forward pass on a batched state
 The interface accepts a torch-sim `SimState` and returns a dictionary with:
 - `"energy"`: shape `[n_systems]`
 - `"forces"`: shape `[n_atoms, 3]`
@@ -76,7 +78,7 @@ energy = out["energy"]  # [n_systems]
 forces = out["forces"]  # [n_atoms, 3]
 ```
 
-## Run batched MD with `torch_sim.integrate`
+### Batched MD with `torch_sim.integrate`
 This example runs multiple systems in parallel using one batched integration call.
 
 ```python

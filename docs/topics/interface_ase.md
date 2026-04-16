@@ -2,7 +2,7 @@
 
 | **Software** | **Backbones** | **Usage** |
 | --- | --- | --- |
-| ASE | all | Python: `FrankenCalculator` |
+| ASE | all | Python: [`FrankenCalculator`](../reference/franken-api/stubs/franken.calculators.FrankenCalculator.rst) |
 
 The native ASE calculator is the simplest way to run single-point evaluations and molecular dynamics with Franken models from Python.
 

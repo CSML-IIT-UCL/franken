@@ -2,7 +2,7 @@
 
 | **Software** | **Backbones** | **Usage** |
 | --- | --- | --- |
-| ASE, LAMMPS(+metatomic) | PET | CLI: `franken.wrap_metatomic` |
+| ASE, LAMMPS(+metatomic) | PET | CLI: [`franken.wrap_metatomic`](../reference/franken-cli/franken.create_lammps_model.rst) |
 
 The Metatomic export turns a Franken-PET checkpoint into a compiled model that can be used from ASE and the Metatomic LAMMPS interface.
 

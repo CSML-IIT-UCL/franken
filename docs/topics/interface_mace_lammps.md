@@ -2,7 +2,7 @@
 
 | **Software** | **Backbones** | **Usage** |
 | --- | --- | --- |
-| LAMMPS(+mace) | MACE | CLI: `franken.wrap_mace_lammps` |
+| LAMMPS(+mace) | MACE | CLI: [`franken.wrap_mace_lammps`](../reference/franken-cli/franken.create_lammps_model.rst) |
 
 If we have optimized a Franken model using a MACE backbone we can compile it for use with the [MACE](https://github.com/ACEsuit/lammps) fork of [LAMMPS](https://www.lammps.org/).
 
