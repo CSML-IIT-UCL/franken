@@ -1,7 +1,10 @@
-# Using Franken with ASE
+# ASE
 
-This page shows how to use a trained Franken checkpoint through the ASE calculator interface.
-This is the simplest way to run single-point evaluations and molecular dynamics from Python.
+| **Software** | **Backbones** | **Usage** |
+| --- | --- | --- |
+| ASE | all | Python: `FrankenCalculator` |
+
+The native ASE calculator is the simplest way to run single-point evaluations and molecular dynamics with Franken models from Python.
 
 ## Load the calculator
 

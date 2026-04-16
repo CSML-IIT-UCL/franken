@@ -80,8 +80,10 @@ Advantages of Franken
    :caption: Interfaces:
    :hidden:
 
+   topics/interface_overview.md
    topics/interface_ase.md
-   topics/interface_lammps.md
+   topics/interface_mace_lammps.md
+   topics/interface_metatomic.md
    topics/interface_torchsim.md
 
 .. toctree::

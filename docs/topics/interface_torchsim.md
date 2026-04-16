@@ -1,13 +1,17 @@
-# Using Franken with torch-sim
+# Torch-sim
 
-This page shows how to use `FrankenPotential` through the [torch-sim](https://github.com/TorchSim/torch-sim) interface.
+| **Software** | **Backbones** | **Usage** |
+| --- | --- | --- |
+| torch-sim | MACE, PET | Python: `FrankenTorchSimModel` |
 
-## What is supported
-- Backbones: `mace`, `pet`
+This interface enables to use Franken models in [torch-sim](https://github.com/TorchSim/torch-sim).
+
+### What is supported
 - Outputs: `energy`, `forces`
+- Batched evaluation
 - Stress/virials: not supported in this interface
 
-## Installation gotchas
+### Installation
 
  - torch-sim does not publish packages on conda-forge - installation must be with pip via `pip install torch-sim-atomistic`.
  - torch-sim requires **at least python 3.12**
@@ -27,7 +31,7 @@ model = FrankenTorchSimModel(
     "path/to/best_ckpt.pt",
     device="cuda" if torch.cuda.is_available() else "cpu",
     dtype=torch.float32,
-    rf_weight_id=None,  # set this when loading a multi-head checkpoint (uncommon)
+    rf_weight_id=None,  # set this when loading a multi-head checkpoint
 )
 ```
 
@@ -109,4 +113,3 @@ final_state = ts.integrate(
 )
 final_atoms_list = final_state.to_atoms()
 ```
-
