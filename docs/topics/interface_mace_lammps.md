@@ -1,29 +1,36 @@
-# Franken + LAMMPS
+# MACE-LAMMPS
 
-The basic steps required to run a Franken model with [LAMMPS](https://www.lammps.org/) are:
+| **Software** | **Backbones** | **Usage** |
+| --- | --- | --- |
+| LAMMPS(+mace) | MACE | CLI: `franken.wrap_mace_lammps` |
+
+If we have optimized a Franken model using a MACE backbone we can compile it for use with the [MACE](https://github.com/ACEsuit/lammps) fork of [LAMMPS](https://www.lammps.org/).
+
+The basic steps required to run a Franken model with MACE-LAMMPS are:
  1. Compile the model using `franken/calculators/mace_inf_wrap.py`:
     ```bash
     franken.wrap_mace_lammps --model_path=<best_ckpt.pt>
     ```
-    Note that only models which use the MACE backbone can be compiled and run with LAMMPS. For the other backbones please use the ase MD interface. The compiled model will be saved in the same directory as the original model, with `-lammps` appended to the filename.
- 2. Configure LAMMPS. The following lines are necessary, the second line should point to the compiled model from step 1.
+    This export route is specific to the MACE LAMMPS fork. The compiled model will
+    be saved in the same directory as the original model, with `-lammps` appended
+    to the filename.
+ 2. Configure LAMMPS. The following lines are necessary, the second line should point to the compiled model from step 1 and describe the chemical species associated to the atom types in LAMMPS. 
     ```
     pair_style mace no_domain_decomposition
-    pair_coeff * * <best_ckpt-lammps.pt> C H N O
+    pair_coeff * * <best_ckpt-lammps.pt> C H N O 
     ```
- 3. Run LAMMPS-Mace. On leonardo you can find it pre-compiled here:
-    `/leonardo/pub/userexternal/lbonati1/software/lammps-mace/lammps/build-ampere-plumed/lmp`
+ 3. Run LAMMPS-Mace. 
 
-## Compiling LAMMPS-Mace
+## Installing MACE-LAMMPS
 
-This follows the [MACE guide](https://mace-docs.readthedocs.io/en/latest/guide/lammps.html) adapting it to the leonardo cluster.
+This follows the [MACE guide](https://mace-docs.readthedocs.io/en/latest/guide/lammps.html) adapting it to the CINECA HPC Leonardo cluster.
 This can be useful in case one wants to modify the Mace patch to LAMMPS. In particular, the following two files are important:
  - [https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp](https://github.com/ACEsuit/lammps/blob/mace/src/ML-MACE/pair_mace.cpp)
  - [https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp](https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp)
 
 We will assume to start from directory `$BASE_DIR`
  1. ```git clone --branch=mace --depth=1 https://github.com/ACEsuit/lammps```
- 2. download librtorch. For now keeping the default version as specified by MACE, but note that new versions exist!
+ 2. download libtorch. For now keeping the default version as specified by MACE, but note that new versions exist!
     ```bash
     wget https://download.pytorch.org/libtorch/cu121/libtorch-shared-with-deps-2.2.0%2Bcu121.zip
     unzip libtorch-shared-with-deps-2.2.0+cu121.zip
@@ -67,12 +74,13 @@ We will assume to start from directory `$BASE_DIR`
         make -j 8
         make install
         ```
-        The compiled binary is then at `$BASE_DIR/lammps/build-ampere/bin/lmp`.
+        The compiled binary is then at `$BASE_DIR/lammps/build-ampere/bin/lmp`. On the HPC cluster Leonardo you can find it pre-compiled here: 
+        `/leonardo/pub/userexternal/lbonati1/software/lammps-mace/lammps/build-ampere-plumed/lmp`
 
 
-## Running LAMMPS-Mace
+## Running MACE-LAMMPS
 
-This is just an example sbatch file which can be used to run LAMMPS-Mace. Edit it according to your needs. It uses the paths to LAMMPS-Mace as available on the leonardo cluster, and we will assume that LAMMPS has been configured in a file named `in.lammps`.
+This is just an example sbatch file which can be used to run MACE-LAMMPS. Edit it according to your needs. It uses the paths to the MACE-LAMMPS binary as available on the Leonardo cluster, and we will assume that LAMMPS has been configured in a file named `in.lammps`.
 
 ```bash
 #!/bin/bash

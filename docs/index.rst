@@ -58,18 +58,33 @@ Advantages of Franken
 
 .. toctree::
    :maxdepth: 2
-   :caption: HOW TOs:
+   :caption: Getting Started:
    :hidden:
 
    Introduction <self>
 
-   topics/installation.md
-   topics/minimal_example.md
-   topics/model_registry.md
-   topics/metrics.md
-   topics/multigpu.md
-   topics/lammps.md
-   topics/torchsim.md
+   topics/intro_installation.md
+   topics/intro_minimal_example.md
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Training:
+   :hidden:
+
+   topics/training_backbones.md
+   topics/training_metrics.md
+   topics/training_multigpu.md
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Interfaces:
+   :hidden:
+
+   topics/interface_overview.md
+   topics/interface_ase.md
+   topics/interface_mace_lammps.md
+   topics/interface_metatomic.md
+   topics/interface_torchsim.md
 
 .. toctree::
     :maxdepth: 2
