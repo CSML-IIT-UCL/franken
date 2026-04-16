@@ -334,7 +334,8 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
 
 class MultiScaleOrthogonalRFF(RandomFeaturesHead):
     r"""
-    A multi-scale version of :class:`OrthogonalRFF` which splits the available random features among multiple length-scales.
+    A multi-scale version of :class:`franken.rf.heads.OrthogonalRFF` which splits
+    the available random features among multiple length-scales.
     This approximates a mixture of Gaussian kernels at different scales, simplifying hyper-parameter tuning.
 
     .. math::

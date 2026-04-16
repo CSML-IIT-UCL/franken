@@ -60,8 +60,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         save_fmaps (bool):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
-            the :meth:`~franken.trainers.FrankenPotential.evaluate` method on training
-            data. Defaults to True.
+            the ``evaluate()`` path on training data. Defaults to True.
     """
 
     def __init__(
@@ -106,25 +105,19 @@ class RandomFeaturesTrainer(BaseTrainer):
             model (FrankenPotential): The model which defines GNN and random features.
             solver_params (dict): Parameters for the solver which actually
                 performs the fit. This argument allows to specify multiple parameters,
-                for each of which we will perform a fit. For example
-
-                >>> solver_params = {
-                >>>     "l2_penalty": [1e-6, 1e-4],
-                >>>     "force_weight": [0.5]
-                >>> }
-
+                for each of which we will perform a fit. For example, passing
+                ``{"l2_penalty": [1e-6, 1e-4], "force_weight": [0.5]}``
                 will result in two different models, one with :code:`l2_penalty=1e-6, force_weight=0.5`
                 and one with :code:`l2_penalty=1e-4, force_weight=0.5`. This way of specifying solver
                 parameters allows to easily perform a grid-search.
 
         Returns:
-            logs (LogCollection): Logs which contain all parameters related
-                to the fitting, as well as timings.
-            weights (torch.Tensor): Weights which were learned during the fit.
+            tuple[LogCollection, torch.Tensor]:
+                The fitting logs, together with the learned weights.
 
         Note:
             More information about the available solver parameters can be found under the
-            :meth:`solve` method.
+            ``solve()`` method.
         """
         if self.device.type == "cuda":
             # Patch E3NN for batched jacobians!
