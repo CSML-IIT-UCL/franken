@@ -29,8 +29,19 @@ mace_off/small
 mace_off/medium
 mace_off/medium24
 mace_off/large
+
+* PET 
+PET_MAD/xs_1.5
+PET_MAD/s_1.5
+PET_OMat/xs_1.0
+PET_OMat/s_1.0
+PET_OMat/m_1.0
+PET_OMat/l_1.0
+PET_OMat/xl_1.0
+
 * SEVENN
 SevenNet0/11July2024
+
 * FAIRCHEM
 SchNet/S2EF-OC20-200k
 SchNet/S2EF-OC20-2M
