@@ -28,6 +28,7 @@ except ImportError:
             raise
 
 else:
+
     class FrankenTorchSimModel(ModelInterface):  # type: ignore
         """Wrap a FrankenPotential model with the torch-sim ``ModelInterface`` API.
 
