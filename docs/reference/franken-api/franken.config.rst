@@ -11,10 +11,11 @@ Backbone configuration
     :template: class.rst
     :nosignatures:
 
-        franken.config.MaceBackboneConfig
-        franken.config.FairchemBackboneConfig
-        franken.config.SevennBackboneConfig
-        franken.config.PetBackboneConfig
+    franken.config.BackboneConfig
+    franken.config.MaceBackboneConfig
+    franken.config.FairchemBackboneConfig
+    franken.config.SevennBackboneConfig
+    franken.config.PETBackboneConfig
 
 
 Random feature configuration
@@ -25,8 +26,9 @@ Random feature configuration
     :template: class.rst
     :nosignatures:
 
-        franken.config.GaussianRFConfig
-        franken.config.MultiscaleGaussianRFConfig
+    franken.config.RFConfig
+    franken.config.GaussianRFConfig
+    franken.config.MultiscaleGaussianRFConfig
 
 
 Other configurations
@@ -37,6 +39,7 @@ Other configurations
     :template: class.rst
     :nosignatures:
 
-        franken.config.DatasetConfig
-        franken.config.SolverConfig
-        franken.config.AutotuneConfig
+    franken.config.HPSearchConfig
+    franken.config.DatasetConfig
+    franken.config.SolverConfig
+    franken.config.AutotuneConfig
