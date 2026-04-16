@@ -11,8 +11,8 @@
 
 . ~/.bashrc
 
-micromamba activate franken-dev
+micromamba activate franken12
 cd ~/franken
 
 export PYTHONUNBUFFERED=1
-PYTHONPATH='.' python tests/test_transfer_perf/test_water.py --db-path=tests/test_transfer_perf/results_2703.pkl
+PYTHONPATH='.' python tests/test_transfer_perf/test_water.py --db-path=tests/test_transfer_perf/results_1404.pkl

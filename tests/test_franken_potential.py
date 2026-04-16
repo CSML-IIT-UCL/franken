@@ -227,7 +227,7 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
 
         if multiweights:
             dummy_multiweights = torch.randn(
-                (10,) + model.rf.weights.shape,
+                (10, model.rf.weights.shape[-1]),
                 dtype=model.rf.weights.dtype,
                 device=model.rf.weights.device,
             )
@@ -278,7 +278,7 @@ class TestModelGradients:
                 rf_config=rf_cfg,
             ).to(device)
 
-        num_lin_models = 10 if multiweights else 1
+        num_lin_models = 8 if multiweights else 1
         weights = torch.randn(
             (num_lin_models, model.rf.total_random_features), device=device
         )
@@ -295,6 +295,48 @@ class TestModelGradients:
         )
         torch.testing.assert_close(energy_func, energy_autograd, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(forces_func, forces_autograd, rtol=1e-3, atol=1e-3)
+    
+    def test_batched_gradients_mocked(self, rf_cfg, device, multiweights):
+        num_atoms = 10
+        num_lin_models = 8 if multiweights else 1
+        dtype = torch.float32
+        with mocked_gnn(device=device, dtype=dtype, feature_dim=32):
+            model = FrankenPotential(
+                gnn_config="test", # type: ignore
+                rf_config=rf_cfg,
+            ).to(device)
+
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        atomic_nums = torch.randint(1, 100, (num_atoms,))
+        cfg1 = Configuration(
+            torch.randn(num_atoms, 3, dtype=dtype), atomic_nums, torch.tensor(num_atoms)
+        ).to(device)
+        cfg2 = Configuration(
+            torch.randn(num_atoms, 3, dtype=dtype), atomic_nums, torch.tensor(num_atoms)
+        ).to(device)
+        cfg_batched = Configuration.concatenate([cfg1, cfg2])
+
+        energy_autograd_1, forces_autograd_1 = model.energy_and_forces(
+            cfg1, weights=weights, forces_mode="torch.autograd"
+        )
+        energy_autograd_2, forces_autograd_2 = model.energy_and_forces(
+            cfg2, weights=weights, forces_mode="torch.autograd"
+        )
+        assert forces_autograd_1 is not None and forces_autograd_2 is not None
+        energy_autograd = torch.cat([energy_autograd_1, energy_autograd_2], dim=1)
+        forces_autograd = torch.cat([forces_autograd_1, forces_autograd_2], dim=1)
+        energy_autograd_batched, forces_autograd_batched = model.energy_and_forces(
+            cfg_batched, weights=weights, forces_mode="torch.autograd"
+        )
+        torch.testing.assert_close(energy_autograd_batched, energy_autograd, msg=f"Batched energies not equal: actual={energy_autograd_batched}  expected={energy_autograd}")
+        torch.testing.assert_close(forces_autograd_batched, forces_autograd, rtol=1e-4, atol=1e-4, msg=f"Batched forces (autograd) not equal: actual={forces_autograd_batched}  expected={forces_autograd}")
+        energy_func_batched, forces_func_batched = model.energy_and_forces(
+            cfg_batched, weights=weights, forces_mode="torch.func"
+        )
+        torch.testing.assert_close(energy_func_batched, energy_autograd, msg=f"Batched energies not equal: actual={energy_autograd_batched}  expected={energy_autograd}")
+        torch.testing.assert_close(forces_func_batched, forces_autograd, rtol=1e-4, atol=1e-4, msg=f"Batched forces (func) not equal: actual={forces_autograd_batched}  expected={forces_autograd}")
 
     @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
     def test_gradients_real(self, rf_cfg, device, multiweights: bool, gnn_cfg):
@@ -322,10 +364,159 @@ class TestModelGradients:
         torch.testing.assert_close(forces_func, forces_autograd, rtol=1e-3, atol=1e-3)
 
 
+@pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("multiweights", [True, False])
+class TestEnergyShift:
+    num_atoms = 10
+    atomic_nums = torch.tensor([1, 1, 1, 1, 1, 8, 8, 8, 8, 8])
+    atomic_energies = {1: -1.0, 8: 0.5}
+    dtype = torch.float32
+
+    def test_simple(self, rf_cfg, device, multiweights):
+        with mocked_gnn(device=device, dtype=self.dtype, feature_dim=32):
+            model = FrankenPotential(
+                gnn_config="test", # type: ignore
+                rf_config=rf_cfg,
+                atomic_energies=self.atomic_energies,
+                num_species=2,
+            ).to(device)
+
+        num_lin_models = 8 if multiweights else 1
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        data = Configuration(
+            torch.randn(self.num_atoms, 3, dtype=self.dtype),
+            self.atomic_nums,
+            torch.tensor(self.num_atoms),
+        ).to(device)
+
+        e_ag, f_ag = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.autograd", add_energy_shift=False
+        )
+        e_ag_shift, f_ag_shift = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
+        )
+        torch.testing.assert_close(f_ag, f_ag_shift)
+        torch.testing.assert_close(e_ag + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, e_ag_shift) 
+
+        e_fn, f_fn = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.func", add_energy_shift=False
+        )
+        e_fn_shift, f_fn_shift = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.func", add_energy_shift=True
+        )
+        torch.testing.assert_close(f_fn, f_fn_shift)
+        torch.testing.assert_close(e_fn + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, e_fn_shift) 
+
+    def test_w_feature_maps(self, rf_cfg, device, multiweights):
+        with mocked_gnn(device=device, dtype=self.dtype, feature_dim=32):
+            model = FrankenPotential(
+                gnn_config="test", # type: ignore
+                rf_config=rf_cfg,
+                atomic_energies=self.atomic_energies,
+                num_species=2,
+            ).to(device)
+        num_lin_models = 8 if multiweights else 1
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        data = Configuration(
+            torch.randn(self.num_atoms, 3, dtype=self.dtype),
+            self.atomic_nums,
+            torch.tensor(self.num_atoms),
+        ).to(device)
+
+        ffmap, efmap = model.grad_feature_map(data)
+        ffmap = ffmap.view(ffmap.shape[0], -1)
+        e_from_fmaps, f_from_fmaps = model.energy_and_forces_from_fmaps(
+            data, energy_fmap=efmap, forces_fmap=ffmap, weights=weights, add_energy_shift=False
+        )
+        e_from_fmaps_shift, f_from_fmaps_shift = model.energy_and_forces_from_fmaps(
+            data, energy_fmap=efmap, forces_fmap=ffmap, weights=weights, add_energy_shift=True
+        )
+        torch.testing.assert_close(f_from_fmaps, f_from_fmaps_shift)
+        torch.testing.assert_close(e_from_fmaps + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, e_from_fmaps_shift) 
+
+    def test_unknown_species(self, rf_cfg, device, multiweights):
+        """Shift for unknown species should be 0"""
+        atomic_nums = torch.tensor([1, 1, 1, 1, 1, 8, 8, 8, 9, 10])
+        with mocked_gnn(device=device, dtype=self.dtype, feature_dim=32):
+            model = FrankenPotential(
+                gnn_config="test", # type: ignore
+                rf_config=rf_cfg,
+                atomic_energies=self.atomic_energies,
+                num_species=2,
+            ).to(device)
+        num_lin_models = 8 if multiweights else 1
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        data = Configuration(
+            torch.randn(self.num_atoms, 3, dtype=self.dtype),
+            atomic_nums,
+            torch.tensor(self.num_atoms),
+        ).to(device)
+
+        e_ag, f_ag = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.autograd", add_energy_shift=False
+        )
+        e_ag_shift, f_ag_shift = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
+        )
+        torch.testing.assert_close(f_ag, f_ag_shift)
+        torch.testing.assert_close(e_ag + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3, e_ag_shift) 
+
+        e_fn, f_fn = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.func", add_energy_shift=False
+        )
+        e_fn_shift, f_fn_shift = model.energy_and_forces(
+            data, weights=weights, forces_mode="torch.func", add_energy_shift=True
+        )
+        torch.testing.assert_close(f_fn, f_fn_shift)
+        torch.testing.assert_close(e_fn + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3, e_fn_shift) 
+    
+    def test_batched(self, rf_cfg, device, multiweights):
+        with mocked_gnn(device=device, dtype=self.dtype, feature_dim=32):
+            model = FrankenPotential(
+                gnn_config="test", # type: ignore
+                rf_config=rf_cfg,
+                atomic_energies=self.atomic_energies,
+                num_species=2,
+            ).to(device)
+        num_lin_models = 8 if multiweights else 1
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        atomic_nums = torch.randint(1, 100, (self.num_atoms,))
+        cfg1 = Configuration(
+            torch.randn(self.num_atoms, 3, dtype=self.dtype), atomic_nums, torch.tensor(self.num_atoms)
+        ).to(device)
+        cfg2 = Configuration(
+            torch.randn(self.num_atoms, 3, dtype=self.dtype), atomic_nums, torch.tensor(self.num_atoms)
+        ).to(device)
+        cfg_batched = Configuration.concatenate([cfg1, cfg2])
+
+        e_ag1, f_ag1 = model.energy_and_forces(
+            cfg1, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
+        )
+        e_ag2, f_ag2 = model.energy_and_forces(
+            cfg2, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
+        )
+        assert f_ag1 is not None and f_ag2 is not None
+        e_ag = torch.cat([e_ag1, e_ag2], dim=1)
+        f_ag = torch.cat([f_ag1, f_ag2], dim=1)
+        e_ag_batch, f_ag_batch = model.energy_and_forces(
+            cfg_batched, weights=weights, forces_mode="torch.autograd", add_energy_shift=True
+        )
+        torch.testing.assert_close(e_ag, e_ag_batch, msg=f"Batched energies not equal: actual={e_ag}  expected={e_ag_batch}")
+        torch.testing.assert_close(f_ag, f_ag_batch, rtol=1e-4, atol=1e-4, msg=f"Batched forces not equal: actual={f_ag}  expected={f_ag_batch}")
+
+
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("atomic_energies", [None, {7: 1.0, 26: 10.0}])
-def test_autotune(gnn_cfg, device, atomic_energies):
+def test_autotune(gnn_cfg, device):
     loaders = init_loaders(
         gnn_cfg,
         DATASET_REGISTRY.get_path("test", "train", None, False),

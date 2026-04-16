@@ -64,27 +64,40 @@ class RandomFeaturesHead(torch.nn.Module):
         self.register_buffer("weights", torch.zeros((1, self.total_random_features)))
 
     def species_scatter_sum(
-        self, Z: torch.Tensor, atomic_numbers: torch.Tensor | None = None
+        self,
+        Z: torch.Tensor,
+        atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        r"""Average features across all atoms in a configuration.
+        r"""Average features across all atoms in one or more configurations.
 
         Depending on the configuration of random features, this function will either perform
         a simple average, or will use a chemically-informed averaging method where features
-        are averaged within each atomic type and concatenated across atomic types. In this latter
-        case, the number of output features is larger than the number of input features. It will
-        always be equal to :code:`self.total_random_features`.
+        are averaged within each atomic type and concatenated across atomic types.
 
-        Args:
-            Z (torch.Tensor): [num_atoms, feature_dim] tensor containing the random features for each atom
-            atomic_numbers (torch.Tensor | None): if specified, an integer tensor of size [num_atoms]
-                detailing the atomic number of each atom in the configuration. Defaults to None.
-
-        Returns:
-            torch.Tensor: [total_feature_dim] tensor containing the random features for the whole configuration.
+        Returns a feature per-system feature map of shape ``[n_systems, total_feature_dim]``.
         """
-        if self.num_species is None:
-            return Z.mean(0)
+        # Z: [Atoms(A), Features(F)]
+        # Out: [Systems(N), Features(F)[*(1+Species(S))]]
+        n_systems = 1
+        if batch_ids is not None:
+            batch_ids = batch_ids.to(dtype=torch.long)
+            n_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
+        dt = Z.dtype
+        dev = Z.device
+        n_species = self.num_species
+        n_rf = self.num_random_features
+
+        if n_systems <= 1:
+            global_mean = Z.mean(0, keepdim=True)
         else:
+            assert batch_ids is not None
+            out = torch.zeros((n_systems, Z.shape[1]), dtype=dt, device=dev)
+            out = out.index_add(0, batch_ids, Z)
+            counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=dt)
+            global_mean = out / counts.clamp_min(1).unsqueeze(-1)
+
+        if n_species is not None:  # will return [N, S * F]
             assert (
                 atomic_numbers is not None
             ), "atomic_number should be specified when self.num_species is not None"
@@ -92,30 +105,37 @@ class RandomFeaturesHead(torch.nn.Module):
                 atomic_numbers, sorted=True, return_inverse=True
             )
             assert (
-                len(species_map) == self.num_species
-            ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {self.num_species}"
+                len(species_map) == n_species
+            ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {n_species}"
 
-            scatter_idxs = scatter_idxs.unsqueeze(-1).expand(
-                Z.size()
-            )  # ~[natoms, random_features_per_species] Broadcasting for backprop.
-            chemically_informed_descriptors = (
-                torch.zeros((self.num_species, self.num_random_features), dtype=Z.dtype)
-                .to(Z.device)
-                .scatter_reduce_(0, scatter_idxs, Z, "mean")
-            ) / self.num_species  # Normalize.
+            if n_systems > 1:
+                assert batch_ids is not None
+                # batched scatter indices
+                scatter_idxs = batch_ids * n_species + scatter_idxs  # [A]
+
+            # Scatter ids must be of the same size as Z for scatter_reduce_
+            scatter_idxs = scatter_idxs.unsqueeze(-1).expand_as(Z)
+            out = (
+                torch.zeros(
+                    (n_systems * n_species, n_rf), dtype=dt, device=dev
+                ).scatter_reduce_(0, scatter_idxs, Z, "mean", include_self=False)
+            ) / n_species  # [N*S, F]
+            chem_informed_features = out.view(n_systems, n_species, n_rf)  # [N, S, F]
 
             if self.chemically_informed_ratio is not None:
                 kappa = self.chemically_informed_ratio
                 assert (
                     0 <= kappa <= 1
                 ), "The ratio of chemically informed feature feature map should be bounded between 0 and 1"
-                chemically_informed_descriptors = torch.cat(
+                chem_informed_features = torch.cat(
                     (
-                        (1 - kappa) * Z.mean(0, keepdim=True),
-                        kappa * chemically_informed_descriptors,
-                    )
+                        (1 - kappa) * global_mean.unsqueeze(1),
+                        kappa * chem_informed_features,
+                    ),
+                    dim=1,
                 )
-            return chemically_informed_descriptors.view(-1)
+            return chem_informed_features.reshape(n_systems, -1)  # [N, S*F]
+        return global_mean  # [N, F]
 
     def init_args(self):
         """Returns the arguments needed to re-initialize this class."""
@@ -231,6 +251,7 @@ class OrthogonalRFF(RandomFeaturesHead):
         self,
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Computes the random-feature map for a given configuration :code:`h`
 
@@ -256,7 +277,7 @@ class OrthogonalRFF(RandomFeaturesHead):
             Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
 
         return self.species_scatter_sum(
-            Z, atomic_numbers=atomic_numbers
+            Z, atomic_numbers=atomic_numbers, batch_ids=batch_ids
         )  # Sum over the single species
 
     def init_args(self):
@@ -294,12 +315,17 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
         self,
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         self.bias = self.bias.to(dtype=h.dtype)
         # unbiased_features ~ [num_random_features - 1]
-        features = super().feature_map(h, atomic_numbers=atomic_numbers)
-        assert features.ndim == 1
-        features[-1] = torch.sqrt(self.bias)
+        features = super().feature_map(
+            h, atomic_numbers=atomic_numbers, batch_ids=batch_ids
+        )
+        if features.ndim == 1:
+            features[-1] = torch.sqrt(self.bias)
+        else:
+            features[:, -1] = torch.sqrt(self.bias)
         return features
 
     def init_args(self):
@@ -308,7 +334,8 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
 
 class MultiScaleOrthogonalRFF(RandomFeaturesHead):
     r"""
-    A multi-scale version of :class:`OrthogonalRFF` which splits the available random features among multiple length-scales.
+    A multi-scale version of :class:`franken.rf.heads.OrthogonalRFF` which splits
+    the available random features among multiple length-scales.
     This approximates a mixture of Gaussian kernels at different scales, simplifying hyper-parameter tuning.
 
     .. math::
@@ -398,6 +425,7 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         self,
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Computes the random-feature map for a given configuration :code:`h`
 
@@ -425,7 +453,7 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
             Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
 
         return self.species_scatter_sum(
-            Z, atomic_numbers=atomic_numbers
+            Z, atomic_numbers=atomic_numbers, batch_ids=batch_ids
         )  # Sum over the single species
 
     def init_args(self):
@@ -483,6 +511,7 @@ class Linear(RandomFeaturesHead):
         self,
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Computes the random-feature map for a given configuration :code:`h`
 
@@ -503,7 +532,9 @@ class Linear(RandomFeaturesHead):
         scaled_descriptors = torch.cat([scaled_descriptors, bias_feature], dim=1)
 
         return self.species_scatter_sum(
-            scaled_descriptors, atomic_numbers=atomic_numbers
+            scaled_descriptors,
+            atomic_numbers=atomic_numbers,
+            batch_ids=batch_ids,
         )
 
     def init_args(self):
@@ -596,6 +627,7 @@ class TensorSketch(RandomFeaturesHead):
         self,
         h: torch.Tensor,
         atomic_numbers: torch.Tensor | None = None,
+        batch_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Computes the random-feature map for a given configuration :code:`h`
 
@@ -616,7 +648,11 @@ class TensorSketch(RandomFeaturesHead):
         Z = torch.fft.rfft(Z, n=self.num_random_features)
         Z = Z.prod(1)  # ~[atoms, random_features]
         Z = torch.fft.irfft(Z, n=self.num_random_features)
-        return self.species_scatter_sum(Z, atomic_numbers=atomic_numbers)
+        return self.species_scatter_sum(
+            Z,
+            atomic_numbers=atomic_numbers,
+            batch_ids=batch_ids,
+        )
 
     def init_args(self):
         return super().init_args() | {

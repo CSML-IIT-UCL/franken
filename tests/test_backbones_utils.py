@@ -46,6 +46,8 @@ def test_cache_dir_default(mock_cache_folder):
                 assert result == mock_cache_folder / ".franken"
                 # Ensure that the path exists
                 mock_exists.assert_called_once()
+                # Reset cache dir. Avoids leaving stale state around
+                franken.backbones.utils.CacheDir.directory = None
 
 
 def test_cache_dir_with_env_var(mock_cache_folder):
@@ -62,6 +64,8 @@ def test_cache_dir_with_env_var(mock_cache_folder):
             assert str(result) == str(mock_cache_folder)
             # Ensure that the path exists
             mock_exists.assert_called_once()
+            # Reset cache dir. Avoids leaving stale state around
+            franken.backbones.utils.CacheDir.directory = None
 
 
 def test_download_checkpoint_name_error():

@@ -2,7 +2,7 @@ from typing import Mapping
 import torch
 
 import franken.utils.distributed as dist_utils
-from franken.data.base import Target
+from franken.data.base import Configuration, Target
 
 
 class BaseMetric:
@@ -12,7 +12,6 @@ class BaseMetric:
         device: torch.device,
         dtype: torch.dtype = torch.float64,
         units: Mapping[str, str | None] = {},
-        requires_species: bool = False,
     ):
         self.name = name
         self.device = device
@@ -20,7 +19,6 @@ class BaseMetric:
         self.buffer = None
         self.samples_counter = torch.zeros((1,), device=device, dtype=dtype)
         self.units = units
-        self.requires_species = requires_species
 
     def reset(self) -> None:
         """Reset the buffer to zeros"""
@@ -35,11 +33,7 @@ class BaseMetric:
         self.buffer += value
         self.samples_counter += num_samples
 
-    def update(
-        self,
-        predictions: Target,
-        targets: Target,
-    ) -> None:
+    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         """Update the metric buffer with new batch results"""
         raise NotImplementedError()
 

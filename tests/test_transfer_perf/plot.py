@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -5,9 +7,16 @@ import pandas as pd
 import pickle
 
 
-def plots(file_name):
+def plots(file_name, save: bool):
     with open(file_name, "rb") as fh:
         data = pickle.load(fh)
+    for d in data:
+        for j in [1, 2, 4, 16, 64, 128]:
+            key = f"results_ts_time_per_atom_{j}"
+            if key not in d:
+                continue
+            if isinstance(d[key], tuple):
+                d[key] = d[key][0]
     df = pd.DataFrame(data)
 
     # Make sure no duplicates exist
@@ -17,39 +26,54 @@ def plots(file_name):
             "Multiple rows found for some (gnn_path_or_id, compile) pairs:\n"
             f"{counts[counts > 1]}"
         )
+    # Check whether to plot the torch-sim experiment
+    plot_torchsim = True
+    if "results_ts_time_per_atom_1" not in df.columns:
+        plot_torchsim = False
     # Note: aggregation is fake, we don't allow duplicates
+    agg_lbls = {
+        'gnn_family': 'first',
+        'results_train_time': 'mean',
+        'results_md_time_per_atom': 'mean',
+        'results_forces_MAE': 'mean',
+        'results_md_stable': 'all',
+    }
+    if plot_torchsim:
+        agg_lbls |= {
+            'results_ts_time_per_atom_1': 'mean',
+            'results_ts_time_per_atom_2': 'mean',
+            'results_ts_time_per_atom_4': 'mean',
+            'results_ts_time_per_atom_16': 'mean',
+            'results_ts_time_per_atom_64': 'mean',
+            'results_ts_time_per_atom_128': 'mean',
+        }
     agg_df = (
         df.groupby(['gnn_path_or_id', 'compile'], as_index=False)
-        .agg({
-            'gnn_family': 'first',
-            'results_train_time': 'mean',
-            'results_md_time_per_atom': 'mean',
-            'results_forces_MAE': 'mean',
-            'results_md_stable': 'all',
-        })
+        .agg(agg_lbls)
         .sort_values(['gnn_family', 'gnn_path_or_id'])
     )
 
-    fig, ax = plt.subplots(ncols=1, nrows=3, figsize=(6, 8))
+    fig, ax = plt.subplots(ncols=2, nrows=3, figsize=(12, 8))
     plot_grouped_bar(
         agg_df,
         value_col='results_train_time',
         title='Training Time per GNN',
-        ylabel='Time',
+        ylabel='Time (s)',
         x_ticks=False,
         affects_compile=False,
-        figax=(fig, ax[0]),
+        figax=(fig, ax[0, 0]),
     )
     plot_grouped_bar(
         agg_df,
         value_col='results_md_time_per_atom',
         title='MD Time per Atom per GNN',
-        ylabel='Time per atom',
+        ylabel='Time per atom (s)',
         x_ticks=False,
         affects_compile=True,
         stability_col="results_md_stable",
-        figax=(fig, ax[1]),
+        figax=(fig, ax[1, 0]),
     )
+    ax[1, 0].set_yscale('log', base=2)
     plot_grouped_bar(
         agg_df,
         value_col='results_forces_MAE',
@@ -57,10 +81,53 @@ def plots(file_name):
         ylabel='MAE',
         x_ticks=True,
         affects_compile=False,
-        figax=(fig, ax[2]),
+        figax=(fig, ax[2, 0]),
     )
+    if plot_torchsim:
+        plot_throughput(
+            agg_df,
+            col_prefix="results_ts_time_per_atom", 
+            lw=2,
+            figax=(fig, ax[0, 1]),
+        )
+        ax[0, 1].set_title("Torch-Sim throughput")
+    else:
+        ax[0, 1].axis('off')
+    ax[1, 1].axis('off')
+    ax[2, 1].axis('off')
     fig.tight_layout()
+    if save:
+        save_path = Path(file_name).with_suffix(".png")
+        fig.savefig(save_path, bbox_inches="tight")
+        print(f"Saved plot to {save_path}")
     plt.show()
+
+
+def plot_throughput(df, col_prefix="", family_col="gnn_family", lw=1, figax=None):
+    if figax is None:
+        fig, ax = plt.subplots(figsize=(10, 5))
+    else:
+        fig, ax = figax
+    families = df[family_col].unique()
+    cmap = plt.get_cmap('tab10')
+    linestyles = ["solid", "dotted", "dashed", "dashdot"]
+    family_to_ls = {
+        fam: linestyles[i] for i, fam in enumerate(families)
+    }
+    x = sorted([int(c.split("_")[-1]) for c in df.columns if c.startswith(col_prefix)])
+
+    for fam, subdf in df.groupby(family_col):
+        gnn_ids = sorted(subdf['gnn_path_or_id'].unique())
+        for i, g in enumerate(gnn_ids):
+            subset = subdf[subdf['gnn_path_or_id'] == g]
+            y = [subset[f"{col_prefix}_{x_val}"].mean() for x_val in x]
+            ax.plot(x, y, ls=family_to_ls[fam], c=cmap(i % 10), label=g, marker='o', lw=lw)
+    ax.legend(bbox_to_anchor=(0.5, -0.3))
+    ax.set_xlabel("Batch size")
+    ax.set_ylabel("Time per atom (s)")
+    ax.set_xscale('log', base=2)
+    ax.set_yscale('log', base=2)
+    return fig, ax
 
 
 def plot_grouped_bar(
@@ -192,8 +259,13 @@ def plot_grouped_bar(
     ]
     
     ax.legend(handles=compile_legend + family_legend, loc="best")
-    
     return fig, ax
 
 if __name__ == "__main__":
-    plots("results_2703.pkl")
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', '--path', type=str, help="Path to database")
+    parser.add_argument('-s', '--save', action="store_true", help="Save output plot")
+    args = parser.parse_args()
+    plots(args.path, args.save)
+

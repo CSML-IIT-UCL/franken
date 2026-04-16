@@ -390,7 +390,12 @@ class AutotuneConfig:
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
     metrics: list[str] = field(default_factory=lambda: DEFAULT_AUTOTUNE_METRICS.copy())
-    """Metrics to compute during evaluation. Options: `energy_MAE`, `forces_MAE`, `energy_RMSE`, `forces_RMSE`, `forces_MAE_species`, `forces_RMSE_species`, `forces_cosim`. """
+    """Metrics to compute during evaluation.
+
+    Options include ``energy_MAE``, ``forces_MAE``, ``energy_RMSE``,
+    ``forces_RMSE``, ``forces_MAE_species``, ``forces_RMSE_species``,
+    and ``forces_cosim``.
+    """
 
     best_model_selection: list[str] = field(
         default_factory=lambda: DEFAULT_BEST_MODEL_SELECTION.copy()
