@@ -516,7 +516,8 @@ class TestEnergyShift:
 
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 @pytest.mark.parametrize("device", DEVICES)
-def test_autotune(gnn_cfg, device):
+@pytest.mark.parametrize("atomic_energies", [None, {7: 1.0, 26: 10.0}])
+def test_autotune(gnn_cfg, device, atomic_energies):
     loaders = init_loaders(
         gnn_cfg,
         DATASET_REGISTRY.get_path("test", "train", None, False),
@@ -549,7 +550,9 @@ def test_autotune(gnn_cfg, device):
             loaders=loaders,
             scale_by_species=False,
             jac_chunk_size="auto",
-            trainer=trainer
+            trainer=trainer,
+            atomic_energies=atomic_energies,
+
         )
         print(f"{list(temp_dir.glob('*'))}")
         assert (temp_dir / "best.json").is_file()
