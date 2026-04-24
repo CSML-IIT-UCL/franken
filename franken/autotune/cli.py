@@ -1,4 +1,5 @@
 import argparse
+import ast
 import dataclasses
 import types
 import typing
@@ -72,6 +73,19 @@ def field_is_optional_literal(field_type: Any):
     is_lit_present = typing.Literal in all_subtype_origins
     return is_lit_present and len(all_subtypes) == 2
 
+
+def parse_atomic_energies(s: str) -> dict[int, float] | None:
+    if s.lower() == "none":
+        return None
+
+    parsed = ast.literal_eval(s)
+    if not isinstance(parsed, dict):
+        raise TypeError("atomic energies must be a dictionary")
+
+    atomic_energies = {}
+    for key, value in parsed.items():
+        atomic_energies[int(key)] = float(value)
+    return atomic_energies
 
 def parse_union_type(*parsers):
     def union_parser(f: Any):
@@ -561,6 +575,12 @@ def build_parser(return_groups: bool = False):
         default="INFO",
         help=get_field_docstring(AutotuneConfig, "console_logging_level"),
     )
+    parser.add_argument(
+        "--atomic-energies",
+        type=parse_atomic_energies,
+        default=None,
+        help=get_field_docstring(AutotuneConfig, "atomic_energies"),
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -607,5 +627,6 @@ def parse_cli(argv):
         run_dir=args.run_dir,
         seed=args.seed,
         console_logging_level=args.log_level,
+        atomic_energies=args.atomic_energies,
     )
     return autotune_cfg

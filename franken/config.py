@@ -419,3 +419,8 @@ class AutotuneConfig:
 
     eval_splits: Optional[list[str]] = None
     """Evaluate only the specified splits e.g. ['val', 'test']. The default value of None runs the evaluation on all splits."""
+
+    atomic_energies: dict[int, float] | None = None
+    """Optional dictionary mapping atomic numbers to their reference energies (eV).
+    If provided, these energies will be subtracted from the prediction during training.
+    Format: {atomic_number: energy_value, ...}. Example: {1: -0.5, 8: -75.3}"""

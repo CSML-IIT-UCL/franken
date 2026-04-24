@@ -58,6 +58,37 @@ warnings.filterwarnings(
 logger = logging.getLogger("franken")
 
 
+def set_dataset_atomic_energies(
+    loaders: dict[str, torch.utils.data.DataLoader],
+    atomic_energies: dict[int, float] | None,
+) -> None:
+    if atomic_energies is None:
+        return
+
+    train_dataset = loaders["train"].dataset
+    assert isinstance(train_dataset, BaseAtomsDataset)
+
+    missing_species = set(train_dataset.species) - set(atomic_energies)
+    if missing_species:
+        raise ValueError(
+            "Missing reference atomic energies for species: "
+            f"{sorted(missing_species)}"
+        )
+
+    extra_species = set(atomic_energies) - set(train_dataset.species)
+    if extra_species:
+        logger.warning(
+            "Ignoring reference atomic energies for species not present in the "
+            "training set: %s",
+            sorted(extra_species),
+        )
+
+    train_dataset.atomic_energies_ = {
+        z: atomic_energies[z] for z in train_dataset.species
+    }
+    train_dataset.energy_shifts_ = None
+
+
 def init_loaders(
     gnn_cfg: BackboneConfig,
     train_path: Path | None,
@@ -180,6 +211,8 @@ def run_autotune(
     metrics: list[str] | None = None,
     best_model_selection: list[str] | None = None,
     eval_splits: list[str] | None = None,
+    atomic_energies: dict[int, float] | None = None,
+
 ):
     if metrics is None:
         metrics = DEFAULT_AUTOTUNE_METRICS.copy()
@@ -198,7 +231,7 @@ def run_autotune(
             rf_config=rf_params,
             scale_by_Z=scale_by_species,
             num_species=loaders["train"].dataset.num_species,
-            atomic_energies=None,
+            atomic_energies=atomic_energies,
             jac_chunk_size=jac_chunk_size,
         )
 
@@ -362,6 +395,8 @@ def autotune(cfg: AutotuneConfig):
         t_end = time.time()
         logger.debug(f"Initialized data-loaders in {t_end - t_start:.2f}s")
 
+        set_dataset_atomic_energies(loaders, cfg.atomic_energies)
+
         trainer = RandomFeaturesTrainer(
             train_dataloader=loaders["train"],
             random_features_normalization=cfg.rf_normalization,
@@ -383,6 +418,8 @@ def autotune(cfg: AutotuneConfig):
             jac_chunk_size=cfg.jac_chunk_size,
             trainer=trainer,
             eval_splits=cfg.eval_splits,
+            atomic_energies=cfg.atomic_energies,
+
         )
     except Exception as e:
         logger.error("Error encountered in autotune. Exiting.", exc_info=e)
