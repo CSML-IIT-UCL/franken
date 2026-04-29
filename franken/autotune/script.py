@@ -212,7 +212,6 @@ def run_autotune(
     best_model_selection: list[str] | None = None,
     eval_splits: list[str] | None = None,
     atomic_energies: dict[int, float] | None = None,
-
 ):
     if metrics is None:
         metrics = DEFAULT_AUTOTUNE_METRICS.copy()
@@ -419,7 +418,6 @@ def autotune(cfg: AutotuneConfig):
             trainer=trainer,
             eval_splits=cfg.eval_splits,
             atomic_energies=cfg.atomic_energies,
-
         )
     except Exception as e:
         logger.error("Error encountered in autotune. Exiting.", exc_info=e)

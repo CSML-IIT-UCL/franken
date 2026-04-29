@@ -87,6 +87,7 @@ def parse_atomic_energies(s: str) -> dict[int, float] | None:
         atomic_energies[int(key)] = float(value)
     return atomic_energies
 
+
 def parse_union_type(*parsers):
     def union_parser(f: Any):
         for p in parsers:
