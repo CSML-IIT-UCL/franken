@@ -1,12 +1,10 @@
-
-from copy import deepcopy
-
 import torch
 import metatomic.torch
 
 from franken.backbones.utils import load_checkpoint
 from franken.config import PETBackboneConfig
-from franken.data.base import BaseAtomsDataset, Configuration
+from franken.data.base import Configuration
+from franken.data.dataset import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.backbones.wrappers.pet_wrap import systems_to_batch
 
@@ -16,7 +14,7 @@ def test_batched_inference():
     pet_gnn = load_checkpoint(gnn_cfg)
     
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_cfg,
