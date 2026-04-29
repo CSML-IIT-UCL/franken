@@ -33,6 +33,7 @@ class Configuration:
             atom_pos.dim() == 2 and atom_pos.shape[1] == 3
         ), f"Incorrect atom position shape {atom_pos.shape}"
         n_atoms = atom_pos.shape[0]
+        n_batches = 1 if batch_ids is None else len(torch.unique(batch_ids))
         self.atom_pos = atom_pos
         assert (
             atomic_numbers.dim() == 1 and len(atomic_numbers) == n_atoms
@@ -55,8 +56,19 @@ class Configuration:
             ), f"Incorrect unit shifts shape {unit_shifts.shape}"
         self.unit_shifts = unit_shifts
         if cell is not None:
-            assert cell.shape == (3, 3), f"Incorrect cell shape {cell.shape}"
+            if n_batches == 1 and cell.ndim == 2:
+                assert cell.shape == (3, 3), f"Incorrect cell shape {cell.shape}"
+            else:
+                assert cell.shape == (
+                    n_batches,
+                    3,
+                    3,
+                ), f"Incorrect cell shape {cell.shape}"
         self.cell = cell
+        if batch_ids is not None:
+            assert (
+                batch_ids.dim() == 1 and len(batch_ids) == n_atoms
+            ), f"Incorrect batch_ids shape {batch_ids.shape}"
         self.batch_ids = batch_ids
         self.pbc = pbc
 
@@ -143,7 +155,7 @@ class Configuration:
                 shifts.append(config.shifts)
             # Check batch IDs: they must not be present in the input configurations
             if config.batch_ids is not None:
-                assert len(config.batch_ids.unique()) == 1
+                assert len(torch.unique(config.batch_ids)) == 1
             all_batch_ids.append(
                 torch.full((system_size,), i, device=config.atom_pos.device)
             )
