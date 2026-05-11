@@ -18,7 +18,6 @@ from franken.utils.misc import no_jit
 # Check availability of backbones
 HAS_MACE = importlib.util.find_spec("mace") is not None
 HAS_SEVENN = importlib.util.find_spec("sevenn") is not None
-HAS_FAIRCHEM = importlib.util.find_spec("fairchem") is not None
 HAS_UPET = True
 
 # Build parametrized model list with skip marks when deps are missing
@@ -29,10 +28,8 @@ for name in REGISTRY.keys():
     if name in {"PET_OMat/xl_1.0", "PET_OMat/l_1.0", "mace_off/large", "mace_omol/0_4M", "mace_mp/large-0b2", "mace_mp/large"}:
         marks.append(pytest.mark.skip(reason=f"{name} requires too large a model"))
         continue
-    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN) or (kind == "fairchem" and not HAS_FAIRCHEM):
+    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN):
         marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
-    elif "SchNet" in name:
-        marks.append(pytest.mark.xfail(reason="Fails in CI due to unknown reasons", strict=False))
     elif kind == "mace":
         marks.append(pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True))
     elif kind == "sevenn":

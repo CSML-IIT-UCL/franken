@@ -202,8 +202,6 @@ class BackboneConfig(ABC):
     def from_ckpt(ckpt: dict):
         if ckpt["family"].lower() == "mace":
             cls = MaceBackboneConfig
-        elif ckpt["family"].lower() == "fairchem":
-            cls = FairchemBackboneConfig
         elif ckpt["family"].lower() == "sevenn":
             cls = SevennBackboneConfig
         elif ckpt["family"].lower() == "pet":
@@ -218,13 +216,6 @@ class BackboneConfig(ABC):
 @dataclass(slots=True)
 class MaceBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "mace"
-    interaction_block: int = 2
-    """GNN layer out of which the features are extracted."""
-
-
-@dataclass(slots=True)
-class FairchemBackboneConfig(BackboneConfig):
-    family: ClassVar[str] = "fairchem"
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
 

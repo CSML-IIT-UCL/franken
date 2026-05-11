@@ -13,7 +13,6 @@ Backbone configuration
 
     franken.config.BackboneConfig
     franken.config.MaceBackboneConfig
-    franken.config.FairchemBackboneConfig
     franken.config.SevennBackboneConfig
     franken.config.PETBackboneConfig
 

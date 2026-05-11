@@ -66,7 +66,7 @@ def set_dataset_atomic_energies(
         return
 
     train_dataset = loaders["train"].dataset
-    assert isinstance(train_dataset, BaseAtomsDataset)
+    assert isinstance(train_dataset, FrankenAtomsDataset)
 
     missing_species = set(train_dataset.species) - set(atomic_energies)
     if missing_species:

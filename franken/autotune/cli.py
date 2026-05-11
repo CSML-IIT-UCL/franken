@@ -9,7 +9,6 @@ from typing import Any, Sequence
 from franken.config import (
     AutotuneConfig,
     MaceBackboneConfig,
-    FairchemBackboneConfig,
     PETBackboneConfig,
     SevennBackboneConfig,
     GaussianRFConfig,
@@ -252,7 +251,7 @@ class ArgumentGroup:
 class MutuallyExclusiveArgumentGroup(ArgumentGroup):
     def __init__(self, name: str, title: str, desc: str, data_class: type, arguments):
         for arg in arguments:
-            arg.full_name = f"{name}.{arg.full_name}"  # e.g. fairchem.interaction_block
+            arg.full_name = f"{name}.{arg.full_name}"  # e.g. mace.interaction_block
         super().__init__(name, title, desc, data_class, arguments)
 
     def add_to_parser(self, parser: argparse.ArgumentParser):
@@ -413,20 +412,6 @@ def get_arg_groups():
                         "append_layers",
                         "append-layers",
                         "last-layer-only",
-                    ),
-                ],
-            ),
-            MutuallyExclusiveArgumentGroup(
-                "fairchem",
-                title="Fairchem backbone",
-                desc="Configure the MACE backbone. Specify ``--backbone=fairchem`` to enable.",
-                data_class=FairchemBackboneConfig,
-                arguments=[
-                    Argument.from_dataclass(
-                        FairchemBackboneConfig, "path_or_id", "path-or-id"
-                    ),
-                    Argument.from_dataclass(
-                        FairchemBackboneConfig, "interaction_block", "interaction-block"
                     ),
                 ],
             ),
