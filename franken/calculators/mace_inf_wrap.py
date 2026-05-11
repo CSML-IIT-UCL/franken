@@ -70,7 +70,7 @@ class MaceInferenceWrapper(torch.nn.Module):
         """
         # node_attrs is a one-hot representation of the atom types. atom_nums should be the actual atomic numbers!
         # we rely on correct sorting. This is the same as in MACE.
-        atom_nums = self.atomic_numbers[ # pyright: ignore[reportIndexIssue]
+        atom_nums = self.atomic_numbers[  # pyright: ignore[reportIndexIssue]
             torch.argmax(data["node_attrs"], dim=1)
         ]
 

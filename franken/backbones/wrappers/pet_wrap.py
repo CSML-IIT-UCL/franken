@@ -199,10 +199,10 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
         # an inner LLPR (for uncertainty quantification) wrapper is optional
         llpr_model = base_model.module
         if hasattr(llpr_model, "model"):
-            pet_model: torch.nn.Module = llpr_model.model # type: ignore
+            pet_model: torch.nn.Module = llpr_model.model  # type: ignore
         else:
-            pet_model = llpr_model # type: ignore
-        return pet_model # pyright: ignore[reportReturnType]
+            pet_model = llpr_model  # type: ignore
+        return pet_model  # pyright: ignore[reportReturnType]
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
         nl_options = self.base_model.requested_neighbor_lists()[0]
