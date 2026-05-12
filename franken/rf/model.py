@@ -135,11 +135,14 @@ class FrankenPotential(torch.nn.Module):
         path,
         map_location=None,
         rf_weight_id: int | None = None,
+        backbone_path_or_id: str | None = None,
     ):
         ckpt = torch.load(path, map_location=map_location, weights_only=False)
 
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
+        if backbone_path_or_id is not None:
+            gnn_cfg.path_or_id = backbone_path_or_id
         model = cls(
             gnn_config=gnn_cfg,
             rf_config=rf_cfg,

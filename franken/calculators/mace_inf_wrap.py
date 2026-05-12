@@ -102,7 +102,11 @@ class MaceInferenceWrapper(torch.nn.Module):
         }
 
     @staticmethod
-    def init_wrapper(model_path: str, rf_weight_id: int | None) -> str:
+    def init_wrapper(
+        model_path: str,
+        rf_weight_id: int | None,
+        backbone_path_or_id: str | None = None,
+    ) -> str:
         """Compile a franken model into a wrapped model ready for use with MACE-LAMMPS
 
         Args:
@@ -111,6 +115,10 @@ class MaceInferenceWrapper(torch.nn.Module):
             rf_weight_id (int | None):
                 ID of the random feature weights. Can generally be left to ``None`` unless
                 the checkpoint contains multiple trained models.
+            backbone_path_or_id (str | None):
+                Override the backbone checkpoint path stored in the
+                Franken checkpoint. This is useful when paths changed
+                since training.
 
         Returns:
             str: the path where the LAMMPS-compatible model was saved to.
@@ -119,6 +127,7 @@ class MaceInferenceWrapper(torch.nn.Module):
             model_path,
             map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             rf_weight_id=rf_weight_id,
+            backbone_path_or_id=backbone_path_or_id,
         )
 
         if not isinstance(franken_model.gnn, AtomisticModelWrapper):
@@ -157,13 +166,25 @@ def build_arg_parser():
         help="Head of the model to be converted to LAMMPS",
         default=None,
     )
+    parser.add_argument(
+        "--backbone_path_or_id",
+        type=str,
+        help=(
+            "Override the backbone checkpoint path stored in the " "Franken checkpoint."
+        ),
+        default=None,
+    )
     return parser
 
 
 def wrap_mace_cli():
     parser = build_arg_parser()
     args = parser.parse_args()
-    MaceInferenceWrapper.init_wrapper(args.model_path, args.rf_weight_id)  # type: ignore
+    MaceInferenceWrapper.init_wrapper(
+        args.model_path,
+        args.rf_weight_id,
+        args.backbone_path_or_id,
+    )  # type: ignore
 
 
 if __name__ == "__main__":
