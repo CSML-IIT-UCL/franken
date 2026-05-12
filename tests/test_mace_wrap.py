@@ -9,7 +9,8 @@ from mace.tools import AtomicNumberTable, atomic_numbers_to_indices, to_one_hot
 from franken.backbones.utils import load_checkpoint
 from franken.backbones.wrappers.mace_wrap import atom_numbers_to_node_attrs
 from franken.config import MaceBackboneConfig
-from franken.data.base import BaseAtomsDataset, Configuration
+from franken.data.base import Configuration
+from franken.data.dataset import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 
 
@@ -18,7 +19,7 @@ def test_batched_inference():
     mace_gnn = load_checkpoint(gnn_cfg)
     
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_cfg,

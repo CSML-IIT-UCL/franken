@@ -53,6 +53,7 @@ def mocked_gnn(device, dtype, feature_dim: int = 32, backbone_id: str = "test"):
     )
     gnn.franken_train = MagicMock(return_value=None)
     gnn.franken_val = MagicMock(return_value=None)
+    gnn.get_neighbors = lambda self, partial_config: partial_config
 
     fake_gnn_weight = torch.randn(3, feature_dim, device=device, dtype=dtype)
 

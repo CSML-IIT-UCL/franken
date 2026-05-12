@@ -6,7 +6,7 @@ import torch
 from ase.calculators.calculator import Calculator, all_changes
 
 from franken.config import BackboneConfig
-from franken.data import BaseAtomsDataset, Configuration
+from franken.data import FrankenAtomsDataset, Configuration
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
 
@@ -74,7 +74,7 @@ class FrankenCalculator(Calculator):
                 "Please pass an explicit gnn_config object instead."
             )
 
-        self.dataset = BaseAtomsDataset.from_path(
+        self.dataset = FrankenAtomsDataset(
             data_path=None,
             split="md",
             gnn_config=gnn_config,

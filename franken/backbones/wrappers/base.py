@@ -22,10 +22,9 @@ class AtomisticModelWrapper(Protocol):
 
     def franken_val(self) -> None: ...
 
+    def get_neighbors(self, partial_config: Configuration) -> Configuration: ...
+
 
 @runtime_checkable
 class MetatomicModelWrapper(AtomisticModelWrapper, Protocol):
     def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]: ...
-
-
-# class MaceModelWrapper(Atomistic)

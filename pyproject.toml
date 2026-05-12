@@ -60,7 +60,6 @@ develop = [
     "packaging",
 ]
 mace = ["mace-torch >= 0.3.10"]
-fairchem = ["fairchem-core == 1.10"]
 sevenn = ["sevenn ~= 0.11"]
 cuda = ["cupy"]
 docs = [

@@ -16,7 +16,7 @@ from metatomic.torch.ase_calculator import MetatomicCalculator
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.calculators.metatomic_inf_wrap import create_metatomic
 from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
@@ -40,12 +40,13 @@ def test_preserves_info(rf_cfg, device, backbone):
     )
 
     dtype = torch.float32
+    temp_dir = None
     try:
         # Step 1: Create a temporary directory for saving the model
         temp_dir = create_temp_dir()
 
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,
@@ -78,7 +79,8 @@ def test_preserves_info(rf_cfg, device, backbone):
 
         # Step 4: Load saved model
         mta_model = load_atomistic_model(comp_model_path).to(device)
-        mta_franken = mta_model.module.model
+        mta_model_unwrap1 = mta_model.module
+        mta_franken = mta_model_unwrap1.model
 
         # Step 5: Compare rf.state_dict between the original and loaded models
         assert are_dicts_close(
@@ -115,7 +117,7 @@ def test_calc_for_asemd(rf_cfg, device, dtype, backbone):
         temp_dir = create_temp_dir()
 
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,

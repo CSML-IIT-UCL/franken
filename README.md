@@ -9,7 +9,7 @@
 Franken is an open-source library that can be used to enhance the accuracy of atomistic foundation models. It can be used for molecular dynamics simulations, and has a focus on computational efficiency.
 
 `franken` features include:
- - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [SchNet](https://github.com/facebookresearch/fairchem), [UPET](https://github.com/lab-cosmo/upet/tree/main))
+ - Supports fine-tuning for a variety of foundation models ([MACE](https://github.com/ACEsuit/mace), [SevenNet](https://github.com/MDIL-SNU/SevenNet), [UPET](https://github.com/lab-cosmo/upet/tree/main))
  - Automatic [hyperparameter tuning](https://franken.readthedocs.io/notebooks/autotune.html) simplifies the adaptation procedure, for an out-of-the-box user experience.
  - Several random-feature approximations to common kernels (e.g. Gaussian, polynomial) are available to flexibly fine-tune any foundation model.
  - Support for running within [LAMMPS](https://www.lammps.org/) molecular dynamics, as well as with [ASE](https://wiki.fysik.dtu.dk/ase/).
@@ -32,7 +32,7 @@ pip install franken
 
 Several optional dependencies can be specified, to install packages required for certain operations:
  - `cuda` includes packages which speed up training on GPUs (note that `franken` will work on GPUs even without these dependencies thanks to pytorch).
- - `fairchem`, `mace`, `sevenn` install the necessary dependencies to use a specific backbone. Note that Fairchem v2 introduced breaking changes, so use v1 for SchNet support.
+ - `mace`, `sevenn` install the necessary dependencies to use a specific backbone. 
  - `docs` and `develop` are only needed if you wish to build the documentation, or work on extending the library.
 
 They can be installed for example by running

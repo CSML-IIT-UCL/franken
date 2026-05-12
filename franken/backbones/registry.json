@@ -137,30 +137,6 @@
     "kind": "sevenn",
     "implemented": true
   },
-  "SchNet/S2EF-OC20-200k": {
-    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_200k.pt",
-    "local": "fairchem/schnet_200k.pt",
-    "kind": "fairchem",
-    "implemented": true
-  },
-  "SchNet/S2EF-OC20-2M": {
-    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_2M.pt",
-    "local": "fairchem/schnet_2M.pt",
-    "kind": "fairchem",
-    "implemented": true
-  },
-  "SchNet/S2EF-OC20-20M": {
-    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_20M.pt",
-    "local": "fairchem/schnet_20M.pt",
-    "kind": "fairchem",
-    "implemented": true
-  },
-  "SchNet/S2EF-OC20-All": {
-    "remote": "https://dl.fbaipublicfiles.com/opencatalystproject/models/2020_11/s2ef/schnet_all_large.pt",
-    "local": "fairchem/schnet_all_large.pt",
-    "kind": "fairchem",
-    "implemented": true
-  },
   "PET_MAD/xs_1.5": {
     "remote": "https://huggingface.co/lab-cosmo/upet/resolve/main/models/pet-mad-xs-v1.5.0.ckpt?download=true",
     "local": "pet/mad_1.5_xs",

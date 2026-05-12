@@ -70,7 +70,6 @@ jobs:
           # Running with the -f argument gives us prebuilt wheels which speeds things up.
           # On the other hand it depends on them publishing the wheels
           python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
-          python -m pip install --no-deps fairchem-core==1.10  # fairchem dependencies are a nightmare, better to ignore them
           python -m pip install mace-torch
           python -m pip install --requirement .github/req-dev.txt  # installs torch-sim
 

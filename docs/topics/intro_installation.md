@@ -8,18 +8,17 @@ pip install franken
 The basic installation comes bare-bones without any GNN backbone installed. You can install franken with a specific backbone directly, by running one of the following commands
 ```bash
 pip install franken[cuda,mace]
-pip install franken[cuda,fairchem]
 pip install franken[cuda,sevenn]
 ```
 In more detail:
  - the `cuda` qualifier installs dependencies which are only relevant on GPU-enabled environments and can be omitted.
- - the three supported backbones are [MACE](https://github.com/ACEsuit/mace), [SchNet from fairchem](https://github.com/FAIR-Chem/fairchem), and [SevenNet](https://github.com/MDIL-SNU/SevenNet). They are explained in more detail below.
+ - the three supported backbones are [MACE](https://github.com/ACEsuit/mace), [UPET](https://github.com/lab-cosmo/upet/tree/main), and [SevenNet](https://github.com/MDIL-SNU/SevenNet). They are explained in more detail below.
 
 
 ```{warning}
 Each backbone seems to have mutually incompatible requirements, particularly with regards to `e3nn` - but also pytorch versions might be a problem.
 To minimize incompatibilities, we suggest that the users who wishes to use multiple backbones create independent python environments for each.
-In particular, the `mace-torch` package requires an old version of `e3nn` (0.4.4) which conflicts with `fairchem-core`, see [this relevant issue](https://github.com/ACEsuit/mace/issues/555) and with `SevenNet`. If you encounter errors with model loading, simply upgrade `e3nn` by running `pip install -U e3nn`.
+In particular, the `mace-torch` package requires an old version of `e3nn` (0.4.4) which may conflict with other backbones. If you encounter errors with model loading, simply upgrade `e3nn` by running `pip install -U e3nn`.
 ```
 
 ## Supported pre-trained models
@@ -42,15 +41,3 @@ In addition to MACE-MP0 trained on the materials project dataset, Franken also s
 
 Franken also supports the [SevenNet model](https://arxiv.org/abs/2402.03789) by Park et al. as implemented in the [`sevennet`](https://github.com/MDIL-SNU/SevenNet) library.
 We have only tested the SevenNet-0 model trained on the materials project dataset, but support for other models should be possible (open an issue if you encounter any problem).
-
-### SchNet OC20 (fairchem, formerly OCP)
-We support the [SchNet model](https://arxiv.org/abs/1706.08566) by Schütt et al. as implemented in the [`fairchem`](https://fair-chem.github.io/) library by Meta's FAIR. The pre-training was done on the [Open Catalyst dataset](https://fair-chem.github.io/core/datasets/oc20.html). To use it as a backbone for `franken`, install the `fairchem` library
-```bash
-pip install fairchem-core
-```
-and the `torch_geometric` dependencies as explained in the [FairChem docs](https://fair-chem.github.io/core/install.html).
-```{note}
-Not all of fairchem's dependencies can be installed by `pip` alone, check the [FairChem docs](https://fair-chem.github.io/core/install.html).
-```
-Note that `SchNet` is not competitive with more recent GNN models and is only meant as a baseline, and to showcase support for diverse backends.
-For now we do not support fairchem v2 models, if you wish to see this implemented please file an issue!

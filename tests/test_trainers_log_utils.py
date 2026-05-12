@@ -15,7 +15,7 @@ def dummy_log_dict():
         },
         "hyperparameters": {
             "franken": {
-                "gnn_backbone_id": "SchNet-S2EF-OC20-All",
+                "gnn_backbone_id": "mace_mp/small",
                 "interaction_block": 3,
                 "kernel_type": "gaussian",
             },

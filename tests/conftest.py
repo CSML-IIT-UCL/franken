@@ -22,7 +22,7 @@ ROOT_PATH = FRANKEN_DIR
 
 DEFAULT_GNN_CONFIGS = [
     MaceBackboneConfig("mace_mp/small")
-]  # , "SchNet-S2EF-OC20-All"]  # List of gnn_ids to download
+]   # List of gnn_ids to download
 
 SKIP_NO_CUDA = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="CUDA not available"

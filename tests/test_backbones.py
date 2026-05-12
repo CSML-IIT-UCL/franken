@@ -9,7 +9,7 @@ import e3nn
 from franken.backbones import REGISTRY
 from franken.backbones.utils import get_checkpoint_path, load_checkpoint
 from franken.config import BackboneConfig, GaussianRFConfig
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.rf.model import FrankenPotential
 
@@ -18,7 +18,6 @@ from franken.utils.misc import no_jit
 # Check availability of backbones
 HAS_MACE = importlib.util.find_spec("mace") is not None
 HAS_SEVENN = importlib.util.find_spec("sevenn") is not None
-HAS_FAIRCHEM = importlib.util.find_spec("fairchem") is not None
 HAS_UPET = True
 
 # Build parametrized model list with skip marks when deps are missing
@@ -29,10 +28,8 @@ for name in REGISTRY.keys():
     if name in {"PET_OMat/xl_1.0", "PET_OMat/l_1.0", "mace_off/large", "mace_omol/0_4M", "mace_mp/large-0b2", "mace_mp/large"}:
         marks.append(pytest.mark.skip(reason=f"{name} requires too large a model"))
         continue
-    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN) or (kind == "fairchem" and not HAS_FAIRCHEM):
+    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN):
         marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
-    elif "SchNet" in name:
-        marks.append(pytest.mark.xfail(reason="Fails in CI due to unknown reasons", strict=False))
     elif kind == "mace":
         marks.append(pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True))
     elif kind == "sevenn":
@@ -64,7 +61,7 @@ def test_data_loading(model_name):
         }
     )
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -85,7 +82,7 @@ def test_descriptors(model_name):
     bbone = load_checkpoint(gnn_config)
     # Get a random data sample
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -110,7 +107,7 @@ def test_force_maps(model_name):
     )
     # Get a random data sample
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = BaseAtomsDataset.from_path(
+    dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
         gnn_config=gnn_config,
@@ -122,8 +119,9 @@ def test_force_maps(model_name):
         rf_config=GaussianRFConfig(num_random_features=128, length_scale=1.0),
     )
     model = model.to(device)
-    data, _ = dataset[0]  # type: ignore
-    data = data.to(device)
+    dataset_el = dataset[0]
+    assert isinstance(dataset_el, tuple)
+    data = dataset_el[0].to(device)
     with torch.no_grad(), no_jit():
         # Need to call this multiple times to make sure test passes!
         emap, fmap = model.grad_feature_map(data)

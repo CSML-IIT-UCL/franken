@@ -19,7 +19,7 @@ from franken.trainers.log_utils import LogCollection
 from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig, SolverConfig
 from franken.calculators.ase_calc import FrankenCalculator
 from franken.autotune.script import init_loaders, run_autotune
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
@@ -86,7 +86,7 @@ def test_save_load_functionality(rf_cfg, device, scale_by_Z):
             temp_dir = create_temp_dir()
 
             data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-            dataset = BaseAtomsDataset.from_path(
+            dataset = FrankenAtomsDataset(
                 data_path=data_path,
                 split="train",
                 gnn_config=gnn_cfg,
@@ -149,7 +149,7 @@ def test_multiweight_save_load_functionality(rf_cfg, device, scale_by_Z):
             temp_dir = create_temp_dir()
 
             data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-            dataset = BaseAtomsDataset.from_path(
+            dataset = FrankenAtomsDataset(
                 data_path=data_path,
                 split="train",
                 gnn_config=gnn_cfg,
@@ -211,7 +211,7 @@ def test_multiweight_save_load_functionality(rf_cfg, device, scale_by_Z):
 def test_inference_force_mode(rf_cfg, device, multiweights: bool):
     for gnn_cfg in DEFAULT_GNN_CONFIGS:
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,
@@ -347,7 +347,7 @@ class TestModelGradients:
             (num_lin_models, model.rf.total_random_features), device=device
         )
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,

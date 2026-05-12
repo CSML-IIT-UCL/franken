@@ -4,7 +4,6 @@ import logging
 import os
 from pathlib import Path
 import time
-from packaging.version import Version
 import requests
 
 from franken.backbones.wrappers.base import AtomisticModelWrapper
@@ -206,38 +205,7 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
     backbone_family = gnn_config_dict.pop("family")
     ckpt_path = get_checkpoint_path(gnn_backbone_id)
     err_msg = f"franken wasn't able to load {gnn_backbone_id}. Is {backbone_family} installed?"
-    if backbone_family == "fairchem":
-        try:
-            from franken.backbones.wrappers.fairchem_schnet import FrankenSchNetWrap
-        except ImportError as import_err:
-            fairchem_importable = True
-            is_fairchem_gt2 = False
-            try:
-                import fairchem.core
-
-                is_fairchem_gt2 = Version(fairchem.core.__version__) >= Version("2")
-            except:  # noqa: E722
-                fairchem_importable = False
-            err_msg = f"franken wasn't able to load {gnn_backbone_id}. "
-            if fairchem_importable:
-                if is_fairchem_gt2:
-                    err_msg += (
-                        "Fairchem version < 2 is required. Please see "
-                        "https://github.com/facebookresearch/fairchem?tab=readme-ov-file#looking-for-fairchem-v1-models-and-code "
-                        "to know more"
-                    )
-                else:
-                    err_msg += import_err.msg
-            else:
-                err_msg += (
-                    f"Please install fairchem version 1.\nBase error: {import_err.msg}"
-                )
-            logger.error(err_msg, exc_info=import_err)
-            raise
-        model = FrankenSchNetWrap.load_from_checkpoint(
-            str(ckpt_path), gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
-        )
-    elif backbone_family == "mace":
+    if backbone_family == "mace":
         try:
             from franken.backbones.wrappers.mace_wrap import FrankenMACE
         except ImportError as import_err:

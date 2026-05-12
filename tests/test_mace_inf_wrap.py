@@ -10,7 +10,7 @@ import torch
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.backbones.wrappers.mace_wrap import atom_numbers_to_node_attrs
 from franken.config import BackboneConfig, GaussianRFConfig, MultiscaleGaussianRFConfig
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
@@ -41,7 +41,7 @@ def test_wrap_compile(rf_cfg, device, backbone):
         temp_dir = create_temp_dir()
 
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,
@@ -130,7 +130,7 @@ def test_wrap_asemd(rf_cfg, device, backbone):
         temp_dir = create_temp_dir()
 
         data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-        dataset = BaseAtomsDataset.from_path(
+        dataset = FrankenAtomsDataset(
             data_path=data_path,
             split="train",
             gnn_config=gnn_cfg,
@@ -165,20 +165,20 @@ def test_wrap_asemd(rf_cfg, device, backbone):
         # Step 4: run compiled model for the training dataset.
         #         we can't actually run MD because this only works with a LAMMPS calculator
         #         the comp_data dictionary would be filled in with the LAMMPS-MACE C++ code.
-        for data, _ in dataset: # pyright: ignore[reportGeneralTypeIssues]
-            data = data.to(device=device)
-            if data.node_attrs is None:
-                data.node_attrs = atom_numbers_to_node_attrs(
-                    frame_nums=data.atomic_numbers, all_nums=model.gnn.supported_atomic_types().to(device), dtype=torch.float64
-                )
+        for dataset_el in dataset:
+            assert isinstance(dataset_el, tuple)
+            config = dataset_el[0].to(device=device)
+            node_attrs = atom_numbers_to_node_attrs(
+                frame_nums=config.atomic_numbers, all_nums=model.gnn.supported_atomic_types().to(device), dtype=torch.float64
+            )
+            assert config.edge_index is not None
             comp_data = {
-                "node_attrs": data.node_attrs,
-                "cell": data.cell,
-                # MACE Calculator provides transposed edge index
-                "edge_index": data.edge_index.transpose(0, 1),
-                "positions": data.atom_pos,
-                "shifts": data.shifts,
-                "unit_shifts": data.unit_shifts,
+                "node_attrs": node_attrs,
+                "cell": config.cell,
+                "edge_index": config.edge_index.transpose(0, 1),
+                "positions": config.atom_pos,
+                "shifts": config.shifts,
+                "unit_shifts": config.unit_shifts,
             }
             out_data = comp_model(comp_data, torch.empty((1,)))
             print(out_data["total_energy_local"])

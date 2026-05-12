@@ -5,7 +5,7 @@ import torch
 from tqdm.auto import tqdm
 
 import franken.utils.distributed as dist_utils
-from franken.data import BaseAtomsDataset
+from franken.data import FrankenAtomsDataset
 from franken.utils.misc import garbage_collection_cuda
 
 
@@ -222,7 +222,7 @@ class FeatureScaler(torch.nn.Module):
 
 
 def compute_dataset_statistics(
-    dataset: BaseAtomsDataset,
+    dataset: FrankenAtomsDataset,
     gnn,
     device: torch.device,
 ):
