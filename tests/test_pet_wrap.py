@@ -1,5 +1,9 @@
 import torch
-import metatomic.torch
+import pytest
+
+metatomic_torch = pytest.importorskip("metatomic.torch")
+pytest.importorskip("metatrain.pet")
+pytest.importorskip("vesin.metatomic")
 
 from franken.backbones.utils import load_checkpoint
 from franken.config import PETBackboneConfig
@@ -88,7 +92,7 @@ def test_pet_systems_to_batch_accepts_precomputed_cartesian_shifts() -> None:
     species_to_species_index[1] = 0
     species_to_species_index[8] = 1
 
-    nl_options = metatomic.torch.NeighborListOptions(
+    nl_options = metatomic_torch.NeighborListOptions(
         cutoff=6.0,
         full_list=True,
         strict=True,
