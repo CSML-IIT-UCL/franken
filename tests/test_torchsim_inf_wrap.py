@@ -1,8 +1,9 @@
-import traceback
-
 import pytest
 import torch
 from ase.build import molecule
+
+ts = pytest.importorskip("torch_sim")
+torch_sim_interface = pytest.importorskip("torch_sim.models.interface")
 
 from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
 from franken.config import GaussianRFConfig, MaceBackboneConfig, PETBackboneConfig
@@ -10,15 +11,7 @@ from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 from tests.utils import mocked_gnn
 
-
-try:
-    import torch_sim as ts
-    from torch_sim.models.interface import validate_model_outputs
-except ImportError:
-    pytest.skip(
-        f"torch-sim/metatomic not installed: {traceback.format_exc()}",
-        allow_module_level=True,
-    )
+validate_model_outputs = torch_sim_interface.validate_model_outputs
 
 
 def _build_mock_franken_model(
