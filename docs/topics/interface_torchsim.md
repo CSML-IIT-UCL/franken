@@ -13,6 +13,7 @@ This interface enables to use Franken models in [torch-sim](https://github.com/T
 
 ### Installation
 
+ - The Python interface can be installed together with franken via `pip install franken[torch-sim]`.
  - torch-sim does not publish packages on conda-forge - installation must be with pip via `pip install torch-sim-atomistic`.
  - torch-sim requires **at least python 3.12**
 
