@@ -1,17 +1,11 @@
-"""Run molecular dynamics with learned potentials.
-
-Calculators are available for ASE and LAMMPS, but can be
-extended to support your favorite MD software.
+"""Deploy the franken model as a calculator through different interfaces.
 """
 
-from .ase_calc import FrankenCalculator
-from .mace_inf_wrap import MaceInferenceWrapper
-from .metatomic_inf_wrap import MetatomicInferenceWrapper
-from .torchsim_inf_wrap import FrankenTorchSimModel
+import importlib
+import importlib.util
 
-__all__ = (
-    "FrankenCalculator",
-    "MaceInferenceWrapper",
-    "MetatomicInferenceWrapper",
-    "FrankenTorchSimModel",
-)
+from .ase_calc import FrankenCalculator
+
+__all__ = ("FrankenCalculator",)
+
+
