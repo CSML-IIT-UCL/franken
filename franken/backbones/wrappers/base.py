@@ -28,4 +28,4 @@ class AtomisticModelWrapper(Protocol):
 class MetatomicModelWrapper(AtomisticModelWrapper, Protocol):
     def requested_neighbor_lists(
         self,
-    ) -> List[Any]: ... #metatomic.torch.NeighborListOptions
+    ) -> List[Any]: ...  # metatomic.torch.NeighborListOptions
