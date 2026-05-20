@@ -1,6 +1,5 @@
-from typing import List, Protocol, runtime_checkable
+from typing import Any, List, Protocol, runtime_checkable
 
-import metatomic.torch
 import torch
 
 from franken.data.base import Configuration
@@ -27,4 +26,6 @@ class AtomisticModelWrapper(Protocol):
 
 @runtime_checkable
 class MetatomicModelWrapper(AtomisticModelWrapper, Protocol):
-    def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]: ...
+    def requested_neighbor_lists(
+        self,
+    ) -> List[Any]: ... #metatomic.torch.NeighborListOptions
