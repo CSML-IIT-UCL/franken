@@ -41,14 +41,7 @@ In addition to MACE-MP0 trained on the materials project dataset, Franken also s
 ### PET
 
 Franken supports [UPET](https://github.com/lab-cosmo/upet/tree/main) models through the Metatomic/Metatrain ecosystem.
-To use PET models as a backbone for `franken`, install the required dependencies in `franken`'s environment.
-If you encounter an error related to the building of the  `metatrain` package, you can install it from the Github repository:
-```bash
-pip install metatomic-torch
-pip install git+https://github.com/lab-cosmo/metatrain
-```
-
-
+To use PET models as a backbone for `franken`, install the required dependencies with `pip install franken[cuda,pet]` or follow the instructions on [metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation.
 
 ### SevenNet
 
