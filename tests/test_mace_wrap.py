@@ -2,6 +2,9 @@
 
 import pytest
 import torch
+
+pytest.importorskip("mace")
+
 from mace.data import Configuration
 
 from mace.tools import AtomicNumberTable, atomic_numbers_to_indices, to_one_hot
