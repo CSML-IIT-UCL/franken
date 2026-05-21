@@ -17,7 +17,7 @@ from franken.data import FrankenAtomsDataset
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
-from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
+from franken.trainers.rf_trainer import RandomFeaturesTrainer
 from franken.utils.misc import garbage_collection_cuda
 from franken.datasets.registry import DATASET_REGISTRY
 
@@ -268,8 +268,8 @@ def random_cfg(num_atoms, dtype, device, atomic_numbers=None):
         torch.randn(num_atoms, 3, dtype=dtype),
         atomic_numbers=atomic_numbers,
         natoms=torch.tensor(num_atoms),
-        edge_index=torch.randint(0, num_atoms, (num_edges, 2)),
-        unit_shifts=torch.randn(num_edges, 3, dtype=dtype),
+        edge_index=torch.randint(0, num_atoms, (num_edges, 2), dtype=torch.int32),
+        unit_shifts=torch.randn(num_edges, 3, dtype=torch.int32),
         cell=torch.randn((3, 3), dtype=dtype)
     ).to(device)
 

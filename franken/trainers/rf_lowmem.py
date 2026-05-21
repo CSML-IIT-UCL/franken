@@ -6,7 +6,7 @@ import torch
 import torch.utils.data
 from torch import Tensor
 
-from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
+from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.data.base import Configuration, Target, TargetType, is_scalar_target
 from franken.rf.model import FrankenPotential
@@ -23,33 +23,12 @@ logger = logging.getLogger("franken")
 
 
 class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
-    """Main class which groups training and evaluation functionality for franken models.
+    """Low-memory variant of :class:`franken.trainers.RandomFeaturesTrainer` random-features trainer.
 
-    Args:
-        train_dataloader (torch.utils.data.DataLoader):
-            Dataloader which iterates over the training set.
-        random_features_normalization (Literal["leading_eig"] | None):
-            How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
-        log_dir (Path | None):
-            Directory where to save logs and models. If not specified, no logs will be saved.
-            Defaults to None.
-        save_every_model (bool):
-            Model fitting with this class is done simultaneously for a list
-            of solver parameters. This argument controls the behavior of model saving:
-            if set to True, the models corresponding to all solver parameters will be saved,
-            otherwise only the 'best' model among them (according to some validation set) will
-            be saved. Defaults to True.
-        device:
-            PyTorch device on which computations are performed. Defaults to "cuda:0".
-            Note that this class is multi-GPU aware. Users can create a RandomFeaturesTrainer
-            in a distributed setting and it will handle synchronization across its replicas.
-        dtype (str | torch.dtype):
-            Data-type for solver operations. Random features will be computed in float32, and
-            then converted to float64 if requested. Defaults to torch.float32.
-        save_fmaps (bool):
-            Whether or not to save feature-maps for the training set. Saving them
-            requires extra memory (linear in the training-set size), but speeds up
-            the ``evaluate()`` path on training data. Defaults to True.
+    The catch to support low-memory is that only 2 training targets are allowed (e.g. energy & forces or
+    forces & stress, etc.).
+
+    All other arguments and behavior is the same as :class:`franken.trainers.RandomFeaturesTrainer`.
     """
 
     def __init__(

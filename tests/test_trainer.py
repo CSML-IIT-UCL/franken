@@ -1,10 +1,8 @@
 import json
 import logging
 import pathlib
-from re import M
 from unittest.mock import DEFAULT, MagicMock, Mock, mock_open, patch
 
-from ase import stress
 import pytest
 import torch
 
@@ -14,7 +12,7 @@ from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.trainers import RandomFeaturesTrainer
 from franken.trainers.log_utils import DataSplit, LogCollection, LogEntry
-from franken.trainers.rf_cuda_lowmem import process_tgt_weights
+from franken.trainers.rf_trainer import process_tgt_weights
 from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
 from tests.utils import mocked_gnn
 from .conftest import DEVICES
@@ -40,7 +38,10 @@ def gen_data(num_configs, num_atoms, dtype, split="train"):
             Configuration(
                 torch.randn(num_atoms, 3, dtype=dtype), 
                 torch.randint(1, 90, (num_atoms, )), 
-                torch.tensor(num_atoms)
+                torch.tensor(num_atoms),
+                edge_index=torch.randint(0, num_atoms, (num_atoms * 2, 2)),
+                unit_shifts=torch.randint(0, 5, (num_atoms * 2, 3), dtype=torch.int32),
+                cell=torch.randn((3, 3), dtype=dtype)
             ),
             Target(torch.randn(1) ** 2, torch.randn(num_atoms, 3) ** 2, torch.randn(3, 3) ** 2)
         )
@@ -226,12 +227,12 @@ class TestTrainer:
         )
     
     def test_compute_train_preds_shortcut(self, device):
-        trainer = self.trainer(device, torch.float64, save_fmaps=True)
+        trainer = self.trainer(device, torch.float64, save_fmaps=True, training_targets=self.ESF_TGT)
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt, split="train")
         model = init_mock_model(None, device, trainer.buffer_dt)
         covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
         weights = trainer.solve(covs, coeffs, l2_penalty=1e-3, 
-                                 forces_weight=0.3, energy_weight=1.0 - 0.3)
+                                forces_weight=0.3, energy_weight=1.0 - 0.3, stress_weight=0.2)
         weights = weights.view(1, -1)  # fit converts to this shape
 
         logs = LogCollection([LogEntry("", 0, 0, 0, [], [])])

@@ -29,7 +29,7 @@ from franken.data.base import (
     TargetType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
-from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
+from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset
