@@ -3,17 +3,16 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Any, List, Literal, Mapping, Sequence
+from typing import Literal, Mapping
 
 import numpy as np
 import torch
 import torch.utils.data
 from torch import Tensor
 
-import franken.metrics
 from franken.metrics.base import BaseMetric
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target
+from franken.data.base import Configuration, Target, TargetType, is_scalar_target
 from franken.rf.model import FrankenPotential
 from franken.trainers import BaseTrainer
 from franken.trainers.log_utils import (
@@ -22,15 +21,10 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
-from franken.utils.linalg.cov import (
-    lowmem_normalize_leading_eig,
-    rank1_update,
-    rankk_update,
-)
+from franken.utils.linalg.cov import normalize_leading_eig
 from franken.utils.linalg.psdsolve import psd_ridge
-from franken.utils.linalg.tri import triangular_lerp
-from franken.utils.misc import no_jit, params_grid, throughput
-
+from franken.utils.misc import ensure_list, no_jit, params_grid, throughput
+from franken.metrics import metric_registry
 
 logger = logging.getLogger("franken")
 
@@ -54,6 +48,8 @@ class RandomFeaturesTrainer(BaseTrainer):
             be saved. Defaults to True.
         device:
             PyTorch device on which computations are performed. Defaults to "cuda:0".
+            Note that this class is multi-GPU aware. Users can create a RandomFeaturesTrainer
+            in a distributed setting and it will handle synchronization across its replicas.
         dtype (str | torch.dtype):
             Data-type for solver operations. Random features will be computed in float32, and
             then converted to float64 if requested. Defaults to torch.float32.
@@ -66,6 +62,9 @@ class RandomFeaturesTrainer(BaseTrainer):
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
+        l2_penalty: float | list[float],
+        training_targets: list[TargetType],
+        target_weight: Mapping[TargetType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -82,6 +81,17 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
         self.random_features_normalization = random_features_normalization
         self.save_fmaps = save_fmaps
+        if len(training_targets) == 0:
+            raise ValueError(
+                "Cannot initialize trainer with no targets. "
+                "Please pass a non-empty list as the `training_targets` parameter."
+            )
+        self.training_targets = training_targets
+        self.l2_penalty = ensure_list(l2_penalty)
+        self.target_weight = process_tgt_weights(target_weight, self.training_targets)
+        self.solver_hps = dict(l2_penalty=self.l2_penalty) | {
+            f"{k}_weight": v for k, v in self.target_weight.items()
+        }
 
     def on_fit_start(self, model: FrankenPotential):
         # initialize input scaler based on statistics property
@@ -89,16 +99,19 @@ class RandomFeaturesTrainer(BaseTrainer):
         # initialize energy shift based on atomic energies
         if not model.energy_shift.is_initialized:
             model.energy_shift.set_from_atomic_energies(
-                self.train_dataloader.dataset.atomic_energies
+                self.train_dataloader.dataset.atomic_energies  # type: ignore
             )
         model.gnn.franken_train()
 
+    def patch_e3nn(self):
+        if self.device.type == "cuda":
+            # Patch E3NN for batched jacobians!
+            from franken.backbones.wrappers.common_patches import patch_e3nn
+
+            patch_e3nn()
+
     @no_jit()
-    def fit(
-        self,
-        model: FrankenPotential,
-        solver_params: Mapping[str, Sequence[Any]],
-    ) -> tuple[LogCollection, torch.Tensor]:
+    def fit(self, model: FrankenPotential) -> tuple[LogCollection, torch.Tensor]:
         """Fit a given franken model on the training set.
 
         Args:
@@ -119,11 +132,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             More information about the available solver parameters can be found under the
             ``solve()`` method.
         """
-        if self.device.type == "cuda":
-            # Patch E3NN for batched jacobians!
-            from franken.backbones.wrappers.common_patches import patch_e3nn
-
-            patch_e3nn()
+        self.patch_e3nn()
 
         model = model.to(self.device)
         self.on_fit_start(model)
@@ -131,19 +140,18 @@ class RandomFeaturesTrainer(BaseTrainer):
         model_hash = model_hash.hexdigest()
 
         t_cov_coeffs_start = perf_counter()
-        self._compute_covs_and_coeffs(model, self.train_dataloader)
+        covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
         t_cov_coeffs = perf_counter() - t_cov_coeffs_start
 
-        solver_grid_size = math.prod([len(v) for v in solver_params.values()])
+        solver_grid_size = math.prod([len(v) for v in self.solver_hps.values()])
         all_weights = torch.zeros(
             solver_grid_size,
             model.rf.total_random_features,
             dtype=self.buffer_dt,
             device=self.device,
         )
-
         solver_iter = throughput(
-            params_grid(solver_params, split_distributed=True),
+            params_grid(self.solver_hps, split_distributed=True),
             desc="least-squares",
             units="models",
             device=self.device,
@@ -154,8 +162,8 @@ class RandomFeaturesTrainer(BaseTrainer):
         for hp_idx, hp_val in solver_iter:
             t_solve_start = perf_counter()
             try:
-                weights = self.solve(**hp_val)
-            except torch.linalg.LinAlgError as e:
+                weights = self.solve(covs=covs, coeffs=coeffs, **hp_val)
+            except torch.linalg.LinAlgError as e:  # type: ignore
                 weights = torch.zeros_like(all_weights[hp_idx])
                 num_failed += 1
                 logger.debug(f"Hyperparameter {hp_val} failed. Error: {e}")
@@ -186,13 +194,21 @@ class RandomFeaturesTrainer(BaseTrainer):
 
         # Reporting failed runs
         dist_utils.all_sum(num_failed)
-
         if num_failed.item() > 0:
             logger.warning(
                 f"Solver failed in {num_failed.item()}/{solver_grid_size} cases."
             )
 
         return log_collection, all_weights
+
+    def get_metrics(self) -> list[BaseMetric]:
+        dev = self.device
+        dt = self.buffer_dt
+        return [
+            metric_registry.init_metric(metric, device=dev, dtype=dt)
+            for tt in self.training_targets
+            for metric in metric_registry.available_metrics_for_target(tt)
+        ]
 
     @no_jit()
     def evaluate(
@@ -201,26 +217,11 @@ class RandomFeaturesTrainer(BaseTrainer):
         dataloader: torch.utils.data.DataLoader,
         log_collection: LogCollection,
         all_weights: torch.Tensor | None,
-        metrics: Sequence[str] = ("energy_MAE", "forces_MAE", "forces_cosim"),
     ) -> LogCollection:
-        if self.device.type == "cuda":
-            # Patch E3NN for batched jacobians!
-            from franken.backbones.wrappers.common_patches import patch_e3nn
-
-            patch_e3nn()
+        self.patch_e3nn()
         tot_dset_size = len(dataloader.dataset)  # type: ignore
 
-        metric_objects: List[BaseMetric] = []
-        for name in metrics:
-            try:
-                metric_obj = franken.metrics.init_metric(
-                    name, device=self.device, dtype=self.buffer_dt
-                )
-                metric_objects.append(metric_obj)
-            except KeyError:
-                logger.warning(
-                    f"Unknown metric {name}. Skipping. Available metrics: {franken.metrics.available_metrics()}"
-                )
+        metric_objects: list[BaseMetric] = self.get_metrics()
 
         split_name = dataloader.dataset.split
         try:
@@ -241,43 +242,33 @@ class RandomFeaturesTrainer(BaseTrainer):
             targets = targets.to(device=self.device)
             if split == DataSplit.TRAIN and self.save_fmaps:
                 # Shortcut to compute predictions for the training-set, for which
-                # we already have computed energy and force feature maps
-                assert len(self.forces_fmap) == len(self.energy_fmap)
-                assert len(self.forces_fmap) == len(dataloader)
-                predictions = Target(
-                    *model.energy_and_forces_from_fmaps(
-                        data,
-                        energy_fmap=self.energy_fmap[i][None, ...],
-                        forces_fmap=self.forces_fmap[i],
-                        weights=all_weights,
-                        add_energy_shift=False,  # since it's always train here
-                    )
-                ).detach()
+                # we already have computed feature maps. No energy shift since this
+                # is always the training set.
+                predictions = model.predict_from_fmaps(
+                    data,
+                    fmaps={k: v[i] for k, v in self.fmaps.items()},
+                    weights=all_weights,
+                    add_energy_shift=False,
+                )
             else:
                 if all_weights is None or all_weights.shape[0] <= 100:
                     forces_mode = "torch.autograd"
                 else:
                     forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
-                predictions = Target(
-                    *model.energy_and_forces(
-                        data,
-                        weights=all_weights,
-                        forces_mode=forces_mode,
-                        add_energy_shift=(False if split == DataSplit.TRAIN else True),
+                predictions = model.predict(
+                    targets=self.training_targets,
+                    data=data,
+                    weights=all_weights,
+                    forces_mode=forces_mode,
+                    add_energy_shift=(False if split == DataSplit.TRAIN else True),
+                )
+            for tt, val in predictions.items():
+                if torch.any(torch.isnan(val)):
+                    logger.warning(
+                        f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                     )
-                ).detach()
-            if torch.any(torch.isnan(predictions.energy)):
-                logger.warning(
-                    f"Configuration {i} - {split_name} has NaNs in energy predictions"
-                )
-            if predictions.forces is not None and torch.any(
-                torch.isnan(predictions.forces)
-            ):
-                logger.warning(
-                    f"Configuration {i} - {split_name} has NaNs in force predictions"
-                )
             for metric in metric_objects:
-                metric.update(predictions, targets, data)
+                metric.update(Target.from_types(predictions), targets, data)
 
         num_models = (
             all_weights.shape[0]
@@ -285,64 +276,26 @@ class RandomFeaturesTrainer(BaseTrainer):
             else model.rf.weights.shape[0]
         )
 
-        # Sync metrics across GPUs
-        metric_values = {}
-        metric_counters = {}
+        # list with one element for each model trained
         for metric in metric_objects:
-            value = metric.compute(reset=False)
-            # LUIGI: i would remove this check as now we have different normalizations
-            # assume that total number of samples must match dataset size
-            # if metric.samples_counter.sum().item() != tot_dset_size:
-            #     logger.warning(
-            #         f"Metric {metric.name} has {metric.samples_counter.sum().item()} samples "
-            #         f"while the dataset has {tot_dset_size} configurations."
-            #     )
-            # scalar metric → (M,) while per-species metric → (M, Z)
-            assert value.ndim in (1, 2)
-            assert value.shape[0] == num_models
-            metric_values[metric.name] = value
-            metric_counters[metric.name] = metric.samples_counter
-
-        # Derive average metrics from species resolved ones
-        for name in metrics:
-            if "species" in name:
-                species_values = metric_values[name]  # (M, Z)
-                metric_values[name + "_average"] = species_values[:, 0]
-
-        # Explode metric values into list of MetricLog
-        raw_logs = []
-        for idx in range(num_models):
-            results = []
-            for name, value in metric_values.items():
-                v = value[idx]
-
-                if v.ndim == 0:
-                    # scalar metric
-                    results.append(dict(name=name, value=v.item()))
-                else:
-                    # per-species metric "<metric_name>_<species>: <metric_val>"
-                    counts = metric_counters[name]
-
-                    for z in range(v.shape[0]):
-                        if counts[z] > 0:
-                            results.append(dict(name=f"{name}_{z}", value=v[z].item()))
-            raw_logs.append(results)
-
-        assert len(raw_logs) == len(log_collection)
-
-        for log_entry, results in zip(log_collection, raw_logs):
-            for metric in results:
-                try:
-                    log_entry.add_metric(metric["name"], metric["value"], split)
-                except ValueError as e:
-                    logger.warning(f"Could not add metric because: {str(e)}")
+            metric_values = metric.compute()
+            for metric_name, metric_value in metric_values:
+                assert metric_value.shape == (num_models,)
+                for model_idx in range(metric_value.shape[0]):
+                    log_entry = log_collection[model_idx]
+                    try:
+                        log_entry.add_metric(
+                            name=metric_name,
+                            value=metric_value[model_idx].item(),
+                            split=split,
+                        )
+                    except ValueError as e:
+                        logger.warning(f"Could not add metric: {str(e)}")
         return log_collection
 
-    def warn_save_fmaps(
-        self, energy_fmap: Tensor, forces_fmap: Tensor, num_maps: int
-    ) -> None:
-        fmap_size = np.prod(energy_fmap.shape) + np.prod(forces_fmap.shape)
-        tot_bytes = fmap_size * forces_fmap.element_size() * num_maps
+    def warn_save_fmaps(self, fmaps: list[Tensor], num_maps: int) -> None:
+        fmap_size = sum(np.prod(fmap.shape) for fmap in fmaps)
+        tot_bytes = fmap_size * fmaps[0].element_size() * num_maps
         if self.device.type == "cuda":
             avail_bytes = torch.cuda.mem_get_info(self.device)[0]
             if tot_bytes > 0.8 * avail_bytes:
@@ -358,36 +311,25 @@ class RandomFeaturesTrainer(BaseTrainer):
 
     @no_jit()
     @torch.no_grad()
-    def _compute_covs_and_coeffs(
-        self, model: FrankenPotential, dataloader: torch.utils.data.DataLoader
-    ) -> None:
+    def _covs_and_coeffs(
+        self,
+        model: FrankenPotential,
+        dataloader: torch.utils.data.DataLoader,
+    ):
         tot_dset_size = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
-        # Initialize Buffers: `covariance` will have
-        # - covariance of forces on LOWER triangle
-        # - covariance of energies on UPPER triangle
-        # with diagonals stored separately, and linsys coefficients.
-        self.covariance = torch.zeros(
-            (n_rf, n_rf), device=self.device, dtype=self.buffer_dt
-        )
-        self.diag_energy = torch.zeros(
-            (n_rf,), device=self.device, dtype=self.buffer_dt
-        )
-        self.diag_forces = torch.zeros(
-            (n_rf,), device=self.device, dtype=self.buffer_dt
-        )
-        self.coeffs_energy = torch.zeros(
-            (n_rf,), device=self.device, dtype=self.buffer_dt
-        )
-        self.coeffs_forces = torch.zeros(
-            (n_rf,), device=self.device, dtype=self.buffer_dt
-        )
-        # NOTE: the feature maps are never synced between devices.
-        #       They can only used correctly by iterating through the
-        #       same dataloader as here, using the same method. Otherwise
-        #       they may not be in the correct order
-        self.energy_fmap = []
-        self.forces_fmap = []
+
+        covs = {
+            t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
+            for t in self.training_targets
+        }
+        coeffs = {
+            t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
+            for t in self.training_targets
+        }
+        self.fmaps: dict[TargetType, list[Tensor]] = {
+            t: [] for t in self.training_targets
+        }
 
         progress_bar = throughput(
             dataloader,
@@ -395,69 +337,80 @@ class RandomFeaturesTrainer(BaseTrainer):
             total=tot_dset_size,
             device=self.device,
         )
-
         for i, (data, targets) in enumerate(progress_bar):
             assert isinstance(data, Configuration)
             data = data.to(device=self.device)
-            targets = targets.to(device=self.device)
-
-            energy_per_atom = targets.energy / data.natoms
-            forces_per_atom = targets.forces / data.natoms
-
             assert data.natoms.numel() == 1, "Batched training is not supported"
-            forces_fmap, energy_fmap = model.grad_feature_map(
-                data
-            )  # ([F, A, 3], [N, F])
+            targets: Target = targets.to(device=self.device)
 
-            energy_fmap = energy_fmap.squeeze(0).to(dtype=self.buffer_dt)
-            rank1_update(self.covariance, self.diag_energy, energy_fmap, upper=True)
-            self.coeffs_energy.add_(energy_fmap, alpha=energy_per_atom.item())
-
-            forces_fmap = (-forces_fmap).to(dtype=self.buffer_dt)
-            forces_fmap = forces_fmap.view(forces_fmap.shape[0], -1)
-            rankk_update(self.covariance, self.diag_forces, forces_fmap, upper=False)
-            self.coeffs_forces.addmv_(
-                forces_fmap, forces_per_atom.view(-1).to(dtype=self.buffer_dt)
-            )
-            if self.save_fmaps:
-                if i == 0:
-                    self.warn_save_fmaps(energy_fmap, forces_fmap, len(dataloader))
-                self.energy_fmap.append(energy_fmap)
-                self.forces_fmap.append(forces_fmap)
-
+            target_fmaps = model.grad_feature_map(data, self.training_targets)
+            if self.save_fmaps and i == 0:
+                self.warn_save_fmaps(list(target_fmaps.values()), len(dataloader))
+            for tgt_name in self.training_targets:
+                try:
+                    tgt = targets[tgt_name]
+                except KeyError:
+                    raise RuntimeError(
+                        f"Target {i} does not contain any values for {tgt_name}."
+                    )
+                tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
+                fmap = target_fmaps[tgt_name].to(self.buffer_dt)
+                if is_scalar_target(tgt_name):
+                    covs[tgt_name].addmm_(fmap, fmap.T)
+                    coeffs[tgt_name].add_(fmap.view(-1), alpha=tgt_per_atom.item())
+                else:
+                    covs[tgt_name].addmm_(fmap, fmap.T)
+                    coeffs[tgt_name].addmv_(fmap, tgt_per_atom.view(-1))
+                if self.save_fmaps:
+                    self.fmaps[tgt_name].append(fmap)
         # Sync covariance matrices & coefficients
-        dist_utils.all_sum(self.covariance)
-        dist_utils.all_sum(self.diag_forces)
-        dist_utils.all_sum(self.diag_energy)
-        dist_utils.all_sum(self.coeffs_energy)
-        dist_utils.all_sum(self.coeffs_forces)
-
+        for tgt_name in self.training_targets:
+            dist_utils.all_sum(covs[tgt_name])
+            dist_utils.all_sum(coeffs[tgt_name])
+        # RF normalization
         if self.random_features_normalization == "leading_eig":
-            logger.warning(
-                "`leading_eig` normalization has high memory usage. If you encounter OOM errors try to disable it."
-            )
-            lowmem_normalize_leading_eig(
-                self.covariance, self.diag_energy, self.coeffs_energy, upper=True
-            )
-            lowmem_normalize_leading_eig(
-                self.covariance, self.diag_forces, self.coeffs_forces, upper=False
-            )
+            for tgt_name in self.training_targets:
+                normalize_leading_eig(covs[tgt_name], coeffs[tgt_name])
         elif self.random_features_normalization is not None:
-            raise ValueError(
+            raise NotImplementedError(
                 f"Covariance normalization {self.random_features_normalization} is not implemented."
             )
+        return covs, coeffs
 
     @torch.no_grad()
-    def solve(self, force_weight: float, l2_penalty: float = 1e-6) -> Tensor:
-        # This is the 2nd copy of the covariance matrix that we need to store.
-        lerped_cov, lerped_diag = triangular_lerp(
-            self.covariance,
-            diag_upper=self.diag_energy,
-            diag_lower=self.diag_forces,
-            weight=force_weight,
-            inplace=False,
-        )
-        lerped_cov.diagonal().copy_(lerped_diag)
-        rhs = torch.lerp(self.coeffs_energy, self.coeffs_forces, force_weight)
-        solution = psd_ridge(lerped_cov, rhs, l2_penalty)
-        return solution
+    def solve(
+        self,
+        covs: dict[TargetType, Tensor],
+        coeffs: dict[TargetType, Tensor],
+        l2_penalty: float = 1e-6,
+        **weights,
+    ) -> Tensor:
+        target_weight = {}
+        for k, v in weights.items():
+            target_weight[k.split("_")[0]] = v
+        weights_norm_factor = sum(target_weight.values())
+        solve_cov, solve_coeff = None, None
+        for tt in self.training_targets:
+            normalized_weight = target_weight[tt] / weights_norm_factor
+            print(f"{tt=} {normalized_weight=}")
+            if solve_cov is None or solve_coeff is None:
+                solve_cov = covs[tt] * normalized_weight
+                solve_coeff = coeffs[tt] * normalized_weight
+            else:
+                solve_cov.add_(covs[tt], alpha=normalized_weight)
+                solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
+        assert solve_cov is not None and solve_coeff is not None
+        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+
+
+def process_tgt_weights(
+    tgt_weights: Mapping[TargetType, float | list[float]], tgts: list[TargetType]
+) -> dict[TargetType, list[float]]:
+    """
+    Make sure all weights in tgts are present (default value for
+    non-provided weights is 1.0).
+    """
+    out_tgt_weights = {}
+    for tgt in tgts:
+        out_tgt_weights[tgt] = ensure_list(tgt_weights.get(tgt, [1.0]))
+    return out_tgt_weights

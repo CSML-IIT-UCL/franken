@@ -4,7 +4,6 @@ from franken.backbones import REGISTRY
 from franken.backbones.utils import download_checkpoint, make_summary
 from franken.utils.misc import setup_logger
 
-
 ### Command 'list': list available models
 
 

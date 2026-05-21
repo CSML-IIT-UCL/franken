@@ -16,12 +16,17 @@ from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
-    DEFAULT_AUTOTUNE_METRICS,
     DEFAULT_BEST_MODEL_SELECTION,
     HPSearchConfig,
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
+)
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    TargetType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
@@ -83,7 +88,7 @@ def set_dataset_atomic_energies(
             sorted(extra_species),
         )
 
-    train_dataset.atomic_energies_ = {
+    train_dataset.atomic_energies_ = {  # type: ignore
         z: atomic_energies[z] for z in train_dataset.species
     }
     train_dataset.energy_shifts_ = None
@@ -195,31 +200,34 @@ def create_rf_hpsearch_grid(
         yield (exp_id, type(cfg)(**grid_item))
 
 
-def create_solver_hpsearch_grid(cfg: SolverConfig):
-    return hps_from_config(cfg)
+def create_solver_hpsearch_grid(
+    cfg: SolverConfig,
+) -> tuple[list[float], dict[TargetType, list[float]]]:
+    solver_hps = hps_from_config(cfg)
+    weight_dict: dict[TargetType, list[float]] = {
+        ENERGY_TARGET_KEY: solver_hps["energy_weight"],
+        FORCES_TARGET_KEY: solver_hps["force_weight"],
+        STRESS_TARGET_KEY: solver_hps["stress_weight"],
+    }
+    return solver_hps["l2_penalty"], weight_dict
 
 
 def run_autotune(
     gnn_cfg: BackboneConfig,
     rf_cfg: RFConfig,
-    solver_cfg: SolverConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
     trainer: BaseTrainer,
-    metrics: list[str] | None = None,
     best_model_selection: list[str] | None = None,
     eval_splits: list[str] | None = None,
     atomic_energies: dict[int, float] | None = None,
 ):
-    if metrics is None:
-        metrics = DEFAULT_AUTOTUNE_METRICS.copy()
     if best_model_selection is None:
         best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
 
-    current_best = BestTrial(None, None)
+    current_best = BestTrial(None, None)  # type: ignore
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
-    solver_param_grid = create_solver_hpsearch_grid(solver_cfg)
     for trial_id, rf_params in rf_param_grid:
         logger.debug(f"Autotune iteration with RF parameters {rf_params}")
 
@@ -233,7 +241,7 @@ def run_autotune(
             jac_chunk_size=jac_chunk_size,
         )
 
-        logs, weights = trainer.fit(model, solver_param_grid)
+        logs, weights = trainer.fit(model)
         for split_name, loader in loaders.items():
             if eval_splits is not None and split_name not in eval_splits:
                 continue
@@ -242,7 +250,6 @@ def run_autotune(
                 loader,
                 logs,
                 weights,
-                metrics=metrics,
             )
         split_for_best_model = (
             DataSplit.VALIDATION if "val" in loaders else DataSplit.TRAIN
@@ -395,8 +402,13 @@ def autotune(cfg: AutotuneConfig):
 
         set_dataset_atomic_energies(loaders, cfg.atomic_energies)
 
+        solver_l2, solver_weights = create_solver_hpsearch_grid(cfg.solver)
+
         trainer = RandomFeaturesTrainer(
             train_dataloader=loaders["train"],
+            l2_penalty=solver_l2,
+            training_targets=cfg.train_targets,
+            target_weight=solver_weights,
             random_features_normalization=cfg.rf_normalization,
             save_every_model=cfg.save_every_model,
             dtype=cfg.dtype,
@@ -408,9 +420,7 @@ def autotune(cfg: AutotuneConfig):
         run_autotune(
             gnn_cfg=cfg.backbone,
             rf_cfg=cfg.rfs,
-            solver_cfg=cfg.solver,
             loaders=loaders,
-            metrics=cfg.metrics,
             best_model_selection=cfg.best_model_selection,
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,

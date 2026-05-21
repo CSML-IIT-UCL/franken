@@ -18,7 +18,6 @@ from franken.trainers.log_utils import (
 )
 from franken.utils.misc import are_dicts_equal
 
-
 logger = logging.getLogger("franken")
 
 
@@ -83,7 +82,6 @@ class BaseTrainer(abc.ABC):
     def fit(
         self,
         model: FrankenPotential,
-        solver_params: dict,
     ) -> tuple[LogCollection, torch.Tensor]:
         """Fit a given franken model on the training set.
 
@@ -106,7 +104,6 @@ class BaseTrainer(abc.ABC):
         dataloader: torch.utils.data.DataLoader,
         log_collection: LogCollection,
         all_weights: torch.Tensor,
-        metrics: list[str],
     ) -> LogCollection:
         """Evaluate a fitted model by computing metrics on a validation dataset.
 
@@ -118,7 +115,6 @@ class BaseTrainer(abc.ABC):
                 method. Metric values will be added to the logs and the same object will
                 be returned by this method.
             all_weights (torch.Tensor): The weights as output by the :meth:`fit` method.
-            metrics (list[str]): List of metrics which should be computed.
 
         Returns:
             logs (LogCollection): Logs which contain all parameters related

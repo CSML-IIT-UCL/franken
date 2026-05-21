@@ -15,7 +15,6 @@ from franken.data.base import Configuration, Target
 from franken.data.distributed_sampler import SimpleUnevenDistributedSampler
 from franken.rf.atomic_energies import AtomicEnergiesShift
 
-
 logger = logging.getLogger("franken")
 
 

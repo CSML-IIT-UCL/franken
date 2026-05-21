@@ -6,9 +6,13 @@ import warnings
 import torch
 
 from franken.backbones.wrappers.base import AtomisticModelWrapper
-from franken.data.base import Configuration
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    Configuration,
+)
 from franken.rf.model import FrankenPotential
-
 
 try:
     import torch_sim.state
@@ -48,19 +52,13 @@ else:
             compute_stress: bool = False,
         ) -> None:
             super().__init__()
-
-            if compute_stress:
-                raise NotImplementedError(
-                    "FrankenTorchSimModel does not support stress in this version."
-                )
-
             if isinstance(device, str):
                 self._device = torch.device(device)
             else:
                 self._device = device
             self._dtype = dtype
             self._compute_forces = compute_forces
-            self._compute_stress = False
+            self._compute_stress = compute_stress
             self._memory_scales_with = "n_atoms_x_density"
             self.neighbor_list_fn = neighbor_list_fn
 
@@ -142,15 +140,19 @@ else:
                 batch_ids=sim_state.system_idx,
                 pbc=sim_state.pbc,
             )
-
-            energy, forces = self.model(
-                data,
-                compute_forces=self._compute_forces,
-                add_energy_shift=True,
-            )
-
-            results: dict[str, torch.Tensor] = {"energy": energy.detach().squeeze(0)}
-            if self._compute_forces:
-                assert forces is not None
-                results["forces"] = forces.detach().squeeze(0)
+            targets = [ENERGY_TARGET_KEY]
+            if self.compute_forces:
+                targets.append(FORCES_TARGET_KEY)
+            if self.compute_stress:
+                targets.append(STRESS_TARGET_KEY)
+            out = self.model(targets, data, weights=None, add_energy_shift=True)
+            for k, v in out.items():
+                print(f"{k}: {v.shape=}")
+            results: dict[str, torch.Tensor] = {
+                "energy": out[ENERGY_TARGET_KEY].detach()
+            }
+            if self.compute_forces:
+                results["forces"] = out[FORCES_TARGET_KEY].detach()
+            if self.compute_stress:
+                results["stress"] = out[STRESS_TARGET_KEY].detach()
             return results

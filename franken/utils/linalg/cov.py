@@ -1,9 +1,8 @@
 import warnings
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TypeVar
 
 import scipy.linalg.blas
 import torch
-
 
 try:
     import cupy
@@ -13,10 +12,12 @@ except ImportError:
 
 from franken.utils.linalg.tri import inplace_triangular_divide
 
+OptTensorType = TypeVar("OptTensorType", bound=torch.Tensor | None, covariant=True)
+
 
 def rank1_update(
-    cov: torch.Tensor, diag: torch.Tensor, vec: torch.Tensor, upper: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    cov: torch.Tensor, diag: OptTensorType, vec: torch.Tensor, upper: bool = True
+) -> Tuple[torch.Tensor, OptTensorType]:
     r"""in-place rank-1 update to a triangular matrix
 
     If cupy is available, a low-memory-footprint algorithm is used.
@@ -46,17 +47,18 @@ def rank1_update(
 
 
 def _rank1_update(
-    cov: torch.Tensor, diag: torch.Tensor, vec: torch.Tensor, upper: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    cov: torch.Tensor, diag: OptTensorType, vec: torch.Tensor, upper: bool = True
+) -> Tuple[torch.Tensor, OptTensorType]:
     tri_fn = torch.triu if upper else torch.tril
     cov.add_(tri_fn(torch.outer(vec, vec)))
-    diag.add_(vec**2)
+    if diag is not None:
+        diag.add_(vec**2)
     return cov, diag
 
 
 def _lowmemcov_rank1_update(
-    cov: torch.Tensor, diag: torch.Tensor, vec: torch.Tensor, upper: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    cov: torch.Tensor, diag: OptTensorType, vec: torch.Tensor, upper: bool = True
+) -> Tuple[torch.Tensor, OptTensorType]:
     # Use the DSYR function in blas
     # A := alpha*x*x**T + A
     assert vec.device == cov.device
@@ -97,13 +99,14 @@ def _lowmemcov_rank1_update(
             beta=1.0,
             lower=not upper,
         )
-    diag.add_(vec**2)
+    if diag is not None:
+        diag.add_(vec**2)
     return cov, diag
 
 
 def rankk_update(
-    cov: torch.Tensor, diag: torch.Tensor, update: torch.Tensor, upper: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    cov: torch.Tensor, diag: OptTensorType, update: torch.Tensor, upper: bool = True
+) -> Tuple[torch.Tensor, OptTensorType]:
     r"""in-place rank-k update to a triangular matrix.
 
     If cupy is available, a low-memory-footprint algorithm is used.
@@ -133,17 +136,18 @@ def rankk_update(
 
 
 def _rankk_update(
-    cov: torch.Tensor, diag: torch.Tensor, update: torch.Tensor, upper: bool = True
-):
+    cov: torch.Tensor, diag: OptTensorType, update: torch.Tensor, upper: bool = True
+) -> tuple[torch.Tensor, OptTensorType]:
     tri_fn = torch.triu if upper else torch.tril
     cov.add_(tri_fn(update @ update.T))
-    diag.add_((update**2).sum(1))
+    if diag is not None:
+        diag.add_((update**2).sum(1))
     return cov, diag
 
 
 def _lowmemcov_rankk_update(
-    cov: torch.Tensor, diag: torch.Tensor, update: torch.Tensor, upper: bool = True
-):
+    cov: torch.Tensor, diag: OptTensorType, update: torch.Tensor, upper: bool = True
+) -> tuple[torch.Tensor, OptTensorType]:
     # DSYRK
     # C := alpha*A*A**T + beta*C,
     assert update.device == cov.device
@@ -193,8 +197,8 @@ def _lowmemcov_rankk_update(
             beta=1.0,
             lower=not upper,
         )
-
-    diag.add_((update**2).sum(1))
+    if diag is not None:
+        diag.add_((update**2).sum(1))
     return cov, diag
 
 

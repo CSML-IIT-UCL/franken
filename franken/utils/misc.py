@@ -7,25 +7,18 @@ import sys
 from itertools import product
 from pathlib import Path
 from time import perf_counter
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Mapping,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from collections.abc import Sequence, Mapping, Callable, Generator
+from typing import Generic, Iterable, Optional, TypeVar
 
 import torch
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 import franken.utils.distributed as dist_utils
 
-
 logger = logging.getLogger("franken")
+
+T = TypeVar("T")
+K = TypeVar("K")
 
 
 def sanitize_init_dict(cls, params: dict) -> dict:
@@ -51,12 +44,10 @@ def sanitize_init_dict(cls, params: dict) -> dict:
 
 
 def params_grid(
-    grid: Mapping[str, Sequence[Any]],
+    grid: Mapping[K, Sequence[T]],
     split_distributed: bool = False,
-    filter_function: Optional[
-        Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]
-    ] = None,
-) -> Generator[Tuple[int, Dict[str, Any]], None, None]:
+    filter_function: Optional[Callable[[dict[K, T]], dict[K, T] | None]] = None,
+) -> Generator[tuple[int, dict[K, T]], None, None]:
     """Converts a map of hyperparameter names to their possible values to a list of individual hyperparameter combinations
 
     Args:
@@ -102,10 +93,10 @@ def params_grid(
                 yield idx, params
 
 
-class throughput:
+class throughput(Generic[T]):
     def __init__(
         self,
-        iterable,
+        iterable: Iterable[T],
         desc="",
         units="cfgs",
         update_interval=0.2,
@@ -135,7 +126,7 @@ class throughput:
         self.total = total
         self.leave = leave
 
-    def __iter__(self):
+    def __iter__(self) -> Generator[T]:
         if self.process_rank != 0:
             for obj in self.iterable:
                 yield obj
@@ -273,10 +264,10 @@ def remove_root_logger_handlers():
 
 
 def setup_logger(
-    level: Union[int, str] = logging.INFO,
-    directory: Optional[str | Path] = None,
+    level: int | str = logging.INFO,
+    directory: str | Path | None = None,
     logname: str = "franken",
-    rank: Optional[int] = 0,
+    rank: int | None = 0,
 ):
     # From https://github.com/ACEsuit/mace/blob/main/mace/tools/utils.py
     flogger = logging.getLogger("franken")
@@ -413,3 +404,16 @@ def no_jit():
         yield
     finally:
         torch._C._set_graph_executor_optimize(stored_flag)
+
+
+T = TypeVar("T", covariant=True, bound=float | int | str | bytes)
+
+
+def ensure_list(obj: T | list[T] | None) -> list[T]:
+    if obj is None:
+        return []
+    if isinstance(obj, (list, tuple, set, frozenset)) and not isinstance(
+        obj, (str, bytes)
+    ):
+        return list(obj)
+    return [obj]  # type: ignore

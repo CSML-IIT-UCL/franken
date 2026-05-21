@@ -16,8 +16,13 @@ from franken.config import (
     SolverConfig,
     DatasetConfig,
     HPSearchConfig,
-    DEFAULT_AUTOTUNE_METRICS,
     DEFAULT_BEST_MODEL_SELECTION,
+)
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    TargetType,
+    all_target_keys,
 )
 
 
@@ -122,6 +127,15 @@ def parse_optional_literal(s: str) -> str | None:
     if s.lower() == "none":
         return None
     return s
+
+
+def parse_target(value: str) -> TargetType:
+    try:
+        return TargetType(value.lower())
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid target type: {value}. Allowed types: {list(TargetType)}"
+        )
 
 
 class Argument:
@@ -518,12 +532,12 @@ def build_parser(return_groups: bool = False):
         action="store_true",
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
     )
-    parser.add_argument(
-        "--metrics",
-        nargs="+",
-        default=DEFAULT_AUTOTUNE_METRICS.copy(),
-        help=get_field_docstring(AutotuneConfig, "metrics"),
-    )
+    # parser.add_argument(
+    #     "--metrics",
+    #     nargs="+",
+    #     default=DEFAULT_AUTOTUNE_METRICS.copy(),
+    #     help=get_field_docstring(AutotuneConfig, "metrics"),
+    # )
     parser.add_argument(
         "--best-model-selection",
         nargs="+",
@@ -567,6 +581,14 @@ def build_parser(return_groups: bool = False):
         default=None,
         help=get_field_docstring(AutotuneConfig, "atomic_energies"),
     )
+    parser.add_argument(
+        "--train-targets",
+        type=parse_target,
+        nargs="+",
+        choices=all_target_keys(),
+        default=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+        help=get_field_docstring(AutotuneConfig, "train_targets"),
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -578,7 +600,7 @@ def build_parser(return_groups: bool = False):
 
 
 def parse_cli(argv):
-    parser, groups = build_parser(True)
+    parser, groups = build_parser(True)  # pyright: ignore[reportGeneralTypeIssues]
     args = parser.parse_args(argv)
 
     if not getattr(args, "dataset_name", None) and not getattr(
@@ -606,7 +628,7 @@ def parse_cli(argv):
         save_every_model=args.save_every_model,
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
-        metrics=args.metrics,
+        # metrics=args.metrics,
         best_model_selection=args.best_model_selection,
         scale_by_species=not args.global_scaling,
         jac_chunk_size=args.jac_chunk_size,
@@ -614,5 +636,6 @@ def parse_cli(argv):
         seed=args.seed,
         console_logging_level=args.log_level,
         atomic_energies=args.atomic_energies,
+        train_targets=args.train_targets,
     )
     return autotune_cfg

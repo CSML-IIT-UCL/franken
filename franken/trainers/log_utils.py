@@ -13,7 +13,6 @@ import franken.metrics
 import franken.utils.distributed as dist_utils
 from franken.config import DEFAULT_BEST_MODEL_SELECTION
 
-
 logger = logging.getLogger("franken")
 
 
@@ -200,7 +199,7 @@ class LogCollection:
     def __iter__(self):
         return iter(self.logs)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> LogEntry:
         return self.logs[idx]
 
     def get_metric(

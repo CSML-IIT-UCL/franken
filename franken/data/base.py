@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from typing import Optional, Sequence
+from typing import Generator, Literal, Optional, Sequence, get_args
 
 import torch
 from torch import Tensor
@@ -176,46 +176,201 @@ class Configuration:
             pbc=pbc,
         )
 
+    @torch.jit.unused
+    def __str__(self) -> str:
+        attrs = {
+            "atom_pos": self.atom_pos,
+            "atomic_numbers": self.atomic_numbers,
+            "natoms": self.natoms,
+            "edge_index": self.edge_index,
+            "shifts": self.shifts,
+            "unit_shifts": self.unit_shifts,
+            "cell": self.cell,
+            "batch_ids": self.batch_ids,
+            "pbc": self.pbc,
+        }
+
+        def fmt(value):
+            if value is None:
+                return "None"
+
+            # Torch tensors
+            if hasattr(value, "shape"):
+                shape = tuple(value.shape)
+                dtype = getattr(value, "dtype", None)
+                device = getattr(value, "device", None)
+                return f"Tensor(shape={shape}, dtype={dtype}, device={device})"
+
+            return repr(value)
+
+        formatted = ",\n    ".join(
+            f"{name}={fmt(value)}" for name, value in attrs.items()
+        )
+        return f"{self.__class__.__name__}(\n    {formatted}\n)"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
+# NOTE: TargetType should be an enum, but instances of
+#       dict[Enum, Any] do not work with torch jit. We
+#       use aliases of strings such that when scripting
+#       str can be used.
+TargetType = Literal["energy", "forces", "stress"]
+ENERGY_TARGET_KEY: TargetType = "energy"
+FORCES_TARGET_KEY: TargetType = "forces"
+STRESS_TARGET_KEY: TargetType = "stress"
+
+
+def is_target_key(s: str):
+    print(f"{get_args(TargetType)=}")
+    return s in get_args(TargetType)
+
+
+def all_target_keys() -> tuple[str]:
+    return get_args(TargetType)
+
+
+def is_scalar_target(s: str):
+    if not is_target_key(s):
+        raise ValueError(f"{s} is not a valid target type")
+    return s == ENERGY_TARGET_KEY
+
 
 @dataclasses.dataclass
 class Target:
     """Container class for the target variables of a single configuration."""
 
-    energy: Tensor
-    forces: Optional[Tensor]
+    energy: Tensor | None
+    forces: Tensor | None
+    stress: Tensor | None = None
+
+    def __getitem__(self, key) -> Tensor:
+        if not is_target_key(key):
+            raise KeyError(key)
+        elif key == ENERGY_TARGET_KEY:
+            val = self.energy
+        elif key == FORCES_TARGET_KEY:
+            val = self.forces
+        elif key == STRESS_TARGET_KEY:
+            val = self.stress
+        else:
+            raise KeyError(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __contains__(self, key) -> bool:
+        try:
+            return self[key] is not None
+        except KeyError:
+            return False
 
     def to(self, device=None, dtype=None) -> "Target":
         return Target(
-            energy=self.energy.to(device=device, dtype=dtype),
+            energy=(
+                self.energy.to(device=device, dtype=dtype)
+                if self.energy is not None
+                else None
+            ),
             forces=(
                 self.forces.to(device=device, dtype=dtype)
                 if self.forces is not None
+                else None
+            ),
+            stress=(
+                self.stress.to(device=device, dtype=dtype)
+                if self.stress is not None
                 else None
             ),
         )
 
     def detach(self) -> "Target":
         return Target(
-            energy=self.energy.detach(),
+            energy=self.energy.detach() if self.energy is not None else None,
             forces=self.forces.detach() if self.forces is not None else None,
+            stress=self.stress.detach() if self.stress is not None else None,
         )
 
-    # @staticmethod
-    # def concatenate(targets: Sequence['Target']):
-    #     energies: list[Tensor] = []
-    #     forcess: list[Tensor] = []
+    @staticmethod
+    def from_types(tt_dict: dict[TargetType, Tensor]):
+        return Target(
+            energy=tt_dict.get(ENERGY_TARGET_KEY),
+            forces=tt_dict.get(FORCES_TARGET_KEY),
+            stress=tt_dict.get(STRESS_TARGET_KEY),
+        )
 
-    #     forces_none = np.asarray([t.forces is None for t in targets])
-    #     if not np.all(forces_none == forces_none[0]):
-    #         raise ValueError("Forces inconsistent")
+    def iter_individual_systems(self, data: Configuration) -> Generator["Target"]:
+        if data.batch_ids is None:
+            yield self
+        else:
+            sys_ids = data.batch_ids.unique()
+            for i, sys_id in enumerate(sys_ids):
+                cfg_energy, cfg_forces, cfg_stress = None, None, None
+                if self.energy is not None:
+                    cfg_energy = self.energy[..., i]
+                if self.forces is not None:
+                    cfg_forces = self.forces[..., data.batch_ids == sys_id, :]
+                if self.stress is not None:
+                    has_batch = self.stress.ndim > 2
+                    stress = self.stress.reshape(-1, len(sys_ids), 3, 3)
+                    cfg_stress = stress[:, i]
+                    if not has_batch:
+                        cfg_stress = cfg_stress.squeeze(0)
+                yield Target(cfg_energy, cfg_forces, cfg_stress)
 
-    #     for target in targets:
-    #         energies.append(target.energy)
-    #         if target.forces is not None:
-    #             forcess.append(target.forces)
+    @staticmethod
+    def concatenate(targets: Sequence["Target"]):
+        e_lst: list[Tensor] = []
+        f_lst: list[Tensor] = []
+        s_lst: list[Tensor] = []
 
-    #     return Configuration(
-    #         atom_pos=torch.cat(positions),
-    #         edge_index=torch.cat(edge_indices) if len(edge_indices) > 0 else None,
+        energy_none = np.asarray([t.energy is None for t in targets])
+        if not np.all(energy_none == energy_none[0]):
+            raise ValueError("Energies inconsistent")
 
-    #     torch.cat([prd1.energy, prd2.energy], dim=1), torch.cat([prd1.forces, prd2.forces], dim=1)
+        forces_none = np.asarray([t.forces is None for t in targets])
+        if not np.all(forces_none == forces_none[0]):
+            raise ValueError("Forces inconsistent")
+
+        stress_none = np.asarray([t.stress is None for t in targets])
+        if not np.all(stress_none == stress_none[0]):
+            raise ValueError("Stresses inconsistent")
+
+        e_has_batch, f_has_batch, s_has_batch = False, False, False
+        for target in targets:
+            if target.energy is not None:
+                e_lst.append(target.energy)
+                if target.energy.ndim != e_lst[0].ndim:
+                    raise ValueError(
+                        f"Energy shapes inconsistent. Found {target.energy.ndim} and {e_lst[0].ndim} dimensions"
+                    )
+                if target.energy.ndim > 1:
+                    e_has_batch = True
+            if target.forces is not None:
+                f_lst.append(target.forces)
+                if target.forces.ndim != f_lst[0].ndim:
+                    raise ValueError(
+                        f"Forces shapes inconsistent. Found {target.forces.ndim} and {f_lst[0].ndim} dimensions"
+                    )
+                if target.forces.ndim > 2:
+                    f_has_batch = True
+            if target.stress is not None:
+                s_lst.append(target.stress)
+                if target.stress.ndim != s_lst[0].ndim:
+                    raise ValueError(
+                        f"Stress shapes inconsistent. Found {target.stress.ndim} and {s_lst[0].ndim} dimensions"
+                    )
+                if target.stress.ndim > 2:
+                    s_has_batch = True
+        return Target(
+            energy=(
+                torch.cat(e_lst, 1 if e_has_batch else 0) if len(e_lst) > 0 else None
+            ),
+            forces=(
+                torch.cat(f_lst, 1 if f_has_batch else 0) if len(f_lst) > 0 else None
+            ),
+            stress=(
+                torch.cat(s_lst, 1 if s_has_batch else 0) if len(s_lst) > 0 else None
+            ),
+        )

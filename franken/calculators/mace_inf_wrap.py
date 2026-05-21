@@ -5,6 +5,7 @@ import torch
 from e3nn.util import jit
 
 from franken.backbones.wrappers.base import AtomisticModelWrapper
+import franken.data.base
 from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 
@@ -85,8 +86,12 @@ class MaceInferenceWrapper(torch.nn.Module):
             unit_shifts=data["unit_shifts"],
             cell=data["cell"],
         )
-        energy, forces = self.model(franken_data)
-        assert forces is not None
+        preds = self.model(
+            [franken.data.base.ENERGY_TARGET_KEY, franken.data.base.FORCES_TARGET_KEY],
+            franken_data,
+        )
+        forces = preds[franken.data.base.FORCES_TARGET_KEY]
+        energy = preds[franken.data.base.ENERGY_TARGET_KEY]
         # Kokkos doesn't like total_energy_local and only looks at node_energy.
         # We hack around this:
         energy = energy.squeeze()  # [M, N] -> [1]

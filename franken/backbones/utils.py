@@ -11,7 +11,6 @@ from franken.config import BackboneConfig, asdict_with_classvar
 from franken.utils import distributed
 from franken.utils.file_utils import download_file
 
-
 logger = logging.getLogger("franken")
 
 
