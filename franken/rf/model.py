@@ -351,7 +351,7 @@ class FrankenPotential(torch.nn.Module):
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         out: dict[TargetType, torch.Tensor]
-        if compute_force or compute_stress:
+        if compute_stress or (compute_force and compute_stress):
             out = cast(
                 dict[TargetType, torch.Tensor],
                 self._compute_forces_stresses(
@@ -408,7 +408,7 @@ class FrankenPotential(torch.nn.Module):
     ) -> dict[str, torch.Tensor]:
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
-        if compute_force or compute_stress:
+        if compute_stress or (compute_force and compute_stress):
             if mode == "torch.func":
                 return self._compute_forces_stresses(
                     data,
@@ -615,7 +615,7 @@ def prep_with_displacement(
         data_cell
         if data_cell is not None
         else torch.zeros(
-            num_systems * 3, 3, dtype=atom_pos.dtype, device=atom_pos.device
+            num_systems * 3, 3, dtype=displacement.dtype, device=displacement.device
         )
     )
     unit_shifts = data.unit_shifts
