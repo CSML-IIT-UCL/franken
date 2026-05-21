@@ -217,6 +217,7 @@ class Configuration:
 #       use aliases of strings such that when scripting
 #       str can be used.
 TargetType = Literal["energy", "forces", "stress"]
+"""TargetType describes the range of possible targets for :class:`franken.rf.model.FrankenPotential`"""
 ENERGY_TARGET_KEY: TargetType = "energy"
 FORCES_TARGET_KEY: TargetType = "forces"
 STRESS_TARGET_KEY: TargetType = "stress"

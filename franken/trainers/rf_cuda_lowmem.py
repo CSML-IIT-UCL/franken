@@ -259,7 +259,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                     targets=self.training_targets,
                     data=data,
                     weights=all_weights,
-                    forces_mode=forces_mode,
+                    differential_mode=forces_mode,
                     add_energy_shift=(False if split == DataSplit.TRAIN else True),
                 )
             for tt, val in predictions.items():
