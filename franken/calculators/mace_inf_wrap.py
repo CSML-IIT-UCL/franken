@@ -82,9 +82,9 @@ class MaceInferenceWrapper(torch.nn.Module):
                 len(atom_nums), dtype=torch.int32, device=atom_nums.device
             ).view(1),
             edge_index=data["edge_index"].transpose(0, 1),
-            shifts=data["shifts"],
+            shifts=data["shifts"].double(),
             unit_shifts=data["unit_shifts"],
-            cell=data["cell"],
+            cell=data["cell"].double(),
         )
         targets = [
             franken.data.base.ENERGY_TARGET_KEY,
