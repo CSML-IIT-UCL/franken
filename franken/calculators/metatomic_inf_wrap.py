@@ -20,6 +20,9 @@ from franken.rf.model import FrankenPotential
 
 
 class MetatomicInferenceWrapper(torch.nn.Module):
+    """Wraps :class:`franken.rf.model.FrankenPotential` models for inference with
+    [metatomic](https://docs.metatensor.org/metatomic/latest/index.html)"""
+
     def __init__(self, franken_model: FrankenPotential):
         super().__init__()
         self.model = franken_model

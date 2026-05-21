@@ -34,10 +34,9 @@ except ImportError:
 else:
 
     class FrankenTorchSimModel(ModelInterface):  # type: ignore
-        """Wrap a FrankenPotential model with the torch-sim ``ModelInterface`` API.
+        """Wrap a :class:`franken.rf.model.FrankenPotential` model with the torch-sim ``ModelInterface`` API.
 
-        This adapter returns per-system energies and per-atom forces. Stress is not
-        supported.
+        This adapter returns per-system energies, per-atom forces and per-system stress tensors.
         """
 
         def __init__(

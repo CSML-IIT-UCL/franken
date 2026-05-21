@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Union
 
-import numpy as np
 import torch
 from ase.calculators.calculator import Calculator, all_changes
 
@@ -21,10 +20,10 @@ class FrankenCalculator(Calculator):
 
     Attributes:
         implemented_properties:
-            Lists properties which can be asked from this calculator, notably "energy" and "forces".
+            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress".
     """
 
-    implemented_properties = ["energy", "forces"]
+    implemented_properties = ["energy", "forces", "stress"]
     default_parameters = {}
     nolabel = True  # ??
 
@@ -110,19 +109,19 @@ class FrankenCalculator(Calculator):
             targets.append(FORCES_TARGET_KEY)
         if "stress" in properties:
             targets.append(STRESS_TARGET_KEY)
-
         computed = self.franken(targets, data)
 
-        if computed[ENERGY_TARGET_KEY].ndim == 0:
-            self.results["energy"] = computed[ENERGY_TARGET_KEY].item()
-        else:
-            self.results["energy"] = np.squeeze(
-                computed[ENERGY_TARGET_KEY].numpy(force=True)
-            )
+        self.results["energy"] = (
+            computed[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
+        )
         if "forces" in properties:
-            self.results["forces"] = computed[FORCES_TARGET_KEY].numpy(force=True)
+            self.results["forces"] = (
+                computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
+            )
         if "stress" in properties:
-            self.results["stress"] = computed[STRESS_TARGET_KEY].numpy(force=True)
+            self.results["stress"] = (
+                computed[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
+            )
 
 
 def calculator_throughput(

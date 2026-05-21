@@ -1,6 +1,5 @@
 """Franken model"""
 
-from collections.abc import Sequence
 import logging
 import os
 from typing import Callable, List, Literal, Mapping, Optional, Union, cast
@@ -404,7 +403,7 @@ class FrankenPotential(torch.nn.Module):
         self,
         weights: torch.Tensor | None,
         data: Configuration,
-        targets: Sequence[str],
+        targets: list[str],
         mode: str,
     ) -> dict[str, torch.Tensor]:
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
@@ -458,7 +457,7 @@ class FrankenPotential(torch.nn.Module):
 
     def predict(
         self,
-        targets: Sequence[str],
+        targets: list[str],
         data: Configuration,
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",

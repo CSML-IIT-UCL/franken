@@ -86,19 +86,22 @@ class MaceInferenceWrapper(torch.nn.Module):
             unit_shifts=data["unit_shifts"],
             cell=data["cell"],
         )
-        preds = self.model(
-            [franken.data.base.ENERGY_TARGET_KEY, franken.data.base.FORCES_TARGET_KEY],
-            franken_data,
-        )
-        forces = preds[franken.data.base.FORCES_TARGET_KEY]
-        energy = preds[franken.data.base.ENERGY_TARGET_KEY]
+        targets = [
+            franken.data.base.ENERGY_TARGET_KEY,
+            franken.data.base.FORCES_TARGET_KEY,
+        ]
+        if compute_virials:
+            targets.append(franken.data.base.STRESS_TARGET_KEY)
+
+        preds = self.model(targets, franken_data)
+        forces = preds[franken.data.base.FORCES_TARGET_KEY].squeeze(0)
+        energy = preds[franken.data.base.ENERGY_TARGET_KEY].squeeze(0)
         # Kokkos doesn't like total_energy_local and only looks at node_energy.
         # We hack around this:
-        energy = energy.squeeze()  # [M, N] -> [1]
         node_energy = energy.repeat(len(atom_nums)).div(len(atom_nums))
         virials: Optional[torch.Tensor] = None
         if compute_virials:
-            virials = torch.zeros((1, 3, 3), dtype=forces.dtype, device=forces.device)
+            virials = preds[franken.data.base.STRESS_TARGET_KEY].squeeze(0)
         return {
             "total_energy_local": energy,
             "node_energy": node_energy,
