@@ -4,7 +4,7 @@ import dataclasses
 import types
 import typing
 import docstring_parser
-from typing import Any, Sequence
+from typing import Any, Sequence, cast, get_args
 
 from franken.config import (
     AutotuneConfig,
@@ -23,6 +23,7 @@ from franken.data.base import (
     FORCES_TARGET_KEY,
     TargetType,
     all_target_keys,
+    is_target_key,
 )
 
 
@@ -130,12 +131,11 @@ def parse_optional_literal(s: str) -> str | None:
 
 
 def parse_target(value: str) -> TargetType:
-    try:
-        return TargetType(value.lower())
-    except ValueError:
+    if not is_target_key(value.lower()):
         raise argparse.ArgumentTypeError(
-            f"Invalid target type: {value}. Allowed types: {list(TargetType)}"
+            f"Invalid target type: {value}. Allowed types: {get_args(TargetType)}"
         )
+    return cast(TargetType, value)
 
 
 class Argument:
