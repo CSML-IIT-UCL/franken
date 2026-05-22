@@ -15,6 +15,7 @@ from metatomic.torch import (
 )
 
 from franken.backbones.wrappers.base import MetatomicModelWrapper
+import franken.data.base
 from franken.data.base import Configuration
 from franken.rf.model import FrankenPotential
 
@@ -118,9 +119,8 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         batch_ids = concat_data.batch_ids
         assert batch_ids is not None
         # Compute energy with underlying model. This is per-system energy
-        _, energy = self.model._energy_aux(
-            concat_data.atom_pos, None, concat_data, None
-        )  # [M, N]
+        model_out = self.model([franken.data.base.ENERGY_TARGET_KEY], concat_data)
+        energy = model_out[franken.data.base.ENERGY_TARGET_KEY]
         # Convert it to per-atom energy
         energy = energy / concat_data.natoms[None, ...]  # [M, N]
         energy = torch.gather(energy, dim=1, index=batch_ids[None, ...])  # [M, A]
