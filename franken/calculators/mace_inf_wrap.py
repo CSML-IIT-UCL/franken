@@ -170,7 +170,7 @@ def build_arg_parser():
         "--backbone_path_or_id",
         type=str,
         help=(
-            "Override the backbone checkpoint path stored in the " "Franken checkpoint."
+            "Override the backbone checkpoint path stored in the Franken checkpoint."
         ),
         default=None,
     )

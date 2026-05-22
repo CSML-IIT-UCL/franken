@@ -142,6 +142,9 @@ class FrankenPotential(torch.nn.Module):
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
         if backbone_path_or_id is not None:
+            logger.warning(
+                f"The backbone path/id changed from {gnn_cfg.path_or_id} to {backbone_path_or_id}. If this refers to a different backbone, unexpected results may occur."
+            )
             gnn_cfg.path_or_id = backbone_path_or_id
         model = cls(
             gnn_config=gnn_cfg,
