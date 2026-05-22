@@ -265,7 +265,7 @@ def random_cfg(num_atoms, dtype, device, atomic_numbers=None):
         atomic_numbers=atomic_numbers,
         natoms=torch.tensor(num_atoms),
         edge_index=torch.randint(0, num_atoms, (num_edges, 2), dtype=torch.int32),
-        unit_shifts=torch.randn(num_edges, 3, dtype=torch.int32),
+        unit_shifts=torch.randint(1, 5, (num_edges, 3), dtype=torch.int32),
         cell=torch.randn((3, 3), dtype=dtype)
     ).to(device)
 
