@@ -32,7 +32,7 @@ def gen_efmap_vals(num_feat, num_configs, num_atoms, device, dtype, targets):
     return out
 
 
-def gen_data(num_configs, num_atoms, dtype, split="train"):
+def gen_data(num_configs, num_atoms, dtype, split="train", gen_stress=True):
     data = [
         (
             Configuration(
@@ -43,7 +43,11 @@ def gen_data(num_configs, num_atoms, dtype, split="train"):
                 unit_shifts=torch.randint(0, 5, (num_atoms * 2, 3), dtype=torch.int32),
                 cell=torch.randn((3, 3), dtype=dtype)
             ),
-            Target(torch.randn(1) ** 2, torch.randn(num_atoms, 3) ** 2, torch.randn(3, 3) ** 2)
+            Target(
+                torch.randn(1) ** 2, 
+                torch.randn(num_atoms, 3) ** 2, 
+                torch.randn(3, 3) ** 2 if gen_stress else None
+            )
         )
         for _ in range(num_configs)
     ]
@@ -320,6 +324,14 @@ class TestTrainer:
                                  stress_weight=stress_weight)
         torch.testing.assert_close(exp_sol, solution)
 
+    def test_missing_target_type(self, device):
+        trainer = self.trainer(device, torch.float32, training_targets=self.ESF_TGT)
+        efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt, self.ESF_TGT)
+        dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt, gen_stress=False)
+        model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
+        with pytest.raises(RuntimeError, match="does not contain any values for stress."):
+            covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
+        
 
 class TestSerializeBestModel:
     @pytest.fixture

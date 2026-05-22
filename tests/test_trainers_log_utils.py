@@ -1,6 +1,9 @@
-import pytest
+import copy
 
-from franken.trainers.log_utils import HyperParameterGroup, LogEntry
+import pytest
+import torch
+
+from franken.trainers.log_utils import DataSplit, HyperParameterGroup, LogCollection, LogEntry, MetricLog
 
 
 @pytest.fixture
@@ -30,7 +33,6 @@ def dummy_log_dict():
             },
         },
     }
-
 
 def test_hpgroup_from_dict():
     dummy_group_dict = {
@@ -69,64 +71,82 @@ def test_log_entry_get_invalid_metric_split(dummy_log_dict):
         log_entry.get_metric("energy_MAE", "invalid_split")
 
 
-# class TestBestModel:
-#     def test_all_nans(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": torch.nan}}},
-#             {"metrics": {"val": {"energy": torch.nan}}},
-#         ]
-#         expected_best_log = log_entries[0]
-#         best_log = get_best_model(log_entries, ["energy"], split="val")
-#         assert best_log == expected_best_log
+class TestBestModel:
+    def log_collection(self, new_metrics, dummy_log_dict) -> LogCollection:
+        log_entries = []
+        for metric_dict in new_metrics:
+            new_log_dict = copy.copy(dummy_log_dict)
+            new_log_dict["metrics"] = metric_dict
+            log_entries.append(LogEntry.from_dict(new_log_dict))
+        return LogCollection(logs=log_entries)
+    
+    def test_all_nans(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": torch.nan}},
+            {"val": {"energy": torch.nan}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        expected_best_log = MetricLog(DataSplit.VAL, "energy", torch.nan)
+        best_log = log_collection.get_best_model(["energy"], split=DataSplit.VAL)
+        assert len(best_log.metrics) == 1
+        assert best_log.metrics[0].name == expected_best_log.name
+        assert best_log.metrics[0].split == expected_best_log.split
+        # assert best_log.metrics[0].value == expected_best_log.value # NaN != NaN
 
-#     def test_nans(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": torch.nan}}},
-#             {"metrics": {"val": {"energy": 0.1}}},
-#             {"metrics": {"val": {"energy": 12.0}}},
-#         ]
-#         expected_best_log = log_entries[1]
-#         best_log = get_best_model(log_entries, ["energy"], split="val")
-#         assert best_log == expected_best_log
-#         log_entries = [
-#             {"metrics": {"val": {"energy": 0.1}}},
-#             {"metrics": {"val": {"energy": torch.nan}}},
-#             {"metrics": {"val": {"energy": 12.0}}},
-#         ]
-#         expected_best_log = log_entries[0]
-#         best_log = get_best_model(log_entries, ["energy"], split="val")
-#         assert best_log == expected_best_log
+    def test_nans(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": torch.nan}},
+            {"val": {"energy": 0.1}},
+            {"val": {"energy": 12.0}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        expected_best_log = MetricLog(DataSplit.VAL, "energy", 0.1)
+        best_log = log_collection.get_best_model(["energy"], split=DataSplit.VAL)
+        assert best_log.metrics == [expected_best_log]
+        log_entries = [
+            {"val": {"energy": 0.1}},
+            {"val": {"energy": torch.nan}},
+            {"val": {"energy": 12.0}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        expected_best_log = MetricLog(DataSplit.VAL, "energy", 0.1)
+        best_log = log_collection.get_best_model(["energy"], split=DataSplit.VAL)
+        assert best_log.metrics == [expected_best_log]
 
-#     def test_stability(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": 1.0, "forces": 12}}},
-#             {"metrics": {"val": {"energy": 1.1, "forces": 11.9}}},
-#             {"metrics": {"val": {"energy": 1.2, "forces": 11.8}}},
-#         ]
-#         expected_best_log = log_entries[0]
-#         best_log = get_best_model(log_entries, ["energy", "forces"], split="val")
-#         assert best_log == expected_best_log
+    def test_stability(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": 1.0, "forces": 12}},
+            {"val": {"energy": 1.1, "forces": 11.9}},
+            {"val": {"energy": 1.2, "forces": 11.8}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        expected_best_log = [MetricLog(DataSplit.VAL, "energy", 1.0), MetricLog(DataSplit.VAL, "forces", 12)]
+        best_log = log_collection.get_best_model(["energy", "forces"], split=DataSplit.VAL)
+        assert best_log.metrics == expected_best_log
 
-#     def test_normal(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": 1.0, "forces": 12}}},
-#             {"metrics": {"val": {"energy": 0.9, "forces": 11.9}}},
-#             {"metrics": {"val": {"energy": 1.2, "forces": 11.8}}},
-#         ]
-#         expected_best_log = log_entries[1]
-#         best_log = get_best_model(log_entries, ["energy", "forces"], split="val")
-#         assert best_log == expected_best_log
+    def test_normal(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": 1.0, "forces": 12}},
+            {"val": {"energy": 0.9, "forces": 11.9}},
+            {"val": {"energy": 1.2, "forces": 11.8}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        expected_best_log = [MetricLog(DataSplit.VAL, "energy", 0.9), MetricLog(DataSplit.VAL, "forces", 11.9)]
+        best_log = log_collection.get_best_model(["energy", "forces"], split=DataSplit.VAL)
+        assert best_log.metrics == expected_best_log
 
-#     def test_missing_split(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": 1.0, "forces": 12}}},
-#         ]
-#         with pytest.raises(KeyError):
-#             get_best_model(log_entries, ["energy", "forces"], split="train")
+    def test_missing_split(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": 1.0, "forces": 12}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        with pytest.raises(KeyError):
+            log_collection.get_best_model(["energy", "forces"], split=DataSplit.TRAIN)
 
-#     def test_missing_metric(self):
-#         log_entries = [
-#             {"metrics": {"val": {"energy": 1.0, "forces": 12}}},
-#         ]
-#         with pytest.raises(KeyError):
-#             get_best_model(log_entries, ["missing", "forces"], split="val")
+    def test_missing_metric(self, dummy_log_dict):
+        log_entries = [
+            {"val": {"energy": 1.0, "forces": 12}},
+        ]
+        log_collection = self.log_collection(log_entries, dummy_log_dict)
+        with pytest.raises(KeyError, match="Unknown metric='missing'"):
+            log_collection.get_best_model(["missing", "forces"], split=DataSplit.VAL)

@@ -311,9 +311,10 @@ class LogCollection:
                     f"Use '{metric}_average' for the species average, or one of the per-species "
                     f"metrics like '{metric}_<Z>'."
                 )
-            assert (
-                metric in available_metrics
-            ), f"Unknown {metric=} for split={split}. Available: {sorted(available_metrics)}"
+            if metric not in available_metrics:
+                raise KeyError(
+                    f"Unknown {metric=} for split={split}. Available: {sorted(available_metrics)}"
+                )
 
         costs = np.stack(
             [self.get_metric(m, split=split) for m in metrics_to_minimize], axis=-1
