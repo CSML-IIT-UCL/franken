@@ -35,6 +35,17 @@ class RandomFeaturesTrainer(BaseTrainer):
     Args:
         train_dataloader (torch.utils.data.DataLoader):
             Dataloader which iterates over the training set.
+        training_targets (list[TargetType]):
+            The target properties to use for training. For example :code:`["energy", "forces"]`.
+        l2_penalty (float or list[float]):
+            Regularization parameter for the kernel ridge problem. If multiple parameters
+            are specified, a separate model will be solved for each. This allows to
+            perform a grid-search for the best parameter.
+        target_weight (dict[TargetType, float | list[float]]):
+            Specify the relative weights of different target-types. Default value for
+            targets without a specified weight is 1.0. Weights are all normalized to sum to
+            one. As with ``l2_penalty``, specify a list of parameters to train a separate
+            model for each. For example :code:`{"forces": [0.1, 0.5, 0.9]}`.
         random_features_normalization (Literal["leading_eig"] | None):
             How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
         log_dir (Path | None):
@@ -57,13 +68,18 @@ class RandomFeaturesTrainer(BaseTrainer):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
             the ``evaluate()`` path on training data. Defaults to True.
+
+    Note:
+        The ``target_weight`` and ``l2_penalty`` can be used to specify a grid-search over
+        solver parameters. Take into account that the size of this grid can become large if
+        several target weights are specified.
     """
 
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
-        l2_penalty: float | list[float],
         training_targets: list[TargetType],
+        l2_penalty: float | list[float],
         target_weight: Mapping[TargetType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
@@ -116,21 +132,10 @@ class RandomFeaturesTrainer(BaseTrainer):
 
         Args:
             model (FrankenPotential): The model which defines GNN and random features.
-            solver_params (dict): Parameters for the solver which actually
-                performs the fit. This argument allows to specify multiple parameters,
-                for each of which we will perform a fit. For example, passing
-                ``{"l2_penalty": [1e-6, 1e-4], "force_weight": [0.5]}``
-                will result in two different models, one with :code:`l2_penalty=1e-6, force_weight=0.5`
-                and one with :code:`l2_penalty=1e-4, force_weight=0.5`. This way of specifying solver
-                parameters allows to easily perform a grid-search.
 
         Returns:
             tuple[LogCollection, torch.Tensor]:
                 The fitting logs, together with the learned weights.
-
-        Note:
-            More information about the available solver parameters can be found under the
-            ``solve()`` method.
         """
         self.patch_e3nn()
 
