@@ -532,12 +532,6 @@ def build_parser(return_groups: bool = False):
         action="store_true",
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
     )
-    # parser.add_argument(
-    #     "--metrics",
-    #     nargs="+",
-    #     default=DEFAULT_AUTOTUNE_METRICS.copy(),
-    #     help=get_field_docstring(AutotuneConfig, "metrics"),
-    # )
     parser.add_argument(
         "--best-model-selection",
         nargs="+",

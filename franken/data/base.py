@@ -224,7 +224,6 @@ STRESS_TARGET_KEY: TargetType = "stress"
 
 
 def is_target_key(s: str):
-    print(f"{get_args(TargetType)=}")
     return s in get_args(TargetType)
 
 

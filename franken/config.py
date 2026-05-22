@@ -333,15 +333,6 @@ class SolverConfig:
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
 
-DEFAULT_AUTOTUNE_METRICS = [
-    "energy_MAE",
-    "forces_MAE",
-    "energy_RMSE",
-    "forces_RMSE",
-    "forces_MAE_species",
-    "forces_cosim",
-]
-
 DEFAULT_BEST_MODEL_SELECTION = [
     "energy_MAE",
     "forces_MAE",
@@ -396,17 +387,9 @@ class AutotuneConfig:
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
-    # metrics: list[str] = field(default_factory=lambda: DEFAULT_AUTOTUNE_METRICS.copy())  # TODO: Remove?
-    # """Metrics to compute during evaluation.
-
-    # Options include ``energy_MAE``, ``forces_MAE``, ``energy_RMSE``,
-    # ``forces_RMSE``, ``forces_MAE_species``, ``forces_RMSE_species``,
-    # and ``forces_cosim``.
-    # """
-
     best_model_selection: list[str] = field(
         default_factory=lambda: DEFAULT_BEST_MODEL_SELECTION.copy()
-    )  # TODO: remove?
+    )
     """Metrics used to select the best model among trials. This does not affect the training loss."""
 
     scale_by_species: bool = True

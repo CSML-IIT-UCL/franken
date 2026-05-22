@@ -29,6 +29,7 @@ from franken.data.base import (
     TargetType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
+from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
@@ -147,24 +148,23 @@ def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) 
         [DataSplit.VALIDATION, DataSplit.TRAIN],
     )
     forces_error = _get_first_available_metric(
-        [
-            "forces_MAE",
-            "forces_MAE_species_average",
-            "forces_RMSE",
-            "forces_RMSE_species_average",
-        ],
+        ["forces_MAE", "forces_RMSE"],
+        [DataSplit.VALIDATION, DataSplit.TRAIN],
+    )
+    stress_error = _get_first_available_metric(
+        ["stress_MAE", "stress_RMSE"],
         [DataSplit.VALIDATION, DataSplit.TRAIN],
     )
 
+    hp_summary += f" Best trial {current_best.trial_id}"
     if energy_error is None:
         energy_error = float("nan")
+    hp_summary += f" (energy {energy_error:.2f} meV/atom)"
     if forces_error is None:
         forces_error = float("nan")
-
-    hp_summary += (
-        f" Best trial {current_best.trial_id} (energy {energy_error:.2f} meV/atom - "
-        f"forces {forces_error:.1f} meV/Ang)"
-    )
+    hp_summary += f" (forces {forces_error:.2f} meV/Ang)"
+    if stress_error is not None:
+        hp_summary += f" (stress {stress_error:.2f} meV/Ang)"
     return hp_summary
 
 
@@ -404,7 +404,11 @@ def autotune(cfg: AutotuneConfig):
 
         solver_l2, solver_weights = create_solver_hpsearch_grid(cfg.solver)
 
-        trainer = RandomFeaturesTrainer(
+        trainer_cls = RandomFeaturesTrainer
+        if len(cfg.train_targets) == 2:
+            trainer_cls = LowMemRandomFeaturesTrainer
+
+        trainer = trainer_cls(
             train_dataloader=loaders["train"],
             l2_penalty=solver_l2,
             training_targets=cfg.train_targets,
