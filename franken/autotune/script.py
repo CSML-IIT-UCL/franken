@@ -29,14 +29,16 @@ from franken.data.base import (
     TargetType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
-from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
-from franken.trainers.rf_trainer import RandomFeaturesTrainer
+from franken.trainers import (
+    LowMemRandomFeaturesTrainer,
+    RandomFeaturesTrainer,
+    BaseTrainer,
+)
+from franken.trainers.log_utils import DataSplit, LogEntry
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-from franken.trainers import BaseTrainer
-from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.utils.misc import (
     garbage_collection_cuda,
     get_device_name,
