@@ -178,7 +178,7 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
         self,
         base_model: torch.nn.Module,
         gnn_backbone_id,
-        descriptor_features: Literal["node", "node+edge"] = "node",
+        descriptor_features: Literal["node", "node+edge"] = "node+edge",
     ):
         super().__init__()
         self.base_model = self.get_pet_model(base_model)
