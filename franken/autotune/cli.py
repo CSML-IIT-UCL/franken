@@ -387,6 +387,11 @@ def get_arg_groups():
                     Argument.from_dataclass(
                         PETBackboneConfig, "path_or_id", "path-or-id"
                     ),
+                    Argument.from_dataclass(
+                        PETBackboneConfig,
+                        "descriptor_features",
+                        "descriptor-features",
+                    ),
                 ],
             ),
             MutuallyExclusiveArgumentGroup(

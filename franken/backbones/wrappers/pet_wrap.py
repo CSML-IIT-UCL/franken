@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 import warnings
 
 import metatrain.pet
@@ -174,10 +174,21 @@ def systems_to_batch(
 
 
 class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
-    def __init__(self, base_model: torch.nn.Module, gnn_backbone_id):
+    def __init__(
+        self,
+        base_model: torch.nn.Module,
+        gnn_backbone_id,
+        descriptor_features: Literal["node", "node+edge"] = "node",
+    ):
         super().__init__()
         self.base_model = self.get_pet_model(base_model)
         self.gnn_backbone_id = gnn_backbone_id
+        if descriptor_features not in ("node", "node+edge"):
+            raise ValueError(
+                "Unknown PET descriptor features "
+                f"{descriptor_features!r}. Expected 'node' or 'node+edge'."
+            )
+        self.descriptor_features = descriptor_features
         # Save useful hyperparameters here
         self.cutoff = self.base_model.cutoff
         self.num_layers = (
@@ -191,6 +202,7 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
     def init_args(self):
         return {
             "gnn_backbone_id": self.gnn_backbone_id,
+            "descriptor_features": self.descriptor_features,
         }
 
     def get_pet_model(self, base_model: torch.nn.Module) -> metatrain.pet.PET:
@@ -262,10 +274,19 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             featurizer_inputs,
             use_manual_attention=self.use_manual_attention,
         )  # pyright: ignore[reportCallIssue]
-        return node_features_list[0]
+
+        node_features = torch.cat(node_features_list, dim=1)
+        if self.descriptor_features == "node":
+            return node_features
+
+        edge_features = torch.cat(edge_features_list, dim=2)
+        edge_features = (edge_features * cutoff_factors[:, :, None]).sum(dim=1)
+        return torch.cat([node_features, edge_features], dim=1)
 
     def feature_dim(self) -> int:
-        dim: int = self.base_model.d_node
+        dim: int = self.base_model.num_readout_layers * self.base_model.d_node
+        if self.descriptor_features == "node+edge":
+            dim += self.base_model.num_readout_layers * self.base_model.d_pet
         return dim
 
     def cutoff_radius(self) -> float:
@@ -324,7 +345,10 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
 
     @staticmethod
     def load_from_checkpoint(
-        trainer_ckpt, gnn_backbone_id: str, map_location=None
+        trainer_ckpt,
+        gnn_backbone_id: str,
+        map_location=None,
+        descriptor_features: Literal["node", "node+edge"] = "node",
     ) -> "PETModelWrapper":
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -333,4 +357,8 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             )
             loaded_model = metatrain.utils.io.load_model(trainer_ckpt)
             loaded_model = loaded_model.export()  # no metadata?
-        return PETModelWrapper(base_model=loaded_model, gnn_backbone_id=gnn_backbone_id)
+        return PETModelWrapper(
+            base_model=loaded_model,
+            gnn_backbone_id=gnn_backbone_id,
+            descriptor_features=descriptor_features,
+        )

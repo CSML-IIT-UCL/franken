@@ -6,11 +6,22 @@ pytest.importorskip("metatrain.pet")
 pytest.importorskip("vesin.metatomic")
 
 from franken.backbones.utils import load_checkpoint
-from franken.config import PETBackboneConfig
+from franken.config import BackboneConfig, PETBackboneConfig
 from franken.data.base import Configuration
 from franken.data.dataset import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.backbones.wrappers.pet_wrap import systems_to_batch
+
+
+def get_pet_test_config(gnn_cfg: PETBackboneConfig) -> Configuration:
+    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+    dataset = FrankenAtomsDataset(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_cfg,
+    )
+    data, _ = dataset[0]
+    return data
 
 
 def test_batched_inference():
@@ -129,3 +140,39 @@ def test_pet_systems_to_batch_accepts_precomputed_cartesian_shifts() -> None:
 
     for a, b in zip(out_from_unit, out_from_cart):
         torch.testing.assert_close(a, b, rtol=1e-6, atol=1e-6)
+
+
+def test_pet_backbone_config_roundtrip() -> None:
+    cfg = PETBackboneConfig(
+        path_or_id="PET_MAD/xs_1.5",
+        descriptor_features="node+edge",
+    )
+    assert BackboneConfig.from_ckpt(cfg.to_ckpt()) == cfg
+
+
+@pytest.mark.parametrize(
+    "descriptor_features",
+    [
+        "node",
+        "node+edge",
+    ],
+)
+def test_pet_descriptor_options(
+    descriptor_features: str,
+) -> None:
+    gnn_cfg = PETBackboneConfig(
+        path_or_id="PET_MAD/xs_1.5",
+        descriptor_features=descriptor_features,
+    )
+    pet_gnn = load_checkpoint(gnn_cfg)
+    data = get_pet_test_config(gnn_cfg)
+
+    features = pet_gnn.descriptors(data)
+
+    num_readout_layers = pet_gnn.base_model.num_readout_layers
+    expected_dim = num_readout_layers * pet_gnn.base_model.d_node
+    if descriptor_features == "node+edge":
+        expected_dim += num_readout_layers * pet_gnn.base_model.d_pet
+
+    assert features.shape[1] == expected_dim
+    assert pet_gnn.feature_dim() == expected_dim

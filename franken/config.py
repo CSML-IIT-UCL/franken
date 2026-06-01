@@ -236,6 +236,8 @@ class SevennBackboneConfig(BackboneConfig):
 @dataclass(slots=True)
 class PETBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "pet"
+    descriptor_features: Literal["node", "node+edge"] = "node"
+    """Which PET features to expose as Franken descriptors."""
 
 
 @dataclass
