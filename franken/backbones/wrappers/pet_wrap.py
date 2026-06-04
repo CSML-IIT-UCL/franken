@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Tuple
+from typing import List, Optional, Tuple
 import warnings
 
 import metatrain.pet
@@ -174,11 +174,7 @@ def systems_to_batch(
 
 
 class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
-    def __init__(
-        self,
-        base_model: torch.nn.Module,
-        gnn_backbone_id
-    ):
+    def __init__(self, base_model: torch.nn.Module, gnn_backbone_id):
         super().__init__()
         self.base_model = self.get_pet_model(base_model)
         self.gnn_backbone_id = gnn_backbone_id
@@ -273,8 +269,8 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
         return torch.cat([node_features, edge_features], dim=1)
 
     def feature_dim(self) -> int:
-        dim: int = self.base_model.num_readout_layers * self.base_model.d_node #nodes
-        dim += self.base_model.num_readout_layers * self.base_model.d_pet # edges
+        dim: int = self.base_model.num_readout_layers * self.base_model.d_node  # nodes
+        dim += self.base_model.num_readout_layers * self.base_model.d_pet  # edges
         return dim
 
     def cutoff_radius(self) -> float:
@@ -333,9 +329,7 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
 
     @staticmethod
     def load_from_checkpoint(
-        trainer_ckpt,
-        gnn_backbone_id: str,
-        map_location=None
+        trainer_ckpt, gnn_backbone_id: str, map_location=None
     ) -> "PETModelWrapper":
         with warnings.catch_warnings():
             warnings.filterwarnings(
