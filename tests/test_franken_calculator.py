@@ -64,7 +64,7 @@ GNN_CONFIGS = [
 
 EXPECTED_ENERGIES = {
     "mace_mp/small": -0.614428,
-    "PET_MAD/xs_1.5": 0.6831,
+    "PET_MAD/xs_1.5": -1.19013,
 }
 
 def init_md(calc):

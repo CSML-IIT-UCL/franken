@@ -262,10 +262,15 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             featurizer_inputs,
             use_manual_attention=self.use_manual_attention,
         )  # pyright: ignore[reportCallIssue]
-        return node_features_list[0]
+
+        node_features = torch.cat(node_features_list, dim=1)
+        edge_features = torch.cat(edge_features_list, dim=2)
+        edge_features = (edge_features * cutoff_factors[:, :, None]).sum(dim=1)
+        return torch.cat([node_features, edge_features], dim=1)
 
     def feature_dim(self) -> int:
-        dim: int = self.base_model.d_node
+        dim: int = self.base_model.num_readout_layers * self.base_model.d_node  # nodes
+        dim += self.base_model.num_readout_layers * self.base_model.d_pet  # edges
         return dim
 
     def cutoff_radius(self) -> float:
@@ -333,4 +338,7 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             )
             loaded_model = metatrain.utils.io.load_model(trainer_ckpt)
             loaded_model = loaded_model.export()  # no metadata?
-        return PETModelWrapper(base_model=loaded_model, gnn_backbone_id=gnn_backbone_id)
+        return PETModelWrapper(
+            base_model=loaded_model,
+            gnn_backbone_id=gnn_backbone_id,
+        )
