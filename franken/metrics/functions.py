@@ -172,7 +172,7 @@ class PerSpeciesMAEMetric(BaseMetric):
                 n_models, self.Z_MAX + 1, device=self.device, dtype=self.dtype
             )
         self.buffer.scatter_add_(
-            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error
+            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error.to(self.dtype)
         )
         self.samples_counter.scatter_add_(
             dim=0,
@@ -226,7 +226,7 @@ class PerSpeciesRMSEMetric(BaseMetric):
                 n_models, self.Z_MAX + 1, device=self.device, dtype=self.dtype
             )
         self.buffer.scatter_add_(
-            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error
+            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error.to(self.dtype)
         )
         self.samples_counter.scatter_add_(
             dim=0,
