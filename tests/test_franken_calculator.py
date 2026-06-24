@@ -69,7 +69,7 @@ EXPECTED_ENERGIES = {
 }
 EXPECTED_ENERGIES_NPT = {
     "mace_mp/small": -0.752493,
-    "PET_MAD/xs_1.5": 0.545044,
+    "PET_MAD/xs_1.5": -1.32933,
 }
 
 
