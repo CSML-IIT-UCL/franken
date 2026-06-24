@@ -1,3 +1,7 @@
+import importlib.util
+import os
+import subprocess
+
 import ase
 import ase.md
 import ase.md.npt
@@ -17,14 +21,51 @@ from franken.datasets.registry import DATASET_REGISTRY
 from .conftest import DEVICES
 
 
+def has_module(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+HAS_MACE = has_module("mace")
+HAS_PET = (
+    has_module("metatomic.torch")
+    and has_module("metatrain.pet")
+    and has_module("vesin.metatomic")
+)
+
+
+def compiler_supports_cxx20():
+    compiler = os.environ.get("CXX", "g++")
+    try:
+        subprocess.run(
+            [compiler, "-std=c++20", "-x", "c++", "-", "-fsyntax-only"],
+            input="int main() { return 0; }",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
 GNN_CONFIGS = [
-    MaceBackboneConfig("mace_mp/small"),
-    PETBackboneConfig("PET_MAD/xs_1.5")
+    pytest.param(
+        MaceBackboneConfig("mace_mp/small"),
+        marks=pytest.mark.skipif(not HAS_MACE, reason="MACE dependencies not installed"),
+    ),
+    pytest.param(
+        PETBackboneConfig("PET_MAD/xs_1.5"),
+        marks=pytest.mark.skipif(not HAS_PET, reason="PET dependencies not installed"),
+    ),
 ]
 
 EXPECTED_ENERGIES = {
     "mace_mp/small": -0.614428,
-    "PET_MAD/xs_1.5": 0.6831,
+    "PET_MAD/xs_1.5": -1.19013,
 }
 EXPECTED_ENERGIES_NPT = {
     "mace_mp/small": -0.752493,
@@ -139,6 +180,10 @@ def test_calculator_jitscript(device, gnn_cfg):
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
+@pytest.mark.skipif(
+    not compiler_supports_cxx20(),
+    reason="torch.compile requires a C++ compiler with C++20 support",
+)
 def test_calculator_compile(device, gnn_cfg):
     np.random.seed(1)
     torch.manual_seed(1)

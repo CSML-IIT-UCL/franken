@@ -19,7 +19,6 @@ import torch
 
 from franken.autotune import autotune
 from franken.calculators.ase_calc import FrankenCalculator
-from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
 from franken.config import (
     BackboneConfig, DatasetConfig, 
     MultiscaleGaussianRFConfig, SolverConfig, HPSearchConfig, 
@@ -143,6 +142,8 @@ def batched_throughput_torchsim(
 ):
     # Test the througput of torch-sim batched model
     import torch_sim.state
+    from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
+
     if warmup_steps >= num_steps:
         raise ValueError("warmup steps invalid")
     

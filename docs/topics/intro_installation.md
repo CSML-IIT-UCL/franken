@@ -9,6 +9,7 @@ The basic installation comes bare-bones without any GNN backbone installed. You 
 ```bash
 pip install franken[cuda,mace]
 pip install franken[cuda,sevenn]
+pip install franken[cuda,pet]
 ```
 In more detail:
  - the `cuda` qualifier installs dependencies which are only relevant on GPU-enabled environments and can be omitted.
@@ -36,6 +37,11 @@ or directly install franken with mace support (`pip install franken[cuda,mace]`)
 
 In addition to MACE-MP0 trained on the materials project dataset, Franken also supports the [`MACE-OFF` models](https://arxiv.org/abs/2312.15211) for organic chemistry.
 
+
+### PET
+
+Franken supports [UPET](https://github.com/lab-cosmo/upet/tree/main) models through the Metatomic/Metatrain ecosystem.
+To use PET models as a backbone for `franken`, install the required dependencies with `pip install franken[cuda,pet]` or follow the instructions on [metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation.
 
 ### SevenNet
 

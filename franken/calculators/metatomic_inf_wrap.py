@@ -165,7 +165,10 @@ class MetatomicInferenceWrapper(torch.nn.Module):
 
 
 def create_metatomic(
-    model_path: str, rf_weight_id: int | None, dtype: torch.dtype
+    model_path: str,
+    rf_weight_id: int | None,
+    dtype: torch.dtype,
+    backbone_path_or_id: str | None = None,
 ) -> str:
     """Compile a franken model into a metatomic model wrapper
 
@@ -175,6 +178,10 @@ def create_metatomic(
         rf_weight_id (int | None):
             ID of the random feature weights. Can generally be left to ``None`` unless
             the checkpoint contains multiple trained models.
+        backbone_path_or_id (str | None):
+            Override the backbone checkpoint path stored in the
+            Franken checkpoint. This is useful when paths changed
+            since training.
 
     Returns:
         str: the path where the metatomic model was saved to.
@@ -183,6 +190,7 @@ def create_metatomic(
         model_path,
         map_location=torch.device("cpu"),
         rf_weight_id=rf_weight_id,
+        backbone_path_or_id=backbone_path_or_id,
     )
     if not isinstance(franken_model.gnn, MetatomicModelWrapper):
         raise NotImplementedError(
@@ -251,6 +259,15 @@ def build_arg_parser():
         help="Data-type in which the model will run",
         required=True,
     )
+    parser.add_argument(
+        "--backbone_path_or_id",
+        type=str,
+        help=(
+            "Override the backbone checkpoint path or registry ID stored in the "
+            "Franken checkpoint."
+        ),
+        default=None,
+    )
     return parser
 
 
@@ -258,7 +275,12 @@ def wrap_metatomic_cli():
     parser = build_arg_parser()
     args = parser.parse_args()
     dtype = torch.float32 if args.dtype == "float32" else torch.float64
-    create_metatomic(args.model_path, args.rf_weight_id, dtype)
+    create_metatomic(
+        args.model_path,
+        args.rf_weight_id,
+        dtype,
+        args.backbone_path_or_id,
+    )
 
 
 if __name__ == "__main__":

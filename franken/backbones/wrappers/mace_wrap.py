@@ -1,17 +1,19 @@
-from typing import Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, Final, List, Optional, Tuple
 import mace
 from packaging.version import Version
 
 import torch
-import metatomic.torch
+from mace.data.neighborhood import get_neighborhood
 from mace.modules.models import MACE
 from mace.modules.utils import get_edge_vectors_and_lengths
-from mace.data.neighborhood import get_neighborhood
 from e3nn.util.jit import compile_mode
 from e3nn import o3
 
 from franken.data import Configuration
 from franken.utils.misc import torch_load_maybejit
+
+if TYPE_CHECKING:
+    import metatomic.torch
 
 
 def undo_script_mace(base: torch.jit.ScriptModule) -> MACE:
@@ -352,7 +354,11 @@ class FrankenMACE(torch.nn.Module):
     def supported_atomic_types(self) -> torch.Tensor:
         return self.atomic_numbers  # pyright: ignore[reportReturnType]
 
-    def requested_neighbor_lists(self) -> List[metatomic.torch.NeighborListOptions]:
+    def requested_neighbor_lists(
+        self,
+    ) -> List["metatomic.torch.NeighborListOptions"]:
+        import metatomic.torch
+
         return [
             metatomic.torch.NeighborListOptions(
                 cutoff=self.cutoff_radius(), full_list=True, strict=True
