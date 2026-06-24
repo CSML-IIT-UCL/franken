@@ -289,5 +289,6 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
         target = Target(
             energy=energy,
             forces=torch.Tensor(self.ase_atoms[idx].get_forces(apply_constraint=False)),
+            stress=torch.Tensor(self.ase_atoms[idx].get_stress(apply_constraint=False)),
         )
         return config, target
