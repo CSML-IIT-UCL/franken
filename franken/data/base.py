@@ -300,7 +300,7 @@ class Target:
             stress=tt_dict.get(STRESS_TARGET_KEY),
         )
 
-    def iter_individual_systems(self, data: Configuration) -> Generator["Target"]:
+    def iter_individual_systems(self, data: Configuration) -> Generator["Target", None, None]:
         if data.batch_ids is None:
             yield self
         else:
