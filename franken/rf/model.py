@@ -329,6 +329,17 @@ class FrankenPotential(torch.nn.Module):
         return random_features.sum(0), random_features
 
     @torch.jit.unused
+    @torch.no_grad
+    def atomic_feature_map(self, data: Configuration) -> torch.Tensor:
+        """Compute unaggregated per-atom random-feature rows for a configuration."""
+        gnn_descriptors = self.gnn.descriptors(data)
+        normalized_descriptors = self.input_scaler(
+            gnn_descriptors,
+            atomic_numbers=data.atomic_numbers,
+        )
+        return self.rf.atomic_feature_map(normalized_descriptors)
+
+    @torch.jit.unused
     def grad_feature_map(
         self,
         data: Configuration,

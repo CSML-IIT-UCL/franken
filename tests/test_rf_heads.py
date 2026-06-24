@@ -129,6 +129,21 @@ class TestEdgeCaseInputs:
 
 
 class TestScatterSum:
+    @pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+    def test_atomic_feature_map_matches_feature_map(self, rf_type):
+        torch.manual_seed(1)
+        rf = init_rf(rf_type, input_dim=8)
+        data = torch.randn(10, 8)
+        atomic_nums = torch.randint(1, 100, (10,))
+
+        atomic_fmap = rf.atomic_feature_map(data)
+        fmap = rf.feature_map(data, atomic_numbers=atomic_nums)
+
+        torch.testing.assert_close(
+            rf.species_scatter_sum(atomic_fmap, atomic_numbers=atomic_nums),
+            fmap,
+        )
+
     @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
     def test_batched_simple(self, rf_type):
         torch.manual_seed(1)
