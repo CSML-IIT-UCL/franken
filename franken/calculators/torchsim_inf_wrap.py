@@ -145,8 +145,6 @@ else:
             if self.compute_stress:
                 targets.append(STRESS_TARGET_KEY)
             out = self.model(targets, data, weights=None, add_energy_shift=True)
-            for k, v in out.items():
-                print(f"{k}: {v.shape=}")
             results: dict[str, torch.Tensor] = {
                 "energy": out[ENERGY_TARGET_KEY].detach()
             }

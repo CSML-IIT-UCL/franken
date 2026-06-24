@@ -2,10 +2,13 @@
 Test the model conversion to LAMMPS (essentially testing torch-scriptability, not LAMMPS directly)
 """
 
+import importlib.util
 import os
 
 import pytest
 import torch
+
+pytest.importorskip("mace")
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.backbones.wrappers.mace_wrap import atom_numbers_to_node_attrs
@@ -26,10 +29,33 @@ RF_PARAMETRIZE = [
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
 
+def has_module(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+HAS_PET = (
+    has_module("metatomic.torch")
+    and has_module("metatrain.pet")
+    and has_module("vesin.metatomic")
+)
+
+BACKBONES = [
+    pytest.param(
+        ("pet", "PET_OMat/xs_1.0"),
+        marks=pytest.mark.skipif(not HAS_PET, reason="PET dependencies not installed"),
+    ),
+    pytest.param(
+        ("mace", "mace_mp/small"),
+    ),
+]
+
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
+@pytest.mark.parametrize("backbone", BACKBONES)
 def test_wrap_compile(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
     gnn_cfg = BackboneConfig.from_ckpt(
@@ -118,7 +144,7 @@ def test_wrap_compile(rf_cfg, device, backbone):
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
+@pytest.mark.parametrize("backbone", BACKBONES)
 def test_wrap_asemd(rf_cfg, device, backbone):
     unpatch_e3nn()  # needed in case some previous test ran the patching code
     gnn_cfg = BackboneConfig.from_ckpt(

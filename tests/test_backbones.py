@@ -17,9 +17,20 @@ from franken.rf.model import FrankenPotential
 from franken.utils.misc import no_jit
 
 # Check availability of backbones
-HAS_MACE = importlib.util.find_spec("mace") is not None
-HAS_SEVENN = importlib.util.find_spec("sevenn") is not None
-HAS_UPET = True
+def has_module(name):
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+HAS_MACE = has_module("mace")
+HAS_SEVENN = has_module("sevenn")
+HAS_UPET = (
+    has_module("metatomic.torch")
+    and has_module("metatrain.pet")
+    and has_module("vesin.metatomic")
+)
 
 # Build parametrized model list with skip marks when deps are missing
 models = []
@@ -29,7 +40,11 @@ for name in REGISTRY.keys():
     if name in {"PET_OMat/xl_1.0", "PET_OMat/l_1.0", "mace_off/large", "mace_omol/0_4M", "mace_mp/large-0b2", "mace_mp/large"}:
         marks.append(pytest.mark.skip(reason=f"{name} requires too large a model"))
         continue
-    if (kind == "mace" and not HAS_MACE) or (kind == "sevenn" and not HAS_SEVENN):
+    if (
+        (kind == "mace" and not HAS_MACE)
+        or (kind == "sevenn" and not HAS_SEVENN)
+        or (kind == "pet" and not HAS_UPET)
+    ):
         marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
     elif kind == "mace":
         marks.append(pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True))

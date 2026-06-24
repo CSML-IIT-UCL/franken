@@ -126,7 +126,7 @@ class throughput(Generic[T]):
         self.total = total
         self.leave = leave
 
-    def __iter__(self) -> Generator[T]:
+    def __iter__(self) -> Generator[T, None, None]:
         if self.process_rank != 0:
             for obj in self.iterable:
                 yield obj

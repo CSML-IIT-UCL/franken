@@ -71,7 +71,8 @@ jobs:
           # On the other hand it depends on them publishing the wheels
           python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
           python -m pip install mace-torch
-          python -m pip install --requirement .github/req-dev.txt  # installs torch-sim
+          python -m pip install torch-sim-atomistic
+          python -m pip install metatomic-torch metatrain
 
       - name: Install package
         # conda setup requires this special shell

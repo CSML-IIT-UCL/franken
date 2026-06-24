@@ -2,6 +2,7 @@
 Test the model conversion to LAMMPS (essentially testing torch-scriptability, not LAMMPS directly)
 """
 
+import importlib.util
 import os
 import pytest
 import ase
@@ -10,8 +11,17 @@ import ase.build
 import ase.units
 import numpy as np
 import torch
-from metatomic.torch import load_atomistic_model
-from metatomic.torch.ase_calculator import MetatomicCalculator
+
+metatomic_torch = pytest.importorskip("metatomic.torch")
+metatomic_ase_calculator = pytest.importorskip("metatomic.torch.ase_calculator")
+pytest.importorskip("metatensor.torch")
+pytest.importorskip("metatrain")
+
+load_atomistic_model = metatomic_torch.load_atomistic_model
+MetatomicCalculator = metatomic_ase_calculator.MetatomicCalculator
+
+HAS_MACE = importlib.util.find_spec("mace") is not None
+HAS_PET = importlib.util.find_spec("metatrain.pet") is not None
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
 from franken.calculators.metatomic_inf_wrap import create_metatomic
@@ -30,9 +40,20 @@ RF_PARAMETRIZE = [
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
 
+BACKBONES = [
+    pytest.param(
+        ("pet", "PET_OMat/xs_1.0"),
+        marks=pytest.mark.skipif(not HAS_PET, reason="PET dependencies not installed"),
+    ),
+    pytest.param(
+        ("mace", "mace_mp/small"),
+        marks=pytest.mark.skipif(not HAS_MACE, reason="MACE dependencies not installed"),
+    ),
+]
+
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
+@pytest.mark.parametrize("backbone", BACKBONES)
 def test_preserves_info(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
     gnn_cfg = BackboneConfig.from_ckpt(
@@ -106,7 +127,7 @@ def test_preserves_info(rf_cfg, device, backbone):
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-@pytest.mark.parametrize("backbone", [("pet", "PET_OMat/xs_1.0"), ("mace", "mace_mp/small")])
+@pytest.mark.parametrize("backbone", BACKBONES)
 def test_calc_for_asemd(rf_cfg, device, dtype, backbone):
     gnn_cfg = BackboneConfig.from_ckpt(
         dict(family=backbone[0], path_or_id=backbone[1])
