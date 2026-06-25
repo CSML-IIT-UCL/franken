@@ -362,10 +362,10 @@ class RandomFeaturesTrainer(BaseTrainer):
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
                 if is_scalar_target(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
-                    coeffs[tgt_name].add_(fmap.view(-1), alpha=tgt_per_atom.item())
+                    coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
                 else:
                     covs[tgt_name].addmm_(fmap, fmap.T)
-                    coeffs[tgt_name].addmv_(fmap, tgt_per_atom.view(-1))
+                    coeffs[tgt_name].addmv_(fmap, tgt_per_atom.reshape(-1))
                 if self.save_fmaps:
                     self.fmaps[tgt_name].append(fmap)
         # Sync covariance matrices & coefficients

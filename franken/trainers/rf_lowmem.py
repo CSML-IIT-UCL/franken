@@ -118,12 +118,12 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
                 if is_scalar_target(tgt_name):
                     rank1_update(
-                        covariance, diags[j], fmap.view(-1), upper=cov_upper[j]
+                        covariance, diags[j], fmap.reshape(-1), upper=cov_upper[j]
                     )
-                    coeffs[j].add_(fmap.view(-1), alpha=tgt_per_atom.item())
+                    coeffs[j].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
                 else:
                     rankk_update(covariance, diags[j], fmap, upper=cov_upper[j])
-                    coeffs[j].addmv_(fmap, tgt_per_atom.view(-1))
+                    coeffs[j].addmv_(fmap, tgt_per_atom.reshape(-1))
                 if self.save_fmaps:
                     self.fmaps[tgt_name].append(fmap)
         # Sync covariance matrices & coefficients
