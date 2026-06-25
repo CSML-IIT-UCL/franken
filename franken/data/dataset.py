@@ -289,7 +289,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
             energy = energy - self.energy_shifts[idx]
         try:
             stress = torch.Tensor(
-                self.ase_atoms[idx].get_stress(apply_constraint=False)
+                self.ase_atoms[idx].get_stress(apply_constraint=False, voigt=False)
             )
         except PropertyNotImplementedError:
             stress = None
