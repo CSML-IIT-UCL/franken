@@ -383,7 +383,7 @@ class FrankenPotential(torch.nn.Module):
             out_f = out[franken.data.base.FORCES_TARGET_KEY]
             out[franken.data.base.FORCES_TARGET_KEY] = out_f.reshape(out_f.shape[0], -1)
         if franken.data.base.STRESS_TARGET_KEY in out:
-            # F, S, 3, 3 -> F, S*3*3
+            # F, S, 3, 3 -> F, S*6
             out_s = out[franken.data.base.STRESS_TARGET_KEY]
             out[franken.data.base.STRESS_TARGET_KEY] = out_s.reshape(out_s.shape[0], -1)
         return out
@@ -653,4 +653,16 @@ def virial_to_stress(virial: torch.Tensor, data: Configuration) -> torch.Tensor:
     volume = torch.linalg.det(cell).abs().unsqueeze(-1)
     stress = virial / volume.view(-1, 1, 1)
     stress = torch.where(torch.abs(stress) < 1e10, stress, torch.zeros_like(stress))
-    return -stress
+    stress = -stress
+    # Convert symmetric 3x3 stress tensor to Voigt 6-component vector
+    return torch.stack(
+        [
+            stress[..., 0, 0],
+            stress[..., 1, 1],
+            stress[..., 2, 2],
+            stress[..., 0, 1],
+            stress[..., 1, 2],
+            stress[..., 2, 0],
+        ],
+        dim=-1,
+    )
