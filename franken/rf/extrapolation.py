@@ -13,18 +13,20 @@ from franken.data import Configuration
 
 @dataclass
 class ActiveSet:
-    """Species-specific active random-feature rows and inverse factors.
+    """Active random-feature rows and inverse factors.
 
-    The active matrix for each species has shape ``[n_active, n_features]``. Its
-    inverse factor has shape ``[n_features, n_active]`` so that an atomic feature
-    row ``phi`` can be scored as ``phi @ inverse`` for both square and
-    underdetermined active sets.
+    The active matrices have shape ``[n_active, n_features]``. Each inverse
+    factor has shape ``[n_features, n_active]`` so that an atomic feature row
+    ``phi`` can be scored as ``phi @ inverse`` for both square and
+    underdetermined active sets. When ``per_species`` is false, key ``0`` stores
+    the global active set because atomic numbers are positive.
     """
 
     active_matrices: dict[int, torch.Tensor]
     inverse_matrices: dict[int, torch.Tensor]
     regularization: float = 1e-8
     selection_method: str = "maxvol"
+    per_species: bool = True
 
     @classmethod
     def from_matrices(
@@ -32,6 +34,7 @@ class ActiveSet:
         active_matrices: dict[int, torch.Tensor],
         regularization: float = 1e-8,
         selection_method: str = "maxvol",
+        per_species: bool = True,
     ) -> "ActiveSet":
         inverse_matrices = {
             species: ExtrapolationGrade.inverse_active_matrix(
@@ -44,6 +47,7 @@ class ActiveSet:
             inverse_matrices=inverse_matrices,
             regularization=regularization,
             selection_method=selection_method,
+            per_species=per_species,
         )
 
     @classmethod
@@ -60,6 +64,7 @@ class ActiveSet:
             inverse_matrices=data["inverse_matrices"],
             regularization=data.get("regularization", 1e-8),
             selection_method=data.get("selection_method", "maxvol"),
+            per_species=data.get("per_species", True),
         )
 
     def save(self, path: os.PathLike | str) -> None:
@@ -69,6 +74,7 @@ class ActiveSet:
                 "inverse_matrices": self.inverse_matrices,
                 "regularization": self.regularization,
                 "selection_method": self.selection_method,
+                "per_species": self.per_species,
             },
             path,
         )
@@ -89,6 +95,7 @@ class ActiveSet:
             },
             regularization=self.regularization,
             selection_method=self.selection_method,
+            per_species=self.per_species,
         )
 
     @property
@@ -295,8 +302,9 @@ class ExtrapolationGrade:
         selection_method: str = "maxvol",
         maxvol_tolerance: float = 1.01,
         maxvol_iters: int = 300,
+        per_species: bool = True,
     ) -> ActiveSet:
-        """Build a species-specific active set from precomputed atomic RF rows."""
+        """Build an active set from precomputed atomic RF rows."""
         if selection_method not in ("pivoted-qr", "maxvol"):
             raise ValueError(
                 f"Unknown active-row selection method: {selection_method}."
@@ -314,19 +322,19 @@ class ExtrapolationGrade:
             )
 
         active_matrices: dict[int, torch.Tensor] = {}
-        for atomic_number in torch.unique(atomic_numbers, sorted=True):
-            mask = atomic_numbers == atomic_number
-            species_rows = atomic_features[mask]
+        if not per_species:
+            # Atomic numbers are positive, so key 0 stores the global active set.
             n_active = min(
-                species_rows.shape[0],
-                max_rows if max_rows is not None else species_rows.shape[1],
+                atomic_features.shape[0],
+                max_rows if max_rows is not None else atomic_features.shape[1],
             )
             if (
                 selection_method == "maxvol"
-                and species_rows.shape[0] >= species_rows.shape[1]
+                and atomic_features.shape[0] >= atomic_features.shape[1]
+                and (max_rows is None or max_rows == atomic_features.shape[1])
             ):
                 selected = cls.select_active_rows(
-                    species_rows,
+                    atomic_features,
                     max_rows=max_rows,
                     method=selection_method,
                     maxvol_tolerance=maxvol_tolerance,
@@ -334,18 +342,46 @@ class ExtrapolationGrade:
                 )
             else:
                 selected = cls.select_active_rows(
-                    species_rows,
+                    atomic_features,
                     max_rows=n_active,
                     method="pivoted-qr",
                 )
-            active_matrices[int(atomic_number.item())] = (
-                species_rows[selected].detach().clone()
-            )
+            active_matrices[0] = atomic_features[selected].detach().clone()
+        else:
+            for atomic_number in torch.unique(atomic_numbers, sorted=True):
+                mask = atomic_numbers == atomic_number
+                species_rows = atomic_features[mask]
+                n_active = min(
+                    species_rows.shape[0],
+                    max_rows if max_rows is not None else species_rows.shape[1],
+                )
+                if (
+                    selection_method == "maxvol"
+                    and species_rows.shape[0] >= species_rows.shape[1]
+                    and (max_rows is None or max_rows == species_rows.shape[1])
+                ):
+                    selected = cls.select_active_rows(
+                        species_rows,
+                        max_rows=max_rows,
+                        method=selection_method,
+                        maxvol_tolerance=maxvol_tolerance,
+                        maxvol_iters=maxvol_iters,
+                    )
+                else:
+                    selected = cls.select_active_rows(
+                        species_rows,
+                        max_rows=n_active,
+                        method="pivoted-qr",
+                    )
+                active_matrices[int(atomic_number.item())] = (
+                    species_rows[selected].detach().clone()
+                )
 
         return ActiveSet.from_matrices(
             active_matrices,
             regularization=regularization,
             selection_method=selection_method,
+            per_species=per_species,
         )
 
     @classmethod
@@ -360,6 +396,7 @@ class ExtrapolationGrade:
         selection_method: str = "maxvol",
         maxvol_tolerance: float = 1.01,
         maxvol_iters: int = 300,
+        per_species: bool = True,
     ) -> ActiveSet:
         """Build an active set from a trained model and configurations."""
         if selection_method not in ("pivoted-qr", "maxvol"):
@@ -379,33 +416,41 @@ class ExtrapolationGrade:
             configs = data
 
         rows_by_species: dict[int, list[torch.Tensor]] = {}
+        all_rows: list[torch.Tensor] = []
         for config in configs:
             config = cls._as_configuration(config)
             if device is not None:
                 config = config.to(device)
             atomic_features = model.atomic_feature_map(config)
-            for atomic_number in torch.unique(config.atomic_numbers, sorted=True):
-                mask = config.atomic_numbers == atomic_number
-                rows_by_species.setdefault(int(atomic_number.item()), []).append(
-                    atomic_features[mask].detach().cpu()
-                )
+            if per_species:
+                for atomic_number in torch.unique(config.atomic_numbers, sorted=True):
+                    mask = config.atomic_numbers == atomic_number
+                    rows_by_species.setdefault(int(atomic_number.item()), []).append(
+                        atomic_features[mask].detach().cpu()
+                    )
+            else:
+                all_rows.append(atomic_features.detach().cpu())
 
-        if not rows_by_species:
+        if per_species and not rows_by_species:
+            raise ValueError("Cannot build an active set from no configurations.")
+        if not per_species and not all_rows:
             raise ValueError("Cannot build an active set from no configurations.")
 
         active_matrices: dict[int, torch.Tensor] = {}
-        for species, row_blocks in rows_by_species.items():
-            species_rows = torch.cat(row_blocks, dim=0)
+        if not per_species:
+            # Atomic numbers are positive, so key 0 stores the global active set.
+            rows = torch.cat(all_rows, dim=0)
             n_active = min(
-                species_rows.shape[0],
-                max_rows if max_rows is not None else species_rows.shape[1],
+                rows.shape[0],
+                max_rows if max_rows is not None else rows.shape[1],
             )
             if (
                 selection_method == "maxvol"
-                and species_rows.shape[0] >= species_rows.shape[1]
+                and rows.shape[0] >= rows.shape[1]
+                and (max_rows is None or max_rows == rows.shape[1])
             ):
                 selected = cls.select_active_rows(
-                    species_rows,
+                    rows,
                     max_rows=max_rows,
                     method=selection_method,
                     maxvol_tolerance=maxvol_tolerance,
@@ -413,16 +458,43 @@ class ExtrapolationGrade:
                 )
             else:
                 selected = cls.select_active_rows(
-                    species_rows,
+                    rows,
                     max_rows=n_active,
                     method="pivoted-qr",
                 )
-            active_matrices[species] = species_rows[selected].clone()
+            active_matrices[0] = rows[selected].clone()
+        else:
+            for species, row_blocks in rows_by_species.items():
+                species_rows = torch.cat(row_blocks, dim=0)
+                n_active = min(
+                    species_rows.shape[0],
+                    max_rows if max_rows is not None else species_rows.shape[1],
+                )
+                if (
+                    selection_method == "maxvol"
+                    and species_rows.shape[0] >= species_rows.shape[1]
+                    and (max_rows is None or max_rows == species_rows.shape[1])
+                ):
+                    selected = cls.select_active_rows(
+                        species_rows,
+                        max_rows=max_rows,
+                        method=selection_method,
+                        maxvol_tolerance=maxvol_tolerance,
+                        maxvol_iters=maxvol_iters,
+                    )
+                else:
+                    selected = cls.select_active_rows(
+                        species_rows,
+                        max_rows=n_active,
+                        method="pivoted-qr",
+                    )
+                active_matrices[species] = species_rows[selected].clone()
 
         return ActiveSet.from_matrices(
             active_matrices,
             regularization=regularization,
             selection_method=selection_method,
+            per_species=per_species,
         )
 
     @staticmethod
@@ -445,6 +517,17 @@ class ExtrapolationGrade:
             dtype=torch.promote_types(atomic_features.dtype, sample_inverse.dtype),
             device=atomic_features.device,
         )
+        if not self.active_set.per_species:
+            if 0 not in self.active_set.inverse_matrices:
+                raise ValueError("Missing global active set at key 0.")
+            active_inverse = self.active_set.inverse_matrices[0]
+            for idx, phi in enumerate(atomic_features):
+                atomic_grades[idx] = self.grade_atom(phi, active_inverse)
+            config_grade = torch.max(atomic_grades)
+            if return_atomic:
+                return config_grade, atomic_grades
+            return config_grade
+
         for idx, (phi, atomic_number) in enumerate(
             zip(atomic_features, atomic_numbers, strict=True)
         ):
