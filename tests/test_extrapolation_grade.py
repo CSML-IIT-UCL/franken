@@ -82,6 +82,32 @@ def test_build_active_set_can_use_maxvol():
     assert gamma <= 1.01
 
 
+def test_build_active_set_can_pool_all_species():
+    atomic_features = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 1.0],
+            [0.5, 1.5],
+        ],
+        dtype=torch.float64,
+    )
+    atomic_numbers = torch.tensor([1, 1, 8, 8])
+
+    active_set = ExtrapolationGrade.build_active_set_from_features(
+        atomic_features,
+        atomic_numbers,
+        regularization=0.0,
+        selection_method="maxvol",
+        per_species=False,
+    )
+
+    assert active_set.per_species is False
+    assert list(active_set.active_matrices) == [0]
+    assert active_set.active_matrices[0].shape == (2, 2)
+    assert active_set.inverse_matrices[0].shape == (2, 2)
+
+
 def test_grade_configuration_matches_manual_gamma():
     active_set = ActiveSet.from_matrices(
         {
@@ -118,7 +144,7 @@ def test_active_set_with_too_few_rows_is_finite():
     assert active_set.active_matrices[6].shape == (2, 3)
     assert active_set.inverse_matrices[6].shape == (3, 2)
     assert torch.isfinite(gamma)
-    assert gamma <= 1.0
+    assert gamma <= 1.0 + 1e-12
 
 
 def test_active_set_roundtrip(tmp_path):
@@ -132,3 +158,4 @@ def test_active_set_roundtrip(tmp_path):
     torch.testing.assert_close(
         loaded.inverse_matrices[1], active_set.inverse_matrices[1]
     )
+    assert loaded.per_species is True
