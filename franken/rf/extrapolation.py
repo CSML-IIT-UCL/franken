@@ -221,6 +221,10 @@ class ExtrapolationGrade:
         )
         n_rows, n_features = rows.shape
         if n_rows < n_features:
+            print(
+                "MaxVol: using pivoted-QR fallback "
+                f"(rows={n_rows}, features={n_features})."
+            )
             return ExtrapolationGrade._select_active_rows_pivoted_qr(
                 rows,
                 max_rows=n_rows,
@@ -236,18 +240,25 @@ class ExtrapolationGrade:
             return selected
 
         selected = selected.clone()
-        for _ in range(maxvol_iters):
+        converged = False
+        for iteration in range(maxvol_iters):
             active_matrix = rows_work[selected]
             active_inverse = torch.linalg.inv(active_matrix)
             coefficients = rows_work @ active_inverse
             abs_coefficients = torch.abs(coefficients)
             max_value, flat_idx = torch.max(abs_coefficients.reshape(-1), dim=0)
             if max_value <= maxvol_tolerance:
+                converged = True
                 break
 
             row_idx = int(flat_idx.item() // n_features)
             active_row_idx = int(flat_idx.item() % n_features)
             selected[active_row_idx] = row_idx
+
+        if converged:
+            print(f"MaxVol: converged after {iteration} iterations.")
+        else:  
+            print(f"MaxVol: stopped after {iteration} iterations. Max value: {max_value} is still larger than tolerance {maxvol_tolerance}.")
 
         return selected
 
@@ -298,7 +309,7 @@ class ExtrapolationGrade:
         atomic_features: torch.Tensor,
         atomic_numbers: torch.Tensor,
         max_rows: int | None = None,
-        regularization: float = 1e-8,
+        regularization: float = 0,
         selection_method: str = "maxvol",
         maxvol_tolerance: float = 1.01,
         maxvol_iters: int = 300,
@@ -323,7 +334,7 @@ class ExtrapolationGrade:
 
         active_matrices: dict[int, torch.Tensor] = {}
         if not per_species:
-            # Atomic numbers are positive, so key 0 stores the global active set.
+            # Key 0 stores the global active set.
             n_active = min(
                 atomic_features.shape[0],
                 max_rows if max_rows is not None else atomic_features.shape[1],
@@ -391,7 +402,7 @@ class ExtrapolationGrade:
         model: torch.nn.Module,
         data: Configuration | Iterable[Configuration | tuple],
         max_rows: int | None = None,
-        regularization: float = 1e-8,
+        regularization: float = 0,
         device: torch.device | str | None = None,
         selection_method: str = "maxvol",
         maxvol_tolerance: float = 1.01,
