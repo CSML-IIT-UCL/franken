@@ -18,6 +18,7 @@ from franken.config import (
     HPSearchConfig,
     DEFAULT_BEST_MODEL_SELECTION,
 )
+from franken.metrics import metric_registry
 from franken.data.base import (
     ENERGY_TARGET_KEY,
     FORCES_TARGET_KEY,
@@ -358,6 +359,13 @@ def get_arg_groups():
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
             ),
+            Argument.from_dataclass(
+                SolverConfig,
+                "stress_weight",
+                "stress-weight",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
         ],
     )
     dset_arg_group = ArgumentGroup(
@@ -583,6 +591,16 @@ def build_parser(return_groups: bool = False):
         default=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
         help=get_field_docstring(AutotuneConfig, "train_targets"),
     )
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        choices=metric_registry.available_metrics,
+        default=None,
+        help=(
+            "Evaluation metrics to compute. If omitted, all metrics available for "
+            "the requested train targets are computed."
+        ),
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -622,7 +640,7 @@ def parse_cli(argv):
         save_every_model=args.save_every_model,
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
-        # metrics=args.metrics,
+        metrics=args.metrics,
         best_model_selection=args.best_model_selection,
         scale_by_species=not args.global_scaling,
         jac_chunk_size=args.jac_chunk_size,

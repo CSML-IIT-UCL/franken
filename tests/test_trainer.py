@@ -332,6 +332,47 @@ class TestTrainer:
         with pytest.raises(RuntimeError, match="does not contain any values for stress."):
             covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
         
+    def test_get_metrics_default_metrics_for_train_targets(self, device):
+        trainer = self.trainer(device, torch.float32, training_targets=self.ESF_TGT)
+        metric_names = [metric.name for metric in trainer.get_metrics()]
+        assert "energy_MAE" in metric_names
+        assert "forces_MAE" in metric_names
+        assert "stress_MAE" in metric_names
+        assert "forces_MAE_species" in metric_names
+
+    def test_get_metrics_with_custom_metrics(self, device):
+        trainer = self.trainer(
+            device,
+            torch.float32,
+            training_targets=self.ESF_TGT,
+            metrics=["energy_MAE", "stress_MAE"],
+        )
+        metric_names = [metric.name for metric in trainer.get_metrics()]
+        assert metric_names == ["energy_MAE", "stress_MAE"]
+
+    def test_get_metrics_invalid_metric_raises(self, device):
+        with pytest.raises(ValueError, match="Unsupported metrics"):
+            self.trainer(
+                device,
+                torch.float32,
+                training_targets=self.ESF_TGT,
+                metrics=["energy_MAE", "invalid_metric"],
+            )
+
+    def test_solver_hps_includes_stress_weight(self, device):
+        trainer = self.trainer(
+            device,
+            torch.float32,
+            training_targets=self.ESF_TGT,
+            target_weight={
+                ENERGY_TARGET_KEY: [0.1],
+                FORCES_TARGET_KEY: [0.2],
+                STRESS_TARGET_KEY: [0.7],
+            },
+        )
+        assert "stress_weight" in trainer.solver_hps
+        assert trainer.solver_hps["stress_weight"] == [0.7]
+
 
 class TestSerializeBestModel:
     @pytest.fixture

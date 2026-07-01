@@ -87,6 +87,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         device: torch.device | str | int = "cuda:0",
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
+        metrics: list[str] | None = None,
     ):
         super().__init__(
             train_dataloader,
@@ -97,12 +98,14 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
         self.random_features_normalization = random_features_normalization
         self.save_fmaps = save_fmaps
+        self.metrics = metrics
         if len(training_targets) == 0:
             raise ValueError(
                 "Cannot initialize trainer with no targets. "
                 "Please pass a non-empty list as the `training_targets` parameter."
             )
         self.training_targets = training_targets
+        self._validate_metrics()
         self.l2_penalty = ensure_list(l2_penalty)
         self.target_weight = process_tgt_weights(target_weight, self.training_targets)
         self.solver_hps = dict(l2_penalty=self.l2_penalty) | {
@@ -209,11 +212,33 @@ class RandomFeaturesTrainer(BaseTrainer):
     def get_metrics(self) -> list[BaseMetric]:
         dev = self.device
         dt = self.buffer_dt
+        if self.metrics is None:
+            metric_names = [
+                metric
+                for tt in self.training_targets
+                for metric in metric_registry.available_metrics_for_target(tt)
+            ]
+        else:
+            metric_names = self.metrics
         return [
             metric_registry.init_metric(metric, device=dev, dtype=dt)
+            for metric in metric_names
+        ]
+
+    def _validate_metrics(self) -> None:
+        if self.metrics is None:
+            return
+        available = {
+            metric
             for tt in self.training_targets
             for metric in metric_registry.available_metrics_for_target(tt)
-        ]
+        }
+        unsupported = [metric for metric in self.metrics if metric not in available]
+        if unsupported:
+            raise ValueError(
+                f"Unsupported metrics for training targets {self.training_targets}: {unsupported}. "
+                f"Supported metrics are: {sorted(available)}"
+            )
 
     @no_jit()
     def evaluate(

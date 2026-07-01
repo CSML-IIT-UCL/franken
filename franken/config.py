@@ -392,6 +392,12 @@ class AutotuneConfig:
     )
     """Metrics used to select the best model among trials. This does not affect the training loss."""
 
+    metrics: list[str] | None = None
+    """Metrics to compute during evaluation.
+
+    If None, all metrics available for the requested `train_targets` are computed.
+    """
+
     scale_by_species: bool = True
     """how to scale the GNN features, whether globally (across species) or individually per species."""
 

@@ -14,6 +14,7 @@ import torch
 from franken.trainers.log_utils import LogCollection
 from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig
 from franken.calculators.ase_calc import FrankenCalculator
+from franken.autotune.cli import parse_cli
 from franken.autotune.script import init_loaders, run_autotune
 from franken.data import FrankenAtomsDataset
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
@@ -81,3 +82,38 @@ def test_integration(gnn_cfg, device, atomic_energies):
     finally:
         if temp_dir is not None:
             cleanup_dir(str(temp_dir))
+
+
+def test_parse_cli_supports_stress_weight_and_metrics():
+    cfg = parse_cli([
+        "--train-path",
+        "/tmp/train.xyz",
+        "--val-path",
+        "/tmp/val.xyz",
+        "--backbone",
+        "mace",
+        "--mace.path-or-id",
+        "mace_mp/small",
+        "--rf",
+        "gaussian",
+        "--gaussian.num-rf",
+        "128",
+        "--gaussian.length-scale",
+        "[1.,2.]",
+        "--train-targets",
+        "energy",
+        "forces",
+        "stress",
+        "--stress-weight",
+        "(0.1,0.9,2,linear)",
+        "--metrics",
+        "energy_MAE",
+        "forces_MAE",
+        "stress_MAE",
+        "--run-dir",
+        ".",
+    ])
+
+    assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+    assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
+    assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")

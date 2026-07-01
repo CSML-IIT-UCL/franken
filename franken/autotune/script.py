@@ -421,6 +421,7 @@ def autotune(cfg: AutotuneConfig):
             save_fmaps=cfg.save_fmaps,
             log_dir=run_dir,
             device=device,
+            metrics=cfg.metrics,
         )
 
         run_autotune(
