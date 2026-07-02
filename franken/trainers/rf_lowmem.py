@@ -43,6 +43,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         device: torch.device | str | int = "cuda:0",
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
+        metrics: list[str] | None = None,
     ):
         if len(training_targets) != 2:
             raise ValueError(
@@ -61,6 +62,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             device=device,
             dtype=dtype,
             save_fmaps=save_fmaps,
+            metrics=metrics,
         )
 
     @no_jit()
