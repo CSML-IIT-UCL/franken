@@ -113,13 +113,19 @@ def vasp_mlff_to_xyz_oneconfig(data):
     stress_values_2 = (
         stress_match_2.group(1).strip().split()[:3]
     )  # Take first three values for XY YZ ZX
-    xx, yy, zz = stress_values_1
-    xy, yz, zx = stress_values_2
+    stress_values_kbar = [float(x) for x in stress_values_1 + stress_values_2]
 
-    # Combine the two stress components into a single list
-    # stress_tensor = stress_values_1 + stress_values_2
-    # stress_tensor = ' '.join(stress_tensor)  # Convert to a single string
-    stress_tensor = f"{xx} {xy} {zx} {xy} {yy} {yz} {zx} {yz} {zz}"
+    # Convert stress from kbar (VASP output) to eV/Å^3, which is the internal
+    # stress unit expected by ASE/franken for extxyz stress tensors.
+    kbar_to_ev_per_ang3 = 1.0 / 1602.176634
+    stress_values = [v * kbar_to_ev_per_ang3 for v in stress_values_kbar]
+    xx, yy, zz, xy, yz, zx = stress_values
+
+    stress_tensor = (
+        f"{xx:.8f} {xy:.8f} {zx:.8f} "
+        f"{xy:.8f} {yy:.8f} {yz:.8f} "
+        f"{zx:.8f} {yz:.8f} {zz:.8f}"
+    )
 
     # Create the extended XYZ content for this configuration
     xyz_content = []
