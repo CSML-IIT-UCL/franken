@@ -160,7 +160,7 @@ class PerSpeciesMAEMetric(BaseMetric):
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         check_single_system(data)
         tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
-        atomic_numbers = data.atomic_numbers  # A
+        atomic_numbers = data.atomic_numbers.to(dtype=torch.int64)  # A
         assert atomic_numbers.max() <= self.Z_MAX
         n_models = pred_t.shape[0]
         error = torch.abs(tgt_t[None, ...] - pred_t)  # N, A*?

@@ -241,7 +241,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
 
         pos_pt = torch.tensor(pos, dtype=dtype)
         pbc_pt = torch.tensor(pbc, dtype=torch.bool)
-        atomic_numbers_pt = torch.tensor(atomic_numbers, dtype=torch.int32)
+        atomic_numbers_pt = torch.tensor(atomic_numbers, dtype=torch.int64)
 
         cell_vectors_are_not_zero = np.any(cell != 0, axis=1)
         if not np.all(cell_vectors_are_not_zero == pbc):
