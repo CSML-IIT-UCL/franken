@@ -330,7 +330,7 @@ class StressMAE(MAEMetric):
     name: typing.ClassVar[str] = "stress_MAE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+        super().__init__({"inputs": "eV/ang^3", "outputs": "meV/ang^3"}, device, dtype)
 
 
 @metric_registry.register()
@@ -339,7 +339,7 @@ class StressRMSE(RMSEMetric):
     name: typing.ClassVar[str] = "stress_RMSE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+        super().__init__({"inputs": "eV/ang^3", "outputs": "meV/ang^3"}, device, dtype)
 
 
 def is_pareto_efficient(costs: np.ndarray) -> np.ndarray:

@@ -166,7 +166,7 @@ def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) 
         forces_error = float("nan")
     hp_summary += f" (forces {forces_error:.2f} meV/Ang)"
     if stress_error is not None:
-        hp_summary += f" (stress {stress_error:.2f} meV/Ang)"
+        hp_summary += f" (stress {stress_error:.2f} meV/Ang^3)"
     return hp_summary
 
 
