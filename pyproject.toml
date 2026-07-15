@@ -59,11 +59,15 @@ develop = [
 ]
 mace = ["mace-torch >= 0.3.10"]
 sevenn = ["sevenn ~= 0.11"]
-pet = ["metatomic-torch", 
-       "metatrain"]
+pet = [
+    "metatomic-torch", 
+    "metatrain >= 2026.3.1",
+]
 "torch-sim" = ["torch-sim-atomistic"]
-metatomic = ["metatomic-torch", 
-             "metatrain"]
+metatomic = [
+    "metatomic-torch", 
+    "metatrain >= 2026.3.1",
+]
 
 cuda = ["cupy"]
 docs = [
