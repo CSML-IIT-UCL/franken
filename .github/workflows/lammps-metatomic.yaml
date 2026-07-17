@@ -1,13 +1,11 @@
 name: LAMMPS
 
 on:
-  push:
-    branches:
-      - "main"
-  pull_request:
-    branches:
-      - "main"
-    types: [opened, reopened, synchronize]
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: 
+      - completed
   schedule:
     # Weekly tests run on main by default:
     #   Scheduled workflows run on the latest commit on the default or base branch.

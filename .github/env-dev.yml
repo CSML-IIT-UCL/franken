@@ -17,8 +17,8 @@ dependencies:
 - black
 - ruff
 - psutil
-- python-metatomic-torch
-- metatrain
+- metatensor-torch
+- metatrain>=2026.3.1
 - docstring_parser
 - packaging
 name: franken

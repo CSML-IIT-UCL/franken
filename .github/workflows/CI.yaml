@@ -72,7 +72,6 @@ jobs:
           python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
           python -m pip install mace-torch
           python -m pip install torch-sim-atomistic
-          python -m pip install "metatomic-torch" "metatrain>=2026.3.1"
 
       - name: Install package
         # conda setup requires this special shell
