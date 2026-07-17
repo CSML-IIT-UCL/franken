@@ -40,7 +40,7 @@ jobs:
 
       # More info on options: https://github.com/marketplace/actions/setup-micromamba
       - name: Create and setup mamba
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@v3
         with:
           # here we specify the environment like this instead of just installing with pip to make caching easier
           environment-file: .github/env-dev.yml
@@ -72,6 +72,8 @@ jobs:
           python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
           python -m pip install mace-torch
           python -m pip install torch-sim-atomistic
+          # conda metatrain is pinned to very specific pytorch versions (for no good reason).
+          python -m pip install metatrain>=2026.3.1
 
       - name: Install package
         # conda setup requires this special shell
