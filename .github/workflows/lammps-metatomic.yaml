@@ -17,41 +17,34 @@ jobs:
   test:
     name: Franken+LAMMPS (metatomic)
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Additional info about the build
         shell: bash
         run: |
           uname -a
           df -h
           ulimit -a
-
       # More info on options: https://github.com/marketplace/actions/setup-micromamba
       - name: Create and setup mamba 
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@v3
         with:
           environment-file: .github/env-dev.yml
           environment-name: train
-
       - name: Install franken
         shell: bash -l {0}
         run: |
           micromamba run -n train python -m pip install . --no-deps
           micromamba list -n train
-
       - name: Train franken model
         shell: bash -l {0}
         run: |
           micromamba run -n train bash tests/lammps/metatomic/train_and_compile.sh
-
       - name: Create lammps environment
         shell: bash -l {0}
         run: |
           micromamba create -y -n lammps -f .github/env-lammps-metatomic.yml
           micromamba list -n lammps
-
       - name: Run with lammps
         shell: bash -l {0}
         working-directory: tests/lammps/metatomic

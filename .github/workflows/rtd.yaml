@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create and setup mamba
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@v3
         with:
           # here we specify the environment like this instead of just installing with pip to make caching easier
           environment-file: .github/env-docs.yml
