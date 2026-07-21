@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ENV_NAME: lammps
-      PYTHON_VERSION: 3.12
-      PYTORCH_VERSION: 2.10
+      PYTHON_VERSION: "3.12"
+      PYTORCH_VERSION: "2.10"
       ENV_PREFIX: ~/micromamba
       PIP_CACHE_DIR: ~/.cache/pip
       CONDA_ARGS: -c metatensor -c conda-forge "lammps-metatomic=*=*nompi*"
