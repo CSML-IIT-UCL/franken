@@ -133,7 +133,13 @@ verify_environment() {
 
 gen_pip_reqs() {
     REQ_FILE=".github/reqs.txt"
-    echo "torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu" >> $REQ_FILE
+    TORCH_FILE=".github/torch_reqs.txt"
+    PYG_FILE=".github/pyg_reqs.txt"
+    # PyTorch
+    echo "-r ${TORCH_FILE}" >> $REQ_FILE
+    echo "--index-url https://download.pytorch.org/whl/cpu" >> $TORCH_FILE
+    echo "torch==${PYTORCH_VERSION}" >> $TORCH_FILE
+    # Standard
     echo "ase" >> $REQ_FILE
     echo "numpy" >> $REQ_FILE
     echo "omegaconf" >> $REQ_FILE
@@ -147,15 +153,18 @@ gen_pip_reqs() {
     echo "pre-commit" >> $REQ_FILE
     echo "black" >> $REQ_FILE
     echo "ruff" >> $REQ_FILE
-    echo "torch_geometric" >> $REQ_FILE
-    echo "pyg_lib --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
-    echo "torch_scatter --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
-    echo "torch_sparse --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
-    echo "torch_cluster --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
-    echo "torch_spline_conv --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
     echo "mace-torch" >> $REQ_FILE
     echo "torch-sim-atomistic" >> $REQ_FILE
     echo "metatrain>=2026.3.1" >> $REQ_FILE
+    # Torch Geometric
+    echo "torch_geometric" >> $REQ_FILE
+    echo "-r ${PYG_FILE}" >> $REQ_FILE
+    echo "--find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $PYG_FILE
+    echo "pyg_lib" >> $PYG_FILE
+    echo "torch_scatter" >> $PYG_FILE
+    echo "torch_sparse" >> $PYG_FILE
+    echo "torch_cluste" >> $PYG_FILE
+    echo "torch_spline_conv" >> $PYG_FILE
 }
 
 run_pip_installs() {
