@@ -19,9 +19,10 @@ concurrency:
 
 jobs:
   docs:
-    environment:
+    environment:  # for deployment to pages only!
       name: ghpg
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
       ENV_NAME: readthedocs
       PYTHON_VERSION: 3.12
       PYTORCH_VERSION: 2.10

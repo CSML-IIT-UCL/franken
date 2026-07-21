@@ -17,7 +17,7 @@ jobs:
   test:
     name: Franken+LAMMPS (metatomic)
     runs-on: ubuntu-latest
-    environment:
+    env:
       ENV_NAME: lammps
       PYTHON_VERSION: 3.12
       PYTORCH_VERSION: 2.10
