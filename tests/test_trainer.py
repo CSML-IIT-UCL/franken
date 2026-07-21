@@ -458,7 +458,8 @@ class TestSerializeBestModel:
                                 trainer.serialize_best_model(
                                     model=model,
                                     all_weights=all_weights,
-                                    split=DataSplit.VALIDATION
+                                    split=DataSplit.VALIDATION,
+                                    best_model_selection=["energy_MAE", "forces_MAE"],
                                 )
                             p3["save"].assert_not_called()
                             assert caplog.text == ""
@@ -471,7 +472,8 @@ class TestSerializeBestModel:
                                 trainer.serialize_best_model(
                                     model=model,
                                     all_weights=all_weights,
-                                    split=DataSplit.VALIDATION
+                                    split=DataSplit.VALIDATION,
+                                    best_model_selection=["energy_MAE", "forces_MAE"],
                                 )
                             p3["save"].assert_called_once()
                             assert "Identified new best model" in caplog.text
@@ -485,7 +487,8 @@ class TestSerializeBestModel:
                                 trainer.serialize_best_model(
                                     model=model,
                                     all_weights=all_weights,
-                                    split=DataSplit.VALIDATION
+                                    split=DataSplit.VALIDATION,
+                                    best_model_selection=["energy_MAE", "forces_MAE"],
                                 )
                             p3["save"].assert_called_once()
                             assert "Identified new best model" in caplog.text
@@ -520,7 +523,8 @@ class TestSerializeBestModel:
                             trainer.serialize_best_model(
                                 model=model,
                                 all_weights=all_weights,
-                                split=DataSplit.VALIDATION
+                                split=DataSplit.VALIDATION,
+                                best_model_selection=["energy_MAE", "forces_MAE"]
                             )
                             # check model saved with correct parameters.
                             assert p3["save"].call_args.args[1] == pathlib.Path("test_dir/best_ckpt.pt")

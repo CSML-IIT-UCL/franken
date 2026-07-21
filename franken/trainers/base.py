@@ -7,7 +7,7 @@ from typing import Tuple, Union
 import torch
 import torch.utils.data
 
-from franken.config import DEFAULT_BEST_MODEL_SELECTION, asdict_with_classvar
+from franken.config import asdict_with_classvar
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics, compute_dataset_statistics
 from franken.trainers.log_utils import (
@@ -127,8 +127,8 @@ class BaseTrainer(abc.ABC):
         model: FrankenPotential,
         log_collection: LogCollection,
         all_weights: torch.Tensor,
+        best_model_selection: list[str],
         best_model_split: DataSplit = DataSplit.TRAIN,
-        best_model_selection: list[str] | None = None,
     ):
         assert self.log_dir is not None, "Log directory is not set"
         model_hash_set = set(log.checkpoint_hash for log in log_collection)
@@ -157,12 +157,10 @@ class BaseTrainer(abc.ABC):
         self,
         model: FrankenPotential,
         all_weights: torch.Tensor,
+        best_model_selection: list[str],
         split: DataSplit = DataSplit.TRAIN,
-        best_model_selection: list[str] | None = None,
     ) -> None:
         assert self.log_dir is not None, "Log directory is not set"
-        if best_model_selection is None:
-            best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
         log_collection = LogCollection.from_json(self.log_dir / "log.json")
         best_model = log_collection.get_best_model(
             split=split, metrics_to_minimize=best_model_selection

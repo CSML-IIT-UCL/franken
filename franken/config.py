@@ -320,25 +320,53 @@ class SolverConfig:
 
     force_weight: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(
-            #start=-1, stop=2, num=10, scale="linear"
-            values = (0.01,0.02,0.05,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0,100.0,200.0,500.0,1000.0)
+            # start=-1, stop=2, num=10, scale="linear"
+            values=(
+                0.01,
+                0.02,
+                0.05,
+                0.1,
+                0.2,
+                0.5,
+                1.0,
+                2.0,
+                5.0,
+                10.0,
+                20.0,
+                50.0,
+                100.0,
+                200.0,
+                500.0,
+                1000.0,
+            )
         )
     )
     """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
 
     stress_weight: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(
-            #start=0.01, stop=0.99, num=10, scale="linear"
-            values = (0.01,0.02,0.05,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0,100.0,200.0,500.0,1000.0)
+            # start=0.01, stop=0.99, num=10, scale="linear"
+            values=(
+                0.01,
+                0.02,
+                0.05,
+                0.1,
+                0.2,
+                0.5,
+                1.0,
+                2.0,
+                5.0,
+                10.0,
+                20.0,
+                50.0,
+                100.0,
+                200.0,
+                500.0,
+                1000.0,
+            )
         )
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
-
-
-DEFAULT_BEST_MODEL_SELECTION = [
-    "energy_MAE",
-    "forces_MAE",
-]
 
 
 @dataclass
@@ -389,10 +417,12 @@ class AutotuneConfig:
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
-    best_model_selection: list[str] = field(
-        default_factory=lambda: DEFAULT_BEST_MODEL_SELECTION.copy()
-    )
-    """Metrics used to select the best model among trials. This does not affect the training loss."""
+    best_model_selection: list[str] = field(default_factory=lambda: [])
+    """Metrics used to select the best model among trials (does not affect the training loss).
+
+    Among the models on the Pareto frontier according to the chosen metrics, the one with the smallest norm will be chosen.
+    If the list is left empty, the MAE of all provided `train_targets` will be used as metrics.
+    """
 
     metrics: list[str] | None = None
     """Metrics to compute during evaluation.

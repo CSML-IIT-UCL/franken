@@ -16,7 +16,6 @@ from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
-    DEFAULT_BEST_MODEL_SELECTION,
     HPSearchConfig,
     RFConfig,
     SolverConfig,
@@ -32,7 +31,6 @@ from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers import (
     LowMemRandomFeaturesTrainer,
     RandomFeaturesTrainer,
-    BaseTrainer,
 )
 from franken.trainers.log_utils import DataSplit, LogEntry
 import franken.utils.distributed as dist_utils
@@ -220,13 +218,14 @@ def run_autotune(
     loaders: dict[str, torch.utils.data.DataLoader],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
-    trainer: BaseTrainer,
+    trainer: RandomFeaturesTrainer,
     best_model_selection: list[str] | None = None,
     eval_splits: list[str] | None = None,
     atomic_energies: dict[int, float] | None = None,
 ):
-    if best_model_selection is None:
-        best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
+    # default best model selection: MAE for all training targets.
+    if best_model_selection is None or len(best_model_selection) == 0:
+        best_model_selection = [f"{tgt}_MAE" for tgt in trainer.training_targets]
 
     current_best = BestTrial(None, None)  # type: ignore
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
@@ -262,8 +261,8 @@ def run_autotune(
                     model,
                     logs,
                     weights,
-                    split_for_best_model,
                     best_model_selection=best_model_selection,
+                    best_model_split=split_for_best_model,
                 )
         dist_utils.barrier()
 

@@ -11,7 +11,6 @@ import torch
 
 import franken.metrics
 import franken.utils.distributed as dist_utils
-from franken.config import DEFAULT_BEST_MODEL_SELECTION
 
 logger = logging.getLogger("franken")
 
@@ -279,7 +278,7 @@ class LogCollection:
 
     def get_best_model(
         self,
-        metrics_to_minimize: list[str] | None = None,
+        metrics_to_minimize: list[str],
         p: int = 1,
         split: DataSplit = DataSplit.TRAIN,
     ) -> LogEntry:
@@ -289,9 +288,6 @@ class LogCollection:
         by minimizing their ``p``-norm.
         The function returns a dictionary with information about the best model.
         """
-
-        if metrics_to_minimize is None:
-            metrics_to_minimize = DEFAULT_BEST_MODEL_SELECTION.copy()
         if len(metrics_to_minimize) == 0:
             raise ValueError(
                 "`metrics_to_minimize` (in best_model_selection) must contain at least one metric."

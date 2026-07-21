@@ -16,7 +16,6 @@ from franken.config import (
     SolverConfig,
     DatasetConfig,
     HPSearchConfig,
-    DEFAULT_BEST_MODEL_SELECTION,
 )
 from franken.metrics import metric_registry
 from franken.data.base import (
@@ -543,7 +542,7 @@ def build_parser(return_groups: bool = False):
     parser.add_argument(
         "--best-model-selection",
         nargs="+",
-        default=DEFAULT_BEST_MODEL_SELECTION.copy(),
+        default=[],
         help=get_field_docstring(AutotuneConfig, "best_model_selection"),
     )
     parser.add_argument(
