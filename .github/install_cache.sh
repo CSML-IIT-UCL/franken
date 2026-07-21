@@ -8,7 +8,7 @@ ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
 RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
-CACHE_FILE_KEY="pyproject.toml"
+CONDA_CREATE_ARGS=""
 export MAMBA_ROOT_PREFIX="$MICROMAMBA_DIR"
 
 # Parse command line arguments
@@ -32,6 +32,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --pip-cache-dir)
             PIP_CACHE_DIR="$2"
+            shift 2
+            ;;
+        --conda-create-args)
+            CONDA_CREATE_ARGS="$2"
             shift 2
             ;;
         --help)
@@ -59,12 +63,6 @@ echo "   PyTorch: ${PYTORCH_VERSION}"
 echo "   MicroMamba environment directory: ${MICROMAMBA_DIR}"
 echo "   Run pip install: ${RUN_PIP_INSTALL}"
 
-# Create environment fingerprint for cache validation
-generate_env_fingerprint() {
-    local fingerprint="py${PYTHON_VERSION}-torch${PYTORCH_VERSION}"
-    fingerprint="${fingerprint}-$(sha256sum ${CACHE_FILE_KEY} | cut -d' ' -f1 | head -c 8)"
-    echo "${fingerprint}"
-}
 
 # Function to install micromamba
 install_micromamba() {
@@ -90,13 +88,11 @@ install_micromamba() {
 
 create_environment() {
     echo "🛠 Creating environment '${ENV_NAME}'..."
+    echo "    Extra arguments: '${CONDA_CREATE_ARGS}'"
     
-    local create_cmd="micromamba create -y -n ${ENV_NAME} python=${PYTHON_VERSION}"
+    local create_cmd="micromamba create -y -n ${ENV_NAME} python=${PYTHON_VERSION} ${CONDA_CREATE_ARGS}"
     
     if eval "${create_cmd}"; then
-        # Store fingerprint for cache validation
-        local fingerprint=$(generate_env_fingerprint)
-        echo "${fingerprint}" > "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint"
         echo "✅ Environment created successfully"
         return 0
     else
@@ -109,15 +105,6 @@ verify_environment() {
     if [ -d "${MICROMAMBA_DIR}/envs/${ENV_NAME}" ]; then
         # Check if environment is functional
         if micromamba run -n "${ENV_NAME}" python --version &>/dev/null; then
-            # Check fingerprint if exists
-            if [ -f "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint" ]; then
-                local stored_fingerprint=$(cat "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint")
-                local current_fingerprint=$(generate_env_fingerprint)
-                if [ "${stored_fingerprint}" != "${current_fingerprint}" ]; then
-                    echo "⚠ Environment fingerprint mismatch, recreation needed"
-                    return 1
-                fi
-            fi
             echo "✅ Environment verified"
             return 0
         fi
@@ -128,7 +115,6 @@ verify_environment() {
 gen_pip_reqs() {
     TORCH_REQ_FILE=".github/torch_reqs.txt"
     PYG_REQ_FILE=".github/pyg_reqs.txt"
-    REQ_FILE=".github/reqs.txt"
     # PyTorch
     echo "--index-url https://download.pytorch.org/whl/cpu" >> $TORCH_REQ_FILE
     echo "torch==${PYTORCH_VERSION}" >> $TORCH_REQ_FILE
@@ -139,24 +125,6 @@ gen_pip_reqs() {
     echo "torch_sparse" >> $PYG_REQ_FILE
     echo "torch_cluster" >> $PYG_REQ_FILE
     echo "torch_spline_conv" >> $PYG_REQ_FILE
-    # Standard
-    # echo "torch_geometric" >> $REQ_FILE
-    # echo "ase" >> $REQ_FILE
-    # echo "numpy" >> $REQ_FILE
-    # echo "omegaconf" >> $REQ_FILE
-    # echo "e3nn" >> $REQ_FILE
-    # echo "requests" >> $REQ_FILE
-    # echo "tqdm" >> $REQ_FILE
-    # echo "psutil" >> $REQ_FILE
-    # echo "docstring_parser" >> $REQ_FILE
-    # echo "packaging" >> $REQ_FILE
-    # echo "pytest" >> $REQ_FILE
-    # echo "pre-commit" >> $REQ_FILE
-    # echo "black" >> $REQ_FILE
-    # echo "ruff" >> $REQ_FILE
-    # echo "mace-torch" >> $REQ_FILE
-    # echo "torch-sim-atomistic" >> $REQ_FILE
-    # echo "metatrain>=2026.3.1" >> $REQ_FILE
 }
 
 run_pip_installs() {
@@ -172,12 +140,11 @@ run_pip_installs() {
     
     gen_pip_reqs
 
-    python -m pip install -r $TORCH_REQ_FILE
+    python -m pip install -r $TORCH_REQ_FILE --cache-dir "$PIP_CACHE_DIR"
     # python -m pip install -r $REQ_FILE
-    python -m pip install -r $PYG_REQ_FILE
+    python -m pip install -r $PYG_REQ_FILE --cache-dir "$PIP_CACHE_DIR"
     
     echo "pip installs completed successfully"
-    return 0
 }
 
 # Main execution
@@ -214,6 +181,7 @@ main() {
     
     # Set up environment variables for subsequent GitHub Actions steps
     if [ -n "${GITHUB_ENV:-}" ]; then
+        echo "ENV_NAME=${ENV_NAME}" >> "${GITHUB_ENV}"
         echo "MAMBA_EXE=${MAMBA_EXE}" >> "${GITHUB_ENV}"
         echo "MAMBA_ROOT_PREFIX=${MAMBA_ROOT_PREFIX}" >> "${GITHUB_ENV}"
         echo "CONDA_PREFIX=${MICROMAMBA_DIR}/envs/${ENV_NAME}" >> "${GITHUB_ENV}"

@@ -71,6 +71,7 @@ metatomic = [
 
 cuda = ["cupy"]
 docs = [
+    "ipython",
     "Sphinx",
     "sphinxawesome-theme",
     "sphinxcontrib-applehelp",

@@ -17,6 +17,13 @@ jobs:
   test:
     name: Franken+LAMMPS (metatomic)
     runs-on: ubuntu-latest
+    environment:
+      ENV_NAME: lammps
+      PYTHON_VERSION: 3.12
+      PYTORCH_VERSION: 2.10
+      ENV_PREFIX: ~/micromamba
+      PIP_CACHE_DIR: ~/.cache/pip
+      CONDA_ARGS: -c metatensor -c conda-forge "lammps-metatomic=*=*nompi*"
     steps:
       - uses: actions/checkout@v7
       - name: Additional info about the build
@@ -25,29 +32,55 @@ jobs:
           uname -a
           df -h
           ulimit -a
-      # More info on options: https://github.com/marketplace/actions/setup-micromamba
-      - name: Create and setup mamba 
-        uses: mamba-org/setup-micromamba@v3
+      # Cache 1: Conda environment. This caches the full dependency tree.
+      - name: Cache conda environment
+        id: cache-conda
+        uses: actions/cache@v6
         with:
-          environment-file: .github/env-dev.yml
-          environment-name: train
-      - name: Install franken
-        shell: bash -l {0}
+          path: ${{ env.ENV_PREFIX }}/envs
+          key: micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-${{ env.ENV_NAME }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-v1
+      # Cache 2: pip wheels. These are not super important, only saves from downloading much stuff from PyPi.
+      - name: Cache pip wheels
+        id: cache-pip
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-v1
+          restore-keys: |
+            pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-
+            pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+      # Environment setup step
+      - name: Setup python environment
+        id: setup
         run: |
-          micromamba run -n train python -m pip install . --no-deps
-          micromamba list -n train
-      - name: Train franken model
-        shell: bash -l {0}
+          chmod +x .github/install_cache.sh
+          .github/install_cache.sh \
+            --python ${{ env.PYTHON_VERSION }} \
+            --pytorch ${{ env.PYTORCH_VERSION }} \
+            --pip-cache-dir ${{ env.PIP_CACHE_DIR }} \
+            --env-name ${{ env.ENV_NAME }} \
+            --conda-create-args ${{ env.CONDA_ARGS }} \
+            --pip-install
+
+      - name: Install franken package
         run: |
-          micromamba run -n train bash tests/lammps/metatomic/train_and_compile.sh
-      - name: Create lammps environment
-        shell: bash -l {0}
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          python -m pip install .[pet]
+
+      - name: Verify environment
         run: |
-          micromamba create -y -n lammps -f .github/env-lammps-metatomic.yml
-          micromamba list -n lammps
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          echo "=== Python Information ==="
+          python --version
+          python -c "import sys; print(f'Python executable: {sys.executable}')"
+          echo "=== Installed Packages ==="
+          micromamba list
+
       - name: Run with lammps
-        shell: bash -l {0}
         working-directory: tests/lammps/metatomic
         run: |
-          micromamba run -n lammps lmp -i lammps_metatomic.in
-
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          micromamba run -n ${{ env.ENV_NAME }} lmp -i lammps_metatomic.in

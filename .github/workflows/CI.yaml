@@ -29,9 +29,8 @@ jobs:
         #     pytorch-version: "2.10"
     env:
       ENV_NAME: test_env
-      MICROMAMBA_DIR: ~/micromamba
-      CACHE_ENV_DIR: ~/micromamba/envs
       PIP_CACHE_DIR: ~/.cache/pip
+      ENV_PREFIX: ~/micromamba
 
     steps:
       - uses: actions/checkout@v7
@@ -46,13 +45,10 @@ jobs:
         id: cache-conda
         uses: actions/cache@v6
         with:
-          path: ${{ env.CACHE_ENV_DIR }}
-          key: micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
-          restore-keys: |
-            micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
-            micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-
+          path: ${{ env.ENV_PREFIX }}/envs
+          key: micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-${{ env.ENV_NAME }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
       # Cache 2: pip wheels. These are not super important, only saves from downloading much stuff from PyPi.
-      - name: Cache pip
+      - name: Cache pip wheels
         id: cache-pip
         uses: actions/cache@v6
         with:
@@ -64,10 +60,6 @@ jobs:
       # Environment setup step
       - name: Setup python environment
         id: setup
-        shell: bash -l {0}
-        env:
-          TORCH_VERSION: ${{ matrix.pytorch-version }}
-          PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           chmod +x .github/install_cache.sh
           .github/install_cache.sh \
@@ -103,7 +95,7 @@ jobs:
         run: |
           eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
-          pytest -v --color=yes tests/test_franken_potential.py
+          pytest -v --color=yes tests/
 
   build:
     name: Bump version and build package with hatch

@@ -22,36 +22,65 @@ jobs:
     environment:
       name: ghpg
       url: ${{ steps.deployment.outputs.page_url }}
+      ENV_NAME: readthedocs
+      PYTHON_VERSION: 3.12
+      PYTORCH_VERSION: 2.10
+      ENV_PREFIX: ~/micromamba
+      PIP_CACHE_DIR: ~/.cache/pip
+      CONDA_ARGS: pandoc=3.6.4
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Create and setup mamba
-        uses: mamba-org/setup-micromamba@v3
+      # Cache 1: Conda environment. This caches the full dependency tree.
+      - name: Cache conda environment
+        id: cache-conda
+        uses: actions/cache@v6
         with:
-          # here we specify the environment like this instead of just installing with pip to make caching easier
-          environment-file: .github/env-docs.yml
-          environment-name: test
-          cache-environment: true
-          cache-environment-key: environment-docs
-          condarc: |
-            channels:
-              - conda-forge
-          create-args: >-
-            python=3.12
-            pytorch=2.10
-            pandoc=3.6.4
-      - name: Install franken
-        # conda setup requires this special shell
-        shell: bash -l {0}
-        # dependencies are handled in conda env
+          path: ${{ env.ENV_PREFIX }}/envs
+          key: micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-${{ env.ENV_NAME }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-v1
+      # Cache 2: pip wheels. These are not super important, only saves from downloading much stuff from PyPi.
+      - name: Cache pip wheels
+        id: cache-pip
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-v1
+          restore-keys: |
+            pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-torch${{ env.PYTORCH_VERSION }}-
+            pip-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+      # Environment setup step
+      - name: Setup python environment
+        id: setup
         run: |
-          python -m pip install . --no-deps
+          chmod +x .github/install_cache.sh
+          .github/install_cache.sh \
+            --python ${{ env.PYTHON_VERSION }} \
+            --pytorch ${{ env.PYTORCH_VERSION }} \
+            --pip-cache-dir ${{ env.PIP_CACHE_DIR }} \
+            --env-name ${{ env.ENV_NAME }} \
+            --conda-create-args ${{ env.CONDA_ARGS }} \
+            --pip-install
+
+      - name: Install franken package
+        run: |
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          python -m pip install .[develop,mace,pet,docs]
+
+      - name: Verify environment
+        run: |
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          echo "=== Python Information ==="
+          python --version
+          python -c "import sys; print(f'Python executable: {sys.executable}')"
+          echo "=== Installed Packages ==="
           micromamba list
 
       - name: Sphinx build
-        # conda setup requires this special shell
-        shell: bash -l {0}
         run: |
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
           # Check import works. sphinx-build will try to import but not provide reliable error-traces.
           python -c "import franken; import franken.calculators;"
           sphinx-build docs _build
