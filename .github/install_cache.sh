@@ -59,18 +59,18 @@ done
 echo "🔧 Setting up micromamba environment: ${ENV_NAME}"
 echo "   Python: ${PYTHON_VERSION}"
 echo "   PyTorch: ${PYTORCH_VERSION}"
-echo "   Environment file: ${ENV_FILE}"
+# echo "   Environment file: ${ENV_FILE}"
 echo "   Run pip install: ${RUN_PIP_INSTALL}"
 
-if [ ! -f "$ENV_FILE" ]; then
-    echo "❌ Error: Environment file not found."
-    exit 2
-fi
+# if [ ! -f "$ENV_FILE" ]; then
+#     echo "❌ Error: Environment file not found."
+#     exit 2
+# fi
 
 # Create environment fingerprint for cache validation
 generate_env_fingerprint() {
     local fingerprint="py${PYTHON_VERSION}-torch${PYTORCH_VERSION}"
-    fingerprint="${fingerprint}-$(sha256sum ${ENV_FILE} | cut -d' ' -f1 | head -c 8)"
+    # fingerprint="${fingerprint}-$(sha256sum ${ENV_FILE} | cut -d' ' -f1 | head -c 8)"
     echo "${fingerprint}"
 }
 
@@ -95,7 +95,7 @@ install_micromamba() {
 create_environment() {
     echo "🛠 Creating environment '${ENV_NAME}'..."
     
-    local create_cmd="micromamba create -y -n ${ENV_NAME} -f ${ENV_FILE} python=${PYTHON_VERSION} pytorch=${PYTORCH_VERSION}"
+    local create_cmd="micromamba create -y -n ${ENV_NAME} python=${PYTHON_VERSION}"
     
     if eval "${create_cmd}"; then
         # Store fingerprint for cache validation
@@ -142,6 +142,9 @@ run_pip_installs() {
     
     # Array of pip install commands
     local pip_commands=(
+        "python -m pip install torch==${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+        "python -m pip install ase numpy omegaconf e3nn requests tqdm psutil docstring_parser packaging"
+        "python -m pip install pytest pre-commit black ruff"
         "python -m pip install torch_geometric"
         "python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html"
         "python -m pip install mace-torch"
