@@ -4,11 +4,11 @@ set -euxo pipefail
 # Default values
 PYTHON_VERSION="3.12"
 PYTORCH_VERSION="2.10.0"
-ENV_FILE=".github/env-dev.yml"
 ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
 RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
+CACHE_FILE_KEY="pyproject.toml"
 export MAMBA_ROOT_PREFIX="$MICROMAMBA_DIR"
 
 # Parse command line arguments
@@ -20,10 +20,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --pytorch)
             PYTORCH_VERSION="$2"
-            shift 2
-            ;;
-        --env-file)
-            ENV_FILE="$2"
             shift 2
             ;;
         --env-name)
@@ -66,7 +62,7 @@ echo "   Run pip install: ${RUN_PIP_INSTALL}"
 # Create environment fingerprint for cache validation
 generate_env_fingerprint() {
     local fingerprint="py${PYTHON_VERSION}-torch${PYTORCH_VERSION}"
-    # fingerprint="${fingerprint}-$(sha256sum ${ENV_FILE} | cut -d' ' -f1 | head -c 8)"
+    fingerprint="${fingerprint}-$(sha256sum ${CACHE_FILE_KEY} | cut -d' ' -f1 | head -c 8)"
     echo "${fingerprint}"
 }
 
@@ -144,23 +140,23 @@ gen_pip_reqs() {
     echo "torch_cluster" >> $PYG_REQ_FILE
     echo "torch_spline_conv" >> $PYG_REQ_FILE
     # Standard
-    echo "torch_geometric" >> $REQ_FILE
-    echo "ase" >> $REQ_FILE
-    echo "numpy" >> $REQ_FILE
-    echo "omegaconf" >> $REQ_FILE
-    echo "e3nn" >> $REQ_FILE
-    echo "requests" >> $REQ_FILE
-    echo "tqdm" >> $REQ_FILE
-    echo "psutil" >> $REQ_FILE
-    echo "docstring_parser" >> $REQ_FILE
-    echo "packaging" >> $REQ_FILE
-    echo "pytest" >> $REQ_FILE
-    echo "pre-commit" >> $REQ_FILE
-    echo "black" >> $REQ_FILE
-    echo "ruff" >> $REQ_FILE
-    echo "mace-torch" >> $REQ_FILE
-    echo "torch-sim-atomistic" >> $REQ_FILE
-    echo "metatrain>=2026.3.1" >> $REQ_FILE
+    # echo "torch_geometric" >> $REQ_FILE
+    # echo "ase" >> $REQ_FILE
+    # echo "numpy" >> $REQ_FILE
+    # echo "omegaconf" >> $REQ_FILE
+    # echo "e3nn" >> $REQ_FILE
+    # echo "requests" >> $REQ_FILE
+    # echo "tqdm" >> $REQ_FILE
+    # echo "psutil" >> $REQ_FILE
+    # echo "docstring_parser" >> $REQ_FILE
+    # echo "packaging" >> $REQ_FILE
+    # echo "pytest" >> $REQ_FILE
+    # echo "pre-commit" >> $REQ_FILE
+    # echo "black" >> $REQ_FILE
+    # echo "ruff" >> $REQ_FILE
+    # echo "mace-torch" >> $REQ_FILE
+    # echo "torch-sim-atomistic" >> $REQ_FILE
+    # echo "metatrain>=2026.3.1" >> $REQ_FILE
 }
 
 run_pip_installs() {
@@ -177,7 +173,7 @@ run_pip_installs() {
     gen_pip_reqs
 
     python -m pip install -r $TORCH_REQ_FILE
-    python -m pip install -r $REQ_FILE
+    # python -m pip install -r $REQ_FILE
     python -m pip install -r $PYG_REQ_FILE
     
     echo "pip installs completed successfully"

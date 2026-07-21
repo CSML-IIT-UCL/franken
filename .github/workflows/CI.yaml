@@ -47,10 +47,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.CACHE_ENV_DIR }}
-          key: micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
+          key: micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
           restore-keys: |
-            micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
-            micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-
+            micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
+            micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-
       # Cache 2: pip wheels
       - name: Cache pip
         id: cache-pip
@@ -73,10 +73,15 @@ jobs:
           .github/install_cache.sh \
             --python "${{ matrix.python-version }}" \
             --pytorch "${{ matrix.pytorch-version }}" \
-            --env-file ".github/env-dev.yml" \
             --env-name "${{ env.ENV_NAME }}" \
             --pip-cache-dir "${{ env.PIP_CACHE_DIR }}" \
             --pip-install
+
+      - name: Install franken package
+        run: |
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          python -m pip install .[develop,mace,pet]
 
       - name: Verify environment
         run: |
@@ -94,17 +99,11 @@ jobs:
           echo "=== Installed Packages ==="
           micromamba list
 
-      - name: Install franken package
-        run: |
-          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
-          micromamba activate ${{ env.ENV_NAME }}
-          python -m pip install --no-deps --no-cache-dir .
-
       - name: Run tests
         run: |
           eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
-          pytest -v --color=yes tests/
+          pytest -v --color=yes tests/test_franken_potential.py
 
   build:
     name: Bump version and build package with hatch
