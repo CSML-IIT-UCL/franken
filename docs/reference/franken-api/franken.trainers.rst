@@ -10,6 +10,7 @@ Base Class
 
     franken.trainers.BaseTrainer
 
+
 Random features trainer
 -----------------------
 .. autosummary::
@@ -18,3 +19,13 @@ Random features trainer
     :nosignatures:
 
     franken.trainers.RandomFeaturesTrainer
+
+
+Low-memory random features trainer
+----------------------------------
+.. autosummary::
+    :toctree: stubs
+    :template: class.rst
+    :nosignatures:
+
+    franken.trainers.LowMemRandomFeaturesTrainer

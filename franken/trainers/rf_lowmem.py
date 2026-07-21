@@ -25,7 +25,7 @@ logger = logging.getLogger("franken")
 class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
     """Low-memory variant of :class:`franken.trainers.RandomFeaturesTrainer` random-features trainer.
 
-    The catch to support low-memory is that only 2 training targets are allowed (e.g. energy & forces or
+    To reduce the memory footprint, only 2 training targets are allowed (e.g. energy & forces or
     forces & stress, etc.).
 
     All other arguments and behavior is the same as :class:`franken.trainers.RandomFeaturesTrainer`.
