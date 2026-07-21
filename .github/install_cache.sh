@@ -79,14 +79,13 @@ install_micromamba() {
     if [ ! -f "${MICROMAMBA_DIR}/bin/micromamba" ]; then
         echo "Installing micromamba..."
         mkdir -p "${MICROMAMBA_DIR}"
-        curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | \
-            tar -xvj -C "${MICROMAMBA_DIR}" --strip-components=1 bin/micromamba
-        
-        if [ ! -f "${MICROMAMBA_DIR}/bin/micromamba" ]; then
-            echo "❌ Error: Failed to install micromamba"
+        # Download and run the official install script
+        if curl -Ls https://micro.mamba.pm/install.sh | bash -s -- --prefix "${MICROMAMBA_DIR}"; then
+            echo "✅ Micromamba installed via official script"
+        else
+            echo "❌ Error:  Official install script failed"
             exit 1
         fi
-        echo "✅ Micromamba installed"
     else
         echo "✅ Micromamba already installed"
     fi
