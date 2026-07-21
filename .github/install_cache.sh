@@ -132,21 +132,21 @@ verify_environment() {
 }
 
 gen_pip_reqs() {
+    TORCH_REQ_FILE=".github/torch_reqs.txt"
+    PYG_REQ_FILE=".github/pyg_reqs.txt"
     REQ_FILE=".github/reqs.txt"
     # PyTorch
-    echo "-r torch_reqs.txt" >> $REQ_FILE
-    echo "--index-url https://download.pytorch.org/whl/cpu" >> ".github/torch_reqs.txt"
-    echo "torch==${PYTORCH_VERSION}" >> ".github/torch_reqs.txt"
+    echo "--index-url https://download.pytorch.org/whl/cpu" >> $TORCH_REQ_FILE
+    echo "torch==${PYTORCH_VERSION}" >> $TORCH_REQ_FILE
     # Torch Geometric
-    echo "torch_geometric" >> $REQ_FILE
-    echo "-r pyg_reqs.txt" >> $REQ_FILE
-    echo "--find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> ".github/pyg_reqs.txt"
-    echo "pyg_lib" >> ".github/pyg_reqs.txt"
-    echo "torch_scatter" >> ".github/pyg_reqs.txt"
-    echo "torch_sparse" >> ".github/pyg_reqs.txt"
-    echo "torch_cluste" >> ".github/pyg_reqs.txt"
-    echo "torch_spline_conv" >> ".github/pyg_reqs.txt"
+    echo "--find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $PYG_REQ_FILE
+    echo "pyg_lib" >> $PYG_REQ_FILE
+    echo "torch_scatter" >> $PYG_REQ_FILE
+    echo "torch_sparse" >> $PYG_REQ_FILE
+    echo "torch_cluster" >> $PYG_REQ_FILE
+    echo "torch_spline_conv" >> $PYG_REQ_FILE
     # Standard
+    echo "torch_geometric" >> $REQ_FILE
     echo "ase" >> $REQ_FILE
     echo "numpy" >> $REQ_FILE
     echo "omegaconf" >> $REQ_FILE
@@ -176,10 +176,11 @@ run_pip_installs() {
     eval "$(micromamba shell hook -s bash)"
     micromamba activate "${ENV_NAME}"
     
-    REQ_FILE=".github/reqs.txt"
     gen_pip_reqs
 
+    python -m pip install -r $TORCH_REQ_FILE
     python -m pip install -r $REQ_FILE
+    python -m pip install -r $PYG_REQ_FILE
     
     echo "pip installs completed successfully"
     return 0
