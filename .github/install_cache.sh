@@ -133,12 +133,19 @@ verify_environment() {
 
 gen_pip_reqs() {
     REQ_FILE=".github/reqs.txt"
-    TORCH_FILE="torch_reqs.txt"
-    PYG_FILE="pyg_reqs.txt"
     # PyTorch
-    echo "-r ${TORCH_FILE}" >> $REQ_FILE
-    echo "--index-url https://download.pytorch.org/whl/cpu" >> $TORCH_FILE
-    echo "torch==${PYTORCH_VERSION}" >> $TORCH_FILE
+    echo "-r torch_reqs.txt" >> $REQ_FILE
+    echo "--index-url https://download.pytorch.org/whl/cpu" >> "./github/torch_reqs.txt"
+    echo "torch==${PYTORCH_VERSION}" >> "./github/torch_reqs.txt"
+    # Torch Geometric
+    echo "torch_geometric" >> $REQ_FILE
+    echo "-r pyg_reqs.txt" >> $REQ_FILE
+    echo "--find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> ".github/pyg_reqs.txt"
+    echo "pyg_lib" >> ".github/pyg_reqs.txt"
+    echo "torch_scatter" >> ".github/pyg_reqs.txt"
+    echo "torch_sparse" >> ".github/pyg_reqs.txt"
+    echo "torch_cluste" >> ".github/pyg_reqs.txt"
+    echo "torch_spline_conv" >> ".github/pyg_reqs.txt"
     # Standard
     echo "ase" >> $REQ_FILE
     echo "numpy" >> $REQ_FILE
@@ -156,15 +163,6 @@ gen_pip_reqs() {
     echo "mace-torch" >> $REQ_FILE
     echo "torch-sim-atomistic" >> $REQ_FILE
     echo "metatrain>=2026.3.1" >> $REQ_FILE
-    # Torch Geometric
-    echo "torch_geometric" >> $REQ_FILE
-    echo "-r ${PYG_FILE}" >> $REQ_FILE
-    echo "--find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $PYG_FILE
-    echo "pyg_lib" >> $PYG_FILE
-    echo "torch_scatter" >> $PYG_FILE
-    echo "torch_sparse" >> $PYG_FILE
-    echo "torch_cluste" >> $PYG_FILE
-    echo "torch_spline_conv" >> $PYG_FILE
 }
 
 run_pip_installs() {
