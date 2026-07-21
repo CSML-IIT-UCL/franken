@@ -61,13 +61,6 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
             pip-${{ runner.os }}-py${{ matrix.python-version }}-
-      # Cache 3: PyG wheels (these are large, cache separately for better control)
-      - name: Cache PyG wheels
-        id: cache-pyg
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pyg
-          key: pip-${{ runner.os }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
       # Environment setup step
       - name: Setup python environment
         id: setup
@@ -99,14 +92,13 @@ jobs:
           python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
           
           echo "=== Installed Packages ==="
-          python -m pip list | grep -E "torch|mace|metatrain|pyg"
+          micromamba list
 
       - name: Install franken package
         run: |
           eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
           python -m pip install --no-deps --no-cache-dir .
-          micromamba list
 
       - name: Run tests
         run: |
