@@ -87,7 +87,7 @@ jobs:
 
       - name: Verify environment
         run: |
-          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
           
           echo "=== Python Information ==="
@@ -103,14 +103,14 @@ jobs:
 
       - name: Install franken package
         run: |
-          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
           python -m pip install --no-deps --no-cache-dir .
           micromamba list
 
       - name: Run tests
         run: |
-          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
           pytest -v --color=yes tests/
 
