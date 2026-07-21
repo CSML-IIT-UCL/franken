@@ -55,8 +55,8 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "torch": ("https://pytorch.org/docs/stable/", None),
     "torchvision": ("https://pytorch.org/vision/stable/", None),
-    "python": ("https://docs.python.org/3.9/", None),
-    "ase": ("https://wiki.fysik.dtu.dk/ase/", None),
+    "python": ("https://docs.python.org/3.12/", None),
+    "ase": ("https://ase.gitlab.io/ase/", None),
 }
 
 
