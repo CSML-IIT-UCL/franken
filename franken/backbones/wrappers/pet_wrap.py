@@ -5,7 +5,10 @@ import metatrain.pet
 import torch
 import metatomic.torch
 import metatrain.utils.io
-from metatrain.pet.modules.adaptive_cutoff import get_adaptive_cutoffs
+from metatrain.pet.modules.adaptive_cutoff import (
+    get_adaptive_cutoffs_grid,
+    get_adaptive_cutoffs_solver,
+)
 from metatrain.pet.modules.nef import (
     compute_reversed_neighbor_list,
     edge_array_to_nef,
@@ -31,6 +34,8 @@ def systems_to_batch(
     cutoff_width: float,
     batch_ids: torch.Tensor,
     num_neighbors_adaptive: Optional[float] = None,
+    adaptive_cutoff_method: str = "solver",
+    cutoff_width_adaptive: float = 1.0,
     cartesian_shifts: torch.Tensor | None = None,
 ) -> Tuple[
     torch.Tensor,
@@ -73,27 +78,41 @@ def systems_to_batch(
         with torch.profiler.record_function("PET::get_adaptive_cutoffs"):
             # Adaptive cutoff scheme to approximately select `num_neighbors_adaptive`
             # neighbors for each atom
-            atomic_cutoffs = get_adaptive_cutoffs(
-                centers,
-                edge_distances,
-                num_neighbors_adaptive,
-                num_nodes,
-                options.cutoff,
-                cutoff_width=cutoff_width,
-            )
+            if adaptive_cutoff_method.lower() == "solver":
+                atomic_cutoffs = get_adaptive_cutoffs_solver(
+                    centers,
+                    edge_distances,
+                    num_neighbors_adaptive,
+                    num_nodes,
+                    options.cutoff,
+                    cutoff_width=cutoff_width_adaptive,
+                )
+            elif adaptive_cutoff_method.lower() == "grid":
+                atomic_cutoffs = get_adaptive_cutoffs_grid(
+                    centers,
+                    edge_distances,
+                    num_neighbors_adaptive,
+                    num_nodes,
+                    options.cutoff,
+                    cutoff_width=cutoff_width_adaptive,
+                )
+            else:
+                raise ValueError(
+                    "adaptive_cutoff_method must be 'grid' or 'solver', got "
+                    + adaptive_cutoff_method
+                )
             # Symmetrize the cutoffs between pairs of atoms (PET needs this symmetry
             # due to its corresponding edge indexing ij -> ji)
             pair_cutoffs = (atomic_cutoffs[centers] + atomic_cutoffs[neighbors]) / 2.0
         with torch.profiler.record_function("PET::adaptive_cutoff_masking"):
-            # Apply cutoff mask
-            cutoff_mask = edge_distances <= pair_cutoffs
-
-            pair_cutoffs = pair_cutoffs[cutoff_mask]
-            centers = centers[cutoff_mask]
-            neighbors = neighbors[cutoff_mask]
-            edge_vectors = edge_vectors[cutoff_mask]
-            unit_shifts = unit_shifts[cutoff_mask]
-            edge_distances = edge_distances[cutoff_mask]
+            keep = torch.nonzero(edge_distances <= pair_cutoffs).squeeze(-1)
+            pair_cutoffs = pair_cutoffs.index_select(0, keep)
+            centers = centers.index_select(0, keep)
+            neighbors = neighbors.index_select(0, keep)
+            edge_vectors = edge_vectors.index_select(0, keep)
+            # GIACOMO: changed name from metatrain: from cell_shifts to unit_shifts
+            unit_shifts = unit_shifts.index_select(0, keep)
+            edge_distances = edge_distances.index_select(0, keep)
     else:
         pair_cutoffs = options.cutoff * torch.ones(
             len(centers), device=positions.device, dtype=positions.dtype
@@ -118,8 +137,9 @@ def systems_to_batch(
         )
 
     # Convert to NEF (Node-Edge-Feature) format:
+    # Pass `num_neighbors` in so `get_nef_indices` doesn't re-run bincount.
     nef_indices, nef_to_edges_neighbor, nef_mask = get_nef_indices(
-        centers, num_nodes, max_edges_per_node
+        centers, num_neighbors, max_edges_per_node
     )
 
     # Element indices
@@ -134,18 +154,14 @@ def systems_to_batch(
     )
     cutoff_factors = edge_array_to_nef(cutoff_factors, nef_indices, nef_mask, 0.0)
 
-    corresponding_edges = get_corresponding_edges(
-        torch.concatenate(
-            [centers.unsqueeze(-1), neighbors.unsqueeze(-1), unit_shifts],
-            dim=-1,
-        )
-    )
+    # GIACOMO: changed variable name: cell_shifts -> unit_shifts
+    corresponding_edges = get_corresponding_edges(centers, neighbors, unit_shifts)
 
     # These are the two arrays we need for message passing with edge reversals,
     # if indexing happens in a two-dimensional way:
     # edges_ji = edges_ij[reversed_neighbor_list, neighbors_index]
     reversed_neighbor_list = compute_reversed_neighbor_list(
-        nef_indices, corresponding_edges, nef_mask
+        nef_indices, corresponding_edges, nef_to_edges_neighbor, nef_mask
     )
     neighbors_index = edge_array_to_nef(neighbors, nef_indices).to(torch.int64)
 
@@ -158,8 +174,11 @@ def systems_to_batch(
     # creates too many of the same index which slows down backward enormously.
     # (See see https://github.com/pytorch/pytorch/issues/41162)
     # We therefore replace the padded indices with a sequence of unique indices.
+    # The count of padded slots equals total slots minus real edges — derive it
+    # from shapes to avoid a `torch.sum(...).item()` host sync every forward.
+    num_padded = reverse_neighbor_index.numel() - centers.shape[0]
     reverse_neighbor_index[~nef_mask] = torch.arange(
-        int(torch.sum(~nef_mask)), device=reverse_neighbor_index.device
+        num_padded, device=reverse_neighbor_index.device
     )
 
     return (
@@ -225,6 +244,19 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
 
         species = data.atomic_numbers
         # **Stage 0: Input Preparation**
+        # The attributes obtained with getattr are new features in metatrain.
+        # Checkpoints we load should already have the new features, but it's better
+        # to be safe.
+        # adaptive_cutoff_method: new in checkpoints v12
+        # https://github.com/metatensor/metatrain/blob/ef3ae09d333e9c21e5da969decdd2f4b802309b6/src/metatrain/pet/checkpoints.py#L281
+        adaptive_cutoff_method = getattr(
+            self.base_model, "adaptive_cutoff_method", "grid"
+        )
+        # cutoff_width_adaptive: new in checkpoints v14
+        # https://github.com/metatensor/metatrain/blob/ef3ae09d333e9c21e5da969decdd2f4b802309b6/src/metatrain/pet/checkpoints.py#L307
+        cutoff_width_adaptive = getattr(
+            self.base_model, "cutoff_width_adaptive", self.base_model.cutoff_width
+        )
         (
             element_indices_nodes,
             element_indices_neighbors,
@@ -240,11 +272,14 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             unit_shifts,
             species,
             nl_options,
+            # NOTE: species_to_species_index will be moved to .backend.species_to_species_index in v16
             self.base_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
             self.base_model.cutoff_function,
             self.base_model.cutoff_width,
             batch_ids=batch_ids,
             num_neighbors_adaptive=self.base_model.num_neighbors_adaptive,
+            adaptive_cutoff_method=adaptive_cutoff_method,
+            cutoff_width_adaptive=cutoff_width_adaptive,
             cartesian_shifts=cartesian_shifts,
         )
         # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!

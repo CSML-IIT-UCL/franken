@@ -185,6 +185,8 @@ def test_calculator_jitscript(device, gnn_cfg):
     reason="torch.compile requires a C++ compiler with C++20 support",
 )
 def test_calculator_compile(device, gnn_cfg):
+    if device == "cpu" and gnn_cfg.family == "pet":
+        pytest.skip(reason="torch.compile segfault for the `get_adaptive_cutoffs_grid` function")
     np.random.seed(1)
     torch.manual_seed(1)
     rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)

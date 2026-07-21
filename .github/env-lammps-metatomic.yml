@@ -1,7 +1,0 @@
-channels:
-- metatensor
-- conda-forge
-dependencies:
-- "lammps-metatomic=*=*nompi*"
-
-name: lammps
