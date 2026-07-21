@@ -78,6 +78,13 @@ jobs:
           echo "=== Installed Packages ==="
           micromamba list
 
+      - name: Train franken model
+        shell: bash -l {0}
+        run: |
+          eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          micromamba run -n ${{ env.ENV_NAME }} bash tests/lammps/metatomic/train_and_compile.sh
+
       - name: Run with lammps
         working-directory: tests/lammps/metatomic
         run: |
