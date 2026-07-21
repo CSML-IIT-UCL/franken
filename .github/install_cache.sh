@@ -86,6 +86,7 @@ install_micromamba() {
         echo "✅ Micromamba already installed"
     fi
     export PATH="${HOME}/.local/bin:${PATH}"
+    export MAMBA_EXE='/home/runner/.local/bin/micromamba'
     # Initialize micromamba shell hook
     eval "$(micromamba shell hook -s bash)"
 }
