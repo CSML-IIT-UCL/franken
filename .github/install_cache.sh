@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -euxo pipefail
 
 # Default values
 PYTHON_VERSION="3.12"
@@ -9,6 +9,7 @@ ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
 RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
+export MAMBA_ROOT_PREFIX="${MICROMAMBA_DIR}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -59,6 +60,7 @@ done
 echo "🔧 Setting up micromamba environment: ${ENV_NAME}"
 echo "   Python: ${PYTHON_VERSION}"
 echo "   PyTorch: ${PYTORCH_VERSION}"
+echo "   MicroMamba directory: ${MICROMAMBA_DIR}"
 # echo "   Environment file: ${ENV_FILE}"
 echo "   Run pip install: ${RUN_PIP_INSTALL}"
 
