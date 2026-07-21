@@ -244,9 +244,9 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
 
         species = data.atomic_numbers
         # **Stage 0: Input Preparation**
-        # Handle some checkpoint updates (new features in metatrain) over here
-        # to keep compatibility with old checkpoints. This is not guaranteed to
-        # be very robust, so ideally use updated checkpoints instead.
+        # The attributes obtained with getattr are new features in metatrain.
+        # Checkpoints we load should already have the new features, but it's better
+        # to be safe.
         # adaptive_cutoff_method: new in checkpoints v12
         # https://github.com/metatensor/metatrain/blob/ef3ae09d333e9c21e5da969decdd2f4b802309b6/src/metatrain/pet/checkpoints.py#L281
         adaptive_cutoff_method = getattr(

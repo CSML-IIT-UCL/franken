@@ -41,7 +41,7 @@ jobs:
           uname -a
           df -h
           ulimit -a
-      # Cache 1: Conda environment
+      # Cache 1: Conda environment. This caches the full dependency tree.
       - name: Cache conda environment
         id: cache-conda
         uses: actions/cache@v6
@@ -51,7 +51,7 @@ jobs:
           restore-keys: |
             micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
             micromamba-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}-py${{ matrix.python-version }}-
-      # Cache 2: pip wheels
+      # Cache 2: pip wheels. These are not super important, only saves from downloading much stuff from PyPi.
       - name: Cache pip
         id: cache-pip
         uses: actions/cache@v6
