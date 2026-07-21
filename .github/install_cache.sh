@@ -1,0 +1,224 @@
+#!/bin/bash
+set -euo pipefail
+
+# Default values
+PYTHON_VERSION="3.12"
+PYTORCH_VERSION="2.10.0"
+ENV_FILE=".github/env-dev.yml"
+ENV_NAME="test"
+MICROMAMBA_DIR="${HOME}/micromamba"
+RUN_PIP_INSTALL=false
+PIP_CACHE_DIR="${HOME}/.cache/pip"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --python)
+            PYTHON_VERSION="$2"
+            shift 2
+            ;;
+        --pytorch)
+            PYTORCH_VERSION="$2"
+            shift 2
+            ;;
+        --env-file)
+            ENV_FILE="$2"
+            shift 2
+            ;;
+        --env-name)
+            ENV_NAME="$2"
+            shift 2
+            ;;
+        --pip-install)
+            RUN_PIP_INSTALL=true
+            shift
+            ;;
+        --pip-cache-dir)
+            PIP_CACHE_DIR="$2"
+            shift 2
+            ;;
+        --help)
+            echo "Usage: $0 [OPTIONS]"
+            echo "Options:"
+            echo "  --python VERSION        Python version (default: 3.10)"
+            echo "  --pytorch VERSION       PyTorch version (default: 2.0.0)"
+            echo "  --env-file FILE        Environment file (default: .github/env-dev.yml)"
+            echo "  --env-name NAME        Environment name (default: test)"
+            echo "  --pip-install          Run additional pip installs after environment creation"
+            echo "  --pip-cache-dir DIR    Pip cache directory (default: ~/.cache/pip)"
+            echo "  --help                 Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+echo "🔧 Setting up micromamba environment: ${ENV_NAME}"
+echo "   Python: ${PYTHON_VERSION}"
+echo "   PyTorch: ${PYTORCH_VERSION}"
+echo "   Environment file: ${ENV_FILE}"
+echo "   Run pip install: ${RUN_PIP_INSTALL}"
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Error: Environment file not found."
+    exit 2
+fi
+
+# Create environment fingerprint for cache validation
+generate_env_fingerprint() {
+    local fingerprint="py${PYTHON_VERSION}-torch${PYTORCH_VERSION}"
+    fingerprint="${fingerprint}-$(sha256sum ${ENV_FILE} | cut -d' ' -f1 | head -c 8)"
+    echo "${fingerprint}"
+}
+
+# Function to install micromamba
+install_micromamba() {
+    if [ ! -f "${MICROMAMBA_DIR}/bin/micromamba" ]; then
+        echo "Installing micromamba..."
+        mkdir -p "${MICROMAMBA_DIR}"
+        curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | \
+            tar -xvj -C "${MICROMAMBA_DIR}" --strip-components=1 bin/micromamba
+        
+        if [ ! -f "${MICROMAMBA_DIR}/bin/micromamba" ]; then
+            echo "❌ Error: Failed to install micromamba"
+            exit 1
+        fi
+        echo "✅ Micromamba installed"
+    else
+        echo "✅ Micromamba already installed"
+    fi
+    export PATH="${MICROMAMBA_DIR}/bin:${PATH}"
+}
+
+create_environment() {
+    echo "🛠 Creating environment '${ENV_NAME}'..."
+    
+    local create_cmd="micromamba create -y -n ${ENV_NAME} -f ${ENV_FILE} python=${PYTHON_VERSION} pytorch=${PYTORCH_VERSION}"
+    
+    if eval "${create_cmd}"; then
+        # Store fingerprint for cache validation
+        local fingerprint=$(generate_env_fingerprint)
+        echo "${fingerprint}" > "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint"
+        echo "✅ Environment created successfully"
+        return 0
+    else
+        echo "❌ Failed to create environment"
+        return 1
+    fi
+}
+
+verify_environment() {
+    if [ -d "${MICROMAMBA_DIR}/envs/${ENV_NAME}" ]; then
+        # Check if environment is functional
+        if micromamba run -n "${ENV_NAME}" python --version &>/dev/null; then
+            # Check fingerprint if exists
+            if [ -f "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint" ]; then
+                local stored_fingerprint=$(cat "${MICROMAMBA_DIR}/envs/${ENV_NAME}/.env_fingerprint")
+                local current_fingerprint=$(generate_env_fingerprint)
+                if [ "${stored_fingerprint}" != "${current_fingerprint}" ]; then
+                    echo "⚠ Environment fingerprint mismatch, recreation needed"
+                    return 1
+                fi
+            fi
+            echo "✅ Environment verified"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+run_pip_installs() {
+    echo "📦 Running additional pip installs..."
+    
+    # Configure pip to use cache
+    export PIP_CACHE_DIR="${PIP_CACHE_DIR}"
+    mkdir -p "${PIP_CACHE_DIR}"
+    
+    # Activate environment for pip installs
+    eval "$(micromamba shell hook -s bash)"
+    micromamba activate "${ENV_NAME}"
+    
+    # Array of pip install commands
+    local pip_commands=(
+        "python -m pip install torch_geometric"
+        "python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html"
+        "python -m pip install mace-torch"
+        "python -m pip install torch-sim-atomistic"
+        "python -m pip install metatrain>=2026.3.1"
+    )
+    
+    local failed_installs=()
+    
+    for cmd in "${pip_commands[@]}"; do
+        echo "  Running: ${cmd}"
+        if eval "${cmd}"; then
+            echo "  ✅ Success"
+        else
+            echo "  ❌ Failed"
+            failed_installs+=("${cmd}")
+        fi
+    done
+    
+    if [ ${#failed_installs[@]} -ne 0 ]; then
+        echo "⚠ Some pip installs failed:"
+        printf '  - %s\n' "${failed_installs[@]}"
+        return 1
+    fi
+    
+    echo "✅ All pip installs completed successfully"
+    return 0
+}
+
+# Main execution
+main() {
+    install_micromamba
+    
+    # Check if environment needs creation
+    if ! verify_environment; then
+        echo "🔄 Environment needs to be created/updated"
+        
+        # Remove existing environment if present
+        if [ -d "${MICROMAMBA_DIR}/envs/${ENV_NAME}" ]; then
+            echo "🗑 Removing old environment..."
+            rm -rf "${MICROMAMBA_DIR}/envs/${ENV_NAME}"
+        fi
+        
+        # Create new environment
+        if ! create_environment; then
+            echo "❌ Environment creation failed"
+            exit 1
+        fi
+        
+        # Set flag that environment was freshly created (for pip installs)
+        ENV_FRESHLY_CREATED=true
+    else
+        echo "✅ Using cached environment"
+        ENV_FRESHLY_CREATED=false
+    fi
+    
+    # Run pip installs if requested
+    if [ "${RUN_PIP_INSTALL}" = true ]; then
+        run_pip_installs
+    fi
+    
+    # Set up environment variables for subsequent GitHub Actions steps
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        echo "MAMBA_EXE=${MICROMAMBA_DIR}/bin/micromamba" >> "${GITHUB_ENV}"
+        echo "MAMBA_ROOT_PREFIX=${MICROMAMBA_DIR}" >> "${GITHUB_ENV}"
+        echo "CONDA_PREFIX=${MICROMAMBA_DIR}/envs/${ENV_NAME}" >> "${GITHUB_ENV}"
+        echo "PIP_CACHE_DIR=${PIP_CACHE_DIR}" >> "${GITHUB_ENV}"
+        
+        # Also set output for the freshly created flag
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+            echo "env_freshly_created=${ENV_FRESHLY_CREATED:-false}" >> "${GITHUB_OUTPUT}"
+        fi
+    fi
+    
+    echo "✅ Setup complete!"
+}
+
+# Run main function
+main

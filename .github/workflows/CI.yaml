@@ -27,75 +27,92 @@ jobs:
         # exclude:
         #   - python-version: "3.12"  # only to save CI minutes
         #     pytorch-version: "2.10"
+    env:
+      ENV_NAME: test_env
+      MICROMAMBA_DIR: ~/micromamba
+      CACHE_ENV_DIR: ~/micromamba/envs
+      PIP_CACHE_DIR: ~/.cache/pip
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Additional info about the build
+      - uses: actions/checkout@v7
+      - name: Build information
         shell: bash
         run: |
           uname -a
           df -h
           ulimit -a
-
-      # More info on options: https://github.com/marketplace/actions/setup-micromamba
-      - name: Create and setup mamba
-        uses: mamba-org/setup-micromamba@v3
+      # Cache 1: Conda environment
+      - name: Cache conda environment
+        id: cache-conda
+        uses: actions/cache@v6
         with:
-          # here we specify the environment like this instead of just installing with pip to make caching easier
-          environment-file: .github/env-dev.yml
-          environment-name: test
-          cache-environment: true
-          cache-environment-key: environment-${{ matrix.python-version }}-${{ matrix.pytorch-version }}
-          condarc: |
-            channels:
-              - conda-forge
-          create-args: >-
-            python=${{ matrix.python-version }}
-            pytorch=${{ matrix.pytorch-version }}
-      - name: Cache pip packages
+          path: ${{ env.CACHE_ENV_DIR }}
+          key: micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
+          restore-keys: |
+            micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
+            micromamba-${{ runner.os }}-${{ hashFiles('.github/env-dev.yml') }}-py${{ matrix.python-version }}-
+      # Cache 2: pip wheels
+      - name: Cache pip
         id: cache-pip
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ matrix.pytorch-version }}-${{ hashFiles('.github/req-dev.txt') }}
-      - name: Install missing packages with pip
-        # conda setup requires this special shell
-        if: steps.cache.outputs.cache-hit != 'true'
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: pip-${{ runner.os }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
+          restore-keys: |
+            pip-${{ runner.os }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-
+            pip-${{ runner.os }}-py${{ matrix.python-version }}-
+      # Cache 3: PyG wheels (these are large, cache separately for better control)
+      - name: Cache PyG wheels
+        id: cache-pyg
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pyg
+          key: pip-${{ runner.os }}-py${{ matrix.python-version }}-torch${{ matrix.pytorch-version }}-v1
+      # Environment setup step
+      - name: Setup python environment
+        id: setup
         shell: bash -l {0}
         env:
           TORCH_VERSION: ${{ matrix.pytorch-version }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
-          python -m pip install torch_geometric
-          # Running with the -f argument gives us prebuilt wheels which speeds things up.
-          # On the other hand it depends on them publishing the wheels
-          python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.0+cpu.html
-          python -m pip install mace-torch
-          python -m pip install torch-sim-atomistic
-          # conda metatrain is pinned to very specific pytorch versions (for no good reason).
-          python -m pip install metatrain>=2026.3.1
+          chmod +x .github/install_cache.sh
+          .github/install_cache.sh \
+            --python "${{ matrix.python-version }}" \
+            --pytorch "${{ matrix.pytorch-version }}" \
+            --env-file ".github/env-dev.yml" \
+            --env-name "${{ env.ENV_NAME }}" \
+            --pip-cache-dir "${{ env.PIP_CACHE_DIR }}" \
+            --pip-install
 
-      - name: Install package
-        # conda setup requires this special shell
-        shell: bash -l {0}
+      - name: Verify environment
         run: |
+          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
+          
+          echo "=== Python Information ==="
+          python --version
+          python -c "import sys; print(f'Python executable: {sys.executable}')"
+          
+          echo "=== PyTorch Information ==="
+          python -c "import torch; print(f'PyTorch version: {torch.__version__}')"
+          python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+          
+          echo "=== Installed Packages ==="
+          python -m pip list | grep -E "torch|mace|metatrain|pyg"
+
+      - name: Install franken package
+        run: |
+          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
           python -m pip install --no-deps --no-cache-dir .
           micromamba list
 
       - name: Run tests
-        # conda setup requires this special shell
-        shell: bash -l {0}
         run: |
+          eval "$(${{ env.MICROMAMBA_DIR }}/bin/micromamba shell hook -s bash)"
+          micromamba activate ${{ env.ENV_NAME }}
           pytest -v --color=yes tests/
-
-      # - name: CodeCov
-      #   if: contains( matrix.os, 'ubuntu' )
-      #   uses: codecov/codecov-action@v3
-      #   with:
-      #     token: ${{ secrets.CODECOV_TOKEN }}
-      #     file: ./coverage.xml
-      #     flags: codecov
-      #     name: codecov-${{ matrix.os }}-py${{ matrix.python-version }}
 
   build:
     name: Bump version and build package with hatch
@@ -106,7 +123,7 @@ jobs:
       github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[release]')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: setup python
         uses: actions/setup-python@v5
         with:
