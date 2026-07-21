@@ -133,8 +133,8 @@ verify_environment() {
 
 gen_pip_reqs() {
     REQ_FILE=".github/reqs.txt"
-    TORCH_FILE=".github/torch_reqs.txt"
-    PYG_FILE=".github/pyg_reqs.txt"
+    TORCH_FILE="torch_reqs.txt"
+    PYG_FILE="pyg_reqs.txt"
     # PyTorch
     echo "-r ${TORCH_FILE}" >> $REQ_FILE
     echo "--index-url https://download.pytorch.org/whl/cpu" >> $TORCH_FILE
