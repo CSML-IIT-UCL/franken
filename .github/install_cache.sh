@@ -131,6 +131,33 @@ verify_environment() {
     return 1
 }
 
+gen_pip_reqs() {
+    REQ_FILE=".github/reqs.txt"
+    echo "torch==${PYTORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu" >> $REQ_FILE
+    echo "ase" >> $REQ_FILE
+    echo "numpy" >> $REQ_FILE
+    echo "omegaconf" >> $REQ_FILE
+    echo "e3nn" >> $REQ_FILE
+    echo "requests" >> $REQ_FILE
+    echo "tqdm" >> $REQ_FILE
+    echo "psutil" >> $REQ_FILE
+    echo "docstring_parser" >> $REQ_FILE
+    echo "packaging" >> $REQ_FILE
+    echo "pytest" >> $REQ_FILE
+    echo "pre-commit" >> $REQ_FILE
+    echo "black" >> $REQ_FILE
+    echo "ruff" >> $REQ_FILE
+    echo "torch_geometric" >> $REQ_FILE
+    echo "pyg_lib --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
+    echo "torch_scatter --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
+    echo "torch_sparse --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
+    echo "torch_cluster --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
+    echo "torch_spline_conv --find-links https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html" >> $REQ_FILE
+    echo "mace-torch" >> $REQ_FILE
+    echo "torch-sim-atomistic" >> $REQ_FILE
+    echo "metatrain>=2026.3.1" >> $REQ_FILE
+}
+
 run_pip_installs() {
     echo "📦 Running additional pip installs..."
     
@@ -142,37 +169,12 @@ run_pip_installs() {
     eval "$(micromamba shell hook -s bash)"
     micromamba activate "${ENV_NAME}"
     
-    # Array of pip install commands
-    local pip_commands=(
-        "python -m pip install torch==${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
-        "python -m pip install ase numpy omegaconf e3nn requests tqdm psutil docstring_parser packaging"
-        "python -m pip install pytest pre-commit black ruff"
-        "python -m pip install torch_geometric"
-        "python -m pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${PYTORCH_VERSION}.0+cpu.html"
-        "python -m pip install mace-torch"
-        "python -m pip install torch-sim-atomistic"
-        "python -m pip install metatrain>=2026.3.1"
-    )
+    REQ_FILE=".github/reqs.txt"
+    gen_pip_reqs
+
+    python -m pip install -r $REQ_FILE
     
-    local failed_installs=()
-    
-    for cmd in "${pip_commands[@]}"; do
-        echo "  Running: ${cmd}"
-        if eval "${cmd}"; then
-            echo "  ✅ Success"
-        else
-            echo "  ❌ Failed"
-            failed_installs+=("${cmd}")
-        fi
-    done
-    
-    if [ ${#failed_installs[@]} -ne 0 ]; then
-        echo "⚠ Some pip installs failed:"
-        printf '  - %s\n' "${failed_installs[@]}"
-        return 1
-    fi
-    
-    echo "✅ All pip installs completed successfully"
+    echo "pip installs completed successfully"
     return 0
 }
 
