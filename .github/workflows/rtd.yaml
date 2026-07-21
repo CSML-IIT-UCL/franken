@@ -9,7 +9,7 @@ on:
     branches:
     - main
 
-  # Allows you to run this workflow manually from the Actions tab
+  # Allows to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 # Cancel in-progress runs when pushing a new commit on the PR
@@ -59,8 +59,7 @@ jobs:
             --pytorch ${{ env.PYTORCH_VERSION }} \
             --pip-cache-dir ${{ env.PIP_CACHE_DIR }} \
             --env-name ${{ env.ENV_NAME }} \
-            --conda-create-args ${{ env.CONDA_ARGS }} \
-            --pip-install
+            --conda-create-args ${{ env.CONDA_ARGS }}
 
       - name: Install franken package
         run: |

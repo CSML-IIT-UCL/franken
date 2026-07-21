@@ -9,9 +9,7 @@ on:
       - "main"
     types: [opened, reopened, synchronize]
   schedule:
-    # Weekly tests run on main by default:
-    #   Scheduled workflows run on the latest commit on the default or base branch.
-    #   (from https://help.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
+    # Weekly tests run on main by default.
     - cron: "0 2 * * 1"
   workflow_dispatch:
 
@@ -66,8 +64,7 @@ jobs:
             --python "${{ matrix.python-version }}" \
             --pytorch "${{ matrix.pytorch-version }}" \
             --env-name "${{ env.ENV_NAME }}" \
-            --pip-cache-dir "${{ env.PIP_CACHE_DIR }}" \
-            --pip-install
+            --pip-cache-dir "${{ env.PIP_CACHE_DIR }}"
 
       - name: Install franken package
         run: |

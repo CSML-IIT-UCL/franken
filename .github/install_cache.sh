@@ -6,7 +6,6 @@ PYTHON_VERSION="3.12"
 PYTORCH_VERSION="2.10.0"
 ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
-RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
 CONDA_CREATE_ARGS=""
 export MAMBA_ROOT_PREFIX="$MICROMAMBA_DIR"
@@ -26,10 +25,6 @@ while [[ $# -gt 0 ]]; do
             ENV_NAME="$2"
             shift 2
             ;;
-        --pip-install)
-            RUN_PIP_INSTALL=true
-            shift
-            ;;
         --pip-cache-dir)
             PIP_CACHE_DIR="$2"
             shift 2
@@ -41,13 +36,13 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
-            echo "  --python VERSION        Python version (default: 3.10)"
-            echo "  --pytorch VERSION       PyTorch version (default: 2.0.0)"
-            echo "  --env-file FILE        Environment file (default: .github/env-dev.yml)"
-            echo "  --env-name NAME        Environment name (default: test)"
-            echo "  --pip-install          Run additional pip installs after environment creation"
-            echo "  --pip-cache-dir DIR    Pip cache directory (default: ~/.cache/pip)"
-            echo "  --help                 Show this help message"
+            echo "  --python VERSION            Python version (default: 3.10)"
+            echo "  --pytorch VERSION           PyTorch version (default: 2.0.0)"
+            echo "  --env-file FILE             Environment file (default: .github/env-dev.yml)"
+            echo "  --env-name NAME             Environment name (default: test)"
+            echo "  --pip-cache-dir DIR         Pip cache directory (default: ~/.cache/pip)"
+            echo "  --conda-create-args ARGS    Extra arguments for the conda environment"
+            echo "  --help                      Show this help message"
             exit 0
             ;;
         *)
@@ -61,7 +56,7 @@ echo "🔧 Setting up micromamba environment: ${ENV_NAME}"
 echo "   Python: ${PYTHON_VERSION}"
 echo "   PyTorch: ${PYTORCH_VERSION}"
 echo "   MicroMamba environment directory: ${MICROMAMBA_DIR}"
-echo "   Run pip install: ${RUN_PIP_INSTALL}"
+echo "   Extra conda arguments: ${CONDA_CREATE_ARGS}"
 
 
 # Function to install micromamba
@@ -174,10 +169,8 @@ main() {
         ENV_FRESHLY_CREATED=false
     fi
     
-    # Run pip installs if requested
-    if [ "${RUN_PIP_INSTALL}" = true ]; then
-        run_pip_installs
-    fi
+    # Run pip installs
+    run_pip_installs
     
     # Set up environment variables for subsequent GitHub Actions steps
     if [ -n "${GITHUB_ENV:-}" ]; then
