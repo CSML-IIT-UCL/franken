@@ -319,52 +319,12 @@ class SolverConfig:
     """Controls the weight of the energy loss term. Weights are normalized to sum to 1."""
 
     force_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(
-            # start=-1, stop=2, num=10, scale="linear"
-            values=(
-                0.01,
-                0.02,
-                0.05,
-                0.1,
-                0.2,
-                0.5,
-                1.0,
-                2.0,
-                5.0,
-                10.0,
-                20.0,
-                50.0,
-                100.0,
-                200.0,
-                500.0,
-                1000.0,
-            )
-        )
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
     )
     """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
 
     stress_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(
-            # start=0.01, stop=0.99, num=10, scale="linear"
-            values=(
-                0.01,
-                0.02,
-                0.05,
-                0.1,
-                0.2,
-                0.5,
-                1.0,
-                2.0,
-                5.0,
-                10.0,
-                20.0,
-                50.0,
-                100.0,
-                200.0,
-                500.0,
-                1000.0,
-            )
-        )
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
