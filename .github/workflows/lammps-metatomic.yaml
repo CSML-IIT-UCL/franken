@@ -23,7 +23,7 @@ jobs:
       PYTORCH_VERSION: "2.10"
       ENV_PREFIX: ~/micromamba
       PIP_CACHE_DIR: ~/.cache/pip
-      CONDA_ARGS: -c metatensor -c conda-forge "lammps-metatomic=*=*nompi*"
+      CONDA_ARGS: '-c metatensor -c conda-forge "lammps-metatomic=*=*nompi*"'
     steps:
       - uses: actions/checkout@v7
       - name: Additional info about the build
