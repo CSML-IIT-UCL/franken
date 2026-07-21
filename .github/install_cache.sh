@@ -135,10 +135,8 @@ gen_pip_reqs() {
     REQ_FILE=".github/reqs.txt"
     # PyTorch
     echo "-r torch_reqs.txt" >> $REQ_FILE
-    cat > ".github/torch_reqs.txt" << 'EOF'
---index-url https://download.pytorch.org/whl/cpu"
-torch==${PYTORCH_VERSION}"
-EOF
+    echo "--index-url https://download.pytorch.org/whl/cpu" >> ".github/torch_reqs.txt"
+    echo "torch==${PYTORCH_VERSION}" >> "./github/torch_reqs.txt"
     # Torch Geometric
     echo "torch_geometric" >> $REQ_FILE
     echo "-r pyg_reqs.txt" >> $REQ_FILE
