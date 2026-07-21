@@ -9,7 +9,6 @@ ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
 RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
-export MAMBA_ROOT_PREFIX="${MICROMAMBA_DIR}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -60,14 +59,8 @@ done
 echo "🔧 Setting up micromamba environment: ${ENV_NAME}"
 echo "   Python: ${PYTHON_VERSION}"
 echo "   PyTorch: ${PYTORCH_VERSION}"
-echo "   MicroMamba directory: ${MICROMAMBA_DIR}"
-# echo "   Environment file: ${ENV_FILE}"
+echo "   MicroMamba environment directory: ${MICROMAMBA_DIR}"
 echo "   Run pip install: ${RUN_PIP_INSTALL}"
-
-# if [ ! -f "$ENV_FILE" ]; then
-#     echo "❌ Error: Environment file not found."
-#     exit 2
-# fi
 
 # Create environment fingerprint for cache validation
 generate_env_fingerprint() {
@@ -91,7 +84,9 @@ install_micromamba() {
     else
         echo "✅ Micromamba already installed"
     fi
-    export PATH="${MICROMAMBA_DIR}/bin:${PATH}"
+    export PATH="${HOME}/.local/bin:${PATH}"
+    # Initialize micromamba shell hook (this sets MAMBA_ROOT_PREFIX properly)
+    eval "$(micromamba shell hook -s bash)"
 }
 
 create_environment() {
@@ -220,8 +215,8 @@ main() {
     
     # Set up environment variables for subsequent GitHub Actions steps
     if [ -n "${GITHUB_ENV:-}" ]; then
-        echo "MAMBA_EXE=${MICROMAMBA_DIR}/bin/micromamba" >> "${GITHUB_ENV}"
-        echo "MAMBA_ROOT_PREFIX=${MICROMAMBA_DIR}" >> "${GITHUB_ENV}"
+        echo "MAMBA_EXE=${MAMBA_EXE}" >> "${GITHUB_ENV}"
+        echo "MAMBA_ROOT_PREFIX=${MAMBA_ROOT_PREFIX}" >> "${GITHUB_ENV}"
         echo "CONDA_PREFIX=${MICROMAMBA_DIR}/envs/${ENV_NAME}" >> "${GITHUB_ENV}"
         echo "PIP_CACHE_DIR=${PIP_CACHE_DIR}" >> "${GITHUB_ENV}"
         
