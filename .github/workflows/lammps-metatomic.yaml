@@ -59,7 +59,7 @@ jobs:
             --pytorch ${{ env.PYTORCH_VERSION }} \
             --pip-cache-dir ${{ env.PIP_CACHE_DIR }} \
             --env-name ${{ env.ENV_NAME }} \
-            --conda-create-args ${{ env.CONDA_ARGS }} \
+            --conda-create-args '${{ env.CONDA_ARGS }}' \
             --pip-install
 
       - name: Install franken package
