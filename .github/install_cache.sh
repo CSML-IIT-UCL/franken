@@ -9,6 +9,7 @@ ENV_NAME="test"
 MICROMAMBA_DIR="${HOME}/micromamba"
 RUN_PIP_INSTALL=false
 PIP_CACHE_DIR="${HOME}/.cache/pip"
+export MAMBA_ROOT_PREFIX="$MICROMAMBA_DIR"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -85,7 +86,7 @@ install_micromamba() {
         echo "✅ Micromamba already installed"
     fi
     export PATH="${HOME}/.local/bin:${PATH}"
-    # Initialize micromamba shell hook (this sets MAMBA_ROOT_PREFIX properly)
+    # Initialize micromamba shell hook
     eval "$(micromamba shell hook -s bash)"
 }
 
