@@ -381,6 +381,9 @@ class AutotuneConfig:
     rfs: RFConfig
     """Choose the random-feature approximation."""
 
+    les: LESConfig | None
+    """Configure the Latent Ewald Summation module. Can be `None` when the module is not used."""
+
     rf_normalization: Literal["leading_eig"] | None = field(default="leading_eig")
     """Normalization strategy for the covariance matrix."""
 

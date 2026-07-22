@@ -8,6 +8,7 @@ from typing import Any, Sequence, cast, get_args
 
 from franken.config import (
     AutotuneConfig,
+    LESConfig,
     MaceBackboneConfig,
     PETBackboneConfig,
     SevennBackboneConfig,
@@ -502,11 +503,23 @@ def get_arg_groups():
         ],
         help_text="Choose the random-feature approximation.",
     )
+    les_group = ArgumentGroup(
+        "les",
+        "LES options",
+        desc="Configure the Latent Ewald Summation model",
+        data_class=LESConfig,
+        arguments=[
+            Argument.from_dataclass(LESConfig, "hidden_dim", "les-hidden-dim"),
+            Argument.from_dataclass(LESConfig, "dl", "les-dl"),
+            Argument.from_dataclass(LESConfig, "sigma", "les-sigma"),
+        ],
+    )
     return {
         "solver": solver_arg_group,
         "dataset": dset_arg_group,
         "backbone": bbone_groups,
         "rfs": rf_groups,
+        "les": les_group,
     }
 
 
@@ -600,6 +613,11 @@ def build_parser(return_groups: bool = False):
             "the requested train targets are computed."
         ),
     )
+    parser.add_argument(
+        "--les",
+        action="store_true",
+        help="Train a model with Latent Ewald Summation (LES) contributions.",
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -628,12 +646,16 @@ def parse_cli(argv):
     rf_config = groups["rfs"].to_dataclass(args)
     solver_config = groups["solver"].to_dataclass(args)
     dset_config = groups["dataset"].to_dataclass(args)
+    les_config = None
+    if args.les:
+        les_config = groups["les"].to_dataclass(args)
 
     # Initialize autotune config
     autotune_cfg = AutotuneConfig(
         dataset=dset_config,
         solver=solver_config,
         backbone=bbone_config,
+        les=les_config,
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,

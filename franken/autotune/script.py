@@ -17,6 +17,7 @@ from franken.config import (
     AutotuneConfig,
     BackboneConfig,
     HPSearchConfig,
+    LESConfig,
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
@@ -28,6 +29,7 @@ from franken.data.base import (
     TargetType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
+from franken.rf.les_model import LESFrankenPotential
 from franken.trainers import (
     LowMemRandomFeaturesTrainer,
     RandomFeaturesTrainer,
@@ -215,6 +217,7 @@ def create_solver_hpsearch_grid(
 def run_autotune(
     gnn_cfg: BackboneConfig,
     rf_cfg: RFConfig,
+    les_cfg: LESConfig | None,
     loaders: dict[str, torch.utils.data.DataLoader],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
@@ -231,16 +234,26 @@ def run_autotune(
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
     for trial_id, rf_params in rf_param_grid:
         logger.debug(f"Autotune iteration with RF parameters {rf_params}")
-
         assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
-        model = FrankenPotential(
-            gnn_config=gnn_cfg,
-            rf_config=rf_params,
-            scale_by_Z=scale_by_species,
-            num_species=loaders["train"].dataset.num_species,
-            atomic_energies=atomic_energies,
-            jac_chunk_size=jac_chunk_size,
-        )
+        if les_cfg is None:
+            model = FrankenPotential(
+                gnn_config=gnn_cfg,
+                rf_config=rf_params,
+                scale_by_Z=scale_by_species,
+                num_species=loaders["train"].dataset.num_species,
+                atomic_energies=atomic_energies,
+                jac_chunk_size=jac_chunk_size,
+            )
+        else:
+            model = LESFrankenPotential(
+                gnn_config=gnn_cfg,
+                rf_config=rf_params,
+                les_config=les_cfg,
+                scale_by_Z=scale_by_species,
+                num_species=loaders["train"].dataset.num_species,
+                atomic_energies=atomic_energies,
+                jac_chunk_size=jac_chunk_size,
+            )
 
         logs, weights = trainer.fit(model)
         for split_name, loader in loaders.items():
@@ -426,6 +439,7 @@ def autotune(cfg: AutotuneConfig):
         run_autotune(
             gnn_cfg=cfg.backbone,
             rf_cfg=cfg.rfs,
+            les_cfg=cfg.les,
             loaders=loaders,
             best_model_selection=cfg.best_model_selection,
             scale_by_species=cfg.scale_by_species,
