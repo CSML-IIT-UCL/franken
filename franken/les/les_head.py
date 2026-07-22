@@ -12,8 +12,8 @@ from les.ewald import Ewald
 
 
 def initialize_les(les_config: LESConfig, feature_dim: int):
-    random_features_params = sanitize_init_dict(LESHead, dataclasses.asdict(les_config))
-    return LESHead(input_dim=feature_dim, **random_features_params)
+    les_params = sanitize_init_dict(LESHead, dataclasses.asdict(les_config))
+    return LESHead(input_dim=feature_dim, **les_params)
 
 
 class LESHead(nn.Module):
@@ -27,20 +27,32 @@ class LESHead(nn.Module):
 
     def __init__(
         self,
-        input_dim,
-        hidden_dim=128,
-        dl=2.0,
+        input_dim: int,
+        n_layers: int = 3,
+        hidden_dim: int | tuple[int, ...] = (32, 16),
+        dl: float = 2.0,
         sigma=1.0,
+        les_output_scale: float = 0.1,
+        add_linear_nn: bool = True,
     ):
         super().__init__()
+        self.les_output_scale = les_output_scale
 
-        self.charge_net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.SiLU(),
-            nn.Linear(hidden_dim, 1),
-        )
+        # Build the MLP
+        if isinstance(hidden_dim, int):
+            n_hidden = [hidden_dim] * (n_layers - 1)
+        else:
+            n_hidden = list(hidden_dim)
+        n_neurons = [input_dim] + n_hidden + [1]
+        layers = []
+        for i in range(n_layers - 1):
+            layers.append(nn.Linear(n_neurons[i], n_neurons[i + 1]))
+            layers.append(nn.SiLU(inplace=True))
+        layers.append(nn.Linear(n_neurons[-2], n_neurons[-1]))
+        self.outnet = nn.Sequential(*layers)
+        self.linear_nn = None
+        if add_linear_nn:
+            self.linear_nn = nn.Linear(input_dim, 1)
 
         self.ewald = Ewald(
             dl=dl,
@@ -93,11 +105,16 @@ class LESHead(nn.Module):
         -------
         energy : tensor shape (1,)
         """
-        q = self.charge_net(atom_features).squeeze(-1)
-        ewald_out = self.ewald(
-            q=q,
+        # predict atomwise contributions
+        y = self.outnet(atom_features)
+        if self.linear_nn is not None:
+            y = y + self.linear_nn(atom_features)
+        y = y * self.les_output_scale
+
+        E_lr, q_induced, u_induced = self.ewald(
+            q=y,
             r=configuration.atom_pos,
             cell=configuration.cell,
             batch=configuration.batch_ids,
         )
-        return ewald_out["pot"]
+        return E_lr

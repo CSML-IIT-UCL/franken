@@ -203,22 +203,11 @@ class LESFrankenPotential(FrankenPotential):
         The parameter `weights` can be used to specified the model's coefficients. Otherwise the ones stored in
         :attr:`FrankenPotential.rf.weights` will be used instead.
 
-        The different values of `forces_mode` correspond to different ways of differentiating
-        through the model to obtain the forces acting on the atoms:
-
-        * :code:`"torch.func"` is best for when `weights` contains multiple linear models on which to
-            perform inference at the same time (in that case `weights` should be a matrix of
-            shape `[n_linear_models, model_size]`).
-
-        * :code:`"torch.autograd"` is best for when a single linear model is used (i.e. when `weights`
-            is a vector of shape `[model_size]`)
-
         Args:
             targets: the target quantities to compute. For example, :code:`"energy"`, :code:`"forces"`
                 or :code:`"stress"`. To see all available quantities, check :attr:`"franken.data.base.TargetType"`.
             weights: weights of the random feature model. Defaults to None, in which case
                 the weights set in :attr:`FrankenPotential.rf` will be used instead.
-            differential_mode: how to compute the model's differential quantites. Defaults to :code:`"torch.autograd"`.
             add_energy_shift: whether to add the energy shift to the energy.
 
         Returns:
