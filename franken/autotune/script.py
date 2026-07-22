@@ -35,6 +35,7 @@ from franken.trainers import (
     RandomFeaturesTrainer,
 )
 from franken.trainers.log_utils import DataSplit, LogEntry
+from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset
@@ -421,6 +422,8 @@ def autotune(cfg: AutotuneConfig):
         trainer_cls = RandomFeaturesTrainer
         if len(cfg.train_targets) == 2:
             trainer_cls = LowMemRandomFeaturesTrainer
+        if cfg.les is not None:
+            trainer_cls = RandomFeaturesEwaldsTrainer
 
         trainer = trainer_cls(
             train_dataloader=loaders["train"],

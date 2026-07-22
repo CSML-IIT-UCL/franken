@@ -1,8 +1,12 @@
+"""Copyright Bingqing Cheng 2026
+Taken from https://github.com/ChengUCB/les
+"""
+
 import torch
 import torch.nn as nn
 from typing import Optional, Tuple, List
 
-from les.module.make_kernels import make_kernels
+from franken.les.make_kernels import make_kernels
 
 __all__ = ["Ewald"]
 

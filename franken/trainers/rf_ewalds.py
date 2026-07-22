@@ -35,14 +35,15 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self,
         train_dataloader: torch.utils.data.DataLoader,
         training_targets: list[TargetType],
-        l2_penalty: float,
-        target_weight: Mapping[TargetType, float],
+        l2_penalty: float | list[float],
+        target_weight: Mapping[TargetType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
         device: torch.device | str | int = "cuda:0",
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
+        metrics: list[str] | None = None,
     ):
         super().__init__(
             train_dataloader,
@@ -55,6 +56,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             device=device,
             dtype=dtype,
             save_fmaps=save_fmaps,
+            metrics=metrics,
         )
         # ensure no multi-weight
         for k, v in self.solver_hps:
@@ -68,15 +70,13 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.les_lr = 1e-3
 
     @no_jit()
-    def fit(
+    def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, model: LESFrankenPotential
-    ) -> tuple[
-        LogCollection, torch.Tensor
-    ]:  # pyright: ignore[reportIncompatibleMethodOverride]
+    ) -> tuple[LogCollection, torch.Tensor]:
         """Fit a given franken model on the training set.
 
         Args:
-            model (FrankenPotential): The model which defines GNN and random features.
+            model (LESFrankenPotential): The model which defines GNN, random features and LES module.
 
         Returns:
             tuple[LogCollection, torch.Tensor]:

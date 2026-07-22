@@ -248,9 +248,12 @@ class PETBackboneConfig(BackboneConfig):
 # TODO: Document LES/Ewalds parameters and add them here.
 @dataclass
 class LESConfig:
-    hidden_dim: int = 128
-    dl: float = 2.0
+    n_layers: int = 3
+    hidden_dim: int | tuple[int, ...] = (32, 16)
+    dl: float = 1.5
     sigma: float = 1.0
+    les_output_scale: float = 0.1
+    add_linear_nn: bool = True
 
     def to_ckpt(self):
         return dataclasses.asdict(self)

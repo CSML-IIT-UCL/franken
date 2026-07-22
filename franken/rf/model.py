@@ -461,7 +461,7 @@ class FrankenPotential(torch.nn.Module):
         The parameter `weights` can be used to specified the model's coefficients. Otherwise the ones stored in
         :attr:`FrankenPotential.rf.weights` will be used instead.
 
-        The different values of `forces_mode` correspond to different ways of differentiating
+        The different values of `differential_mode` correspond to different ways of differentiating
         through the model to obtain the forces acting on the atoms:
 
         * :code:`"torch.func"` is best for when `weights` contains multiple linear models on which to
