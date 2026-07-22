@@ -2,6 +2,7 @@ from abc import ABC
 import ast
 from copy import deepcopy
 from dataclasses import dataclass, field
+import dataclasses
 import logging
 from typing import Any, ClassVar, Literal, Optional, Sequence, Union
 
@@ -242,6 +243,21 @@ class SevennBackboneConfig(BackboneConfig):
 @dataclass(slots=True)
 class PETBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "pet"
+
+
+# TODO: Document LES/Ewalds parameters and add them here.
+@dataclass
+class LESConfig:
+    hidden_dim: int = 128
+    dl: float = 2.0
+    sigma: float = 1.0
+
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return LESConfig(**ckpt)
 
 
 @dataclass
