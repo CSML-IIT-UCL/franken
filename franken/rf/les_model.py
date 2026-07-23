@@ -11,7 +11,7 @@ from franken.data import Configuration
 import franken.data.base
 from franken.les.les_head import initialize_les
 from franken.rf.model import FrankenPotential
-from franken.utils.derivatives import full_forces_autograd, full_forces_stress_autograd
+from franken.utils.derivatives import forces_bwdad, forces_stress_bwdad
 
 logger = logging.getLogger("franken")
 
@@ -168,11 +168,9 @@ class LESFrankenPotential(FrankenPotential):
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
-            return full_forces_stress_autograd(
-                data, fn=self._energy_aux, weights=weights
-            )
+            return forces_stress_bwdad(data, fn=self._energy_aux, weights=weights)
         elif compute_force:
-            return full_forces_autograd(data, fn=self._energy_aux, weights=weights)
+            return forces_bwdad(data, fn=self._energy_aux, weights=weights)
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
             return {franken.data.base.ENERGY_TARGET_KEY: energy}
@@ -183,9 +181,9 @@ class LESFrankenPotential(FrankenPotential):
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
-            return full_forces_stress_autograd(data, fn=self._les_energy_aux)
+            return forces_stress_bwdad(data, fn=self._les_energy_aux)
         elif compute_force:
-            return full_forces_autograd(data, fn=self._les_energy_aux)
+            return forces_bwdad(data, fn=self._les_energy_aux)
         else:
             _, energy = self._les_energy_aux(data.atom_pos, None, data)  # [M, N]
             return {franken.data.base.ENERGY_TARGET_KEY: energy}
