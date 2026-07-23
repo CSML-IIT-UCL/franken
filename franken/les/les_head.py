@@ -97,6 +97,7 @@ class LESHead(nn.Module):
     def forward(
         self,
         atom_features: torch.Tensor,
+        atom_pos: torch.Tensor,
         configuration: Configuration,
     ) -> torch.Tensor:
         """
@@ -116,11 +117,15 @@ class LESHead(nn.Module):
         if self.linear_nn is not None:
             y = y + self.linear_nn(atom_features)
         y = y * self.les_output_scale
-
+        cell = configuration.cell
+        assert cell is not None
+        if cell.dim() == 2:
+            cell = cell.unsqueeze(0)
         E_lr, q_induced, u_induced = self.ewald(
             q=y,
-            r=configuration.atom_pos,
-            cell=configuration.cell,
+            r=atom_pos,
+            cell=cell,
             batch=configuration.batch_ids,
         )
+        print(f"{E_lr.requires_grad=} - {E_lr=}")
         return E_lr
