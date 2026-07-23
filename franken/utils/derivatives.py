@@ -28,7 +28,8 @@ def forces_bwdad(
 ):
     data.atom_pos.requires_grad_(True)
     _, energy = fn(data.atom_pos, displacement=None, data=data, **extra_args)
-    forces = _forces_bwdad_helper(energies=energy, data=data)
+    with torch.enable_grad():
+        forces = _forces_bwdad_helper(energies=energy, data=data)
     return {
         franken.data.base.FORCES_TARGET_KEY: forces.detach(),
         franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
@@ -68,7 +69,10 @@ def forces_stress_bwdad(
         device=data.atom_pos.device,
     ).requires_grad_(True)
     data.atom_pos.requires_grad_(True)
-    _, energy = fn(data.atom_pos, displacement=displacement, data=data, **extra_args)
+    with torch.enable_grad():
+        _, energy = fn(
+            data.atom_pos, displacement=displacement, data=data, **extra_args
+        )
     forces, stress = _forces_stress_bwdad_helper(
         energies=energy, displacement=displacement, data=data
     )
