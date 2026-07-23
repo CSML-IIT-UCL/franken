@@ -160,7 +160,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
         solver_iter = throughput(
             params_grid(self.solver_hps, split_distributed=True),
-            desc="least-squares",
+            desc=f"Least-squares (total {solver_grid_size} HPs)",
             units="models",
             device=self.device,
         )
