@@ -249,7 +249,7 @@ class PETBackboneConfig(BackboneConfig):
 @dataclass
 class LESConfig:
     n_layers: int = 3
-    hidden_dim: int | tuple[int, ...] = (32, 16)
+    hidden_dim: tuple[int, ...] = (32, 16)
     dl: float = 1.5
     sigma: float = 1.0
     les_output_scale: float = 0.1
