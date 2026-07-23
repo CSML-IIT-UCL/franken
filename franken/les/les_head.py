@@ -6,9 +6,9 @@ import torch.nn as nn
 from franken.config import LESConfig
 import franken.data.base
 from franken.data.base import Configuration
-from franken.utils.derivatives import forces_autograd, forces_stress_autograd
+from franken.utils.derivatives import _forces_bwdad_helper, _forces_stress_bwdad_helper
 from franken.utils.misc import sanitize_init_dict
-from les.ewald import Ewald
+from franken.les.ewald import Ewald
 
 
 def initialize_les(les_config: LESConfig, feature_dim: int):
@@ -29,7 +29,7 @@ class LESHead(nn.Module):
         self,
         input_dim: int,
         n_layers: int = 3,
-        hidden_dim: int | tuple[int, ...] = (32, 16),
+        hidden_dim: tuple[int, ...] = (32, 16),
         dl: float = 2.0,
         sigma=1.0,
         les_output_scale: float = 0.1,
@@ -40,7 +40,13 @@ class LESHead(nn.Module):
 
         # Build the MLP
         if isinstance(hidden_dim, int):
-            n_hidden = [hidden_dim] * (n_layers - 1)
+            hidden_dim = (hidden_dim,)
+        if len(hidden_dim) == 1:
+            n_hidden = [hidden_dim[0]] * (n_layers - 1)
+        elif len(hidden_dim) != n_layers - 1:
+            raise ValueError(
+                f"Expected {n_layers - 1} dimensions for the MLP. Found dimensions {hidden_dim}."
+            )
         else:
             n_hidden = list(hidden_dim)
         n_neurons = [input_dim] + n_hidden + [1]
@@ -71,14 +77,14 @@ class LESHead(nn.Module):
         energies = self(atom_features, data)
         if compute_stress:
             assert displacement is not None
-            forces, stress = forces_stress_autograd(energies, displacement, data)
+            forces, stress = _forces_stress_bwdad_helper(energies, displacement, data)
             return {
                 franken.data.base.FORCES_TARGET_KEY: forces.detach(),
                 franken.data.base.STRESS_TARGET_KEY: stress.detach(),
                 franken.data.base.ENERGY_TARGET_KEY: energies.detach(),
             }
         elif compute_force:
-            forces, stress = forces_autograd(energies, data)
+            forces, stress = _forces_bwdad_helper(energies, data)
             return {
                 franken.data.base.FORCES_TARGET_KEY: forces.detach(),
                 franken.data.base.ENERGY_TARGET_KEY: energies.detach(),
