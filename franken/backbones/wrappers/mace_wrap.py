@@ -271,7 +271,7 @@ class FrankenMACE(torch.nn.Module):
         )  # type: ignore
         if torch.jit.isinstance(rad_emb, torch.Tensor):
             edge_feats, cutoff = rad_emb, None
-        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, torch.Tensor]):
+        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[torch.Tensor]]):
             edge_feats, cutoff = rad_emb
         elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[float]]):
             edge_feats, cutoff = rad_emb

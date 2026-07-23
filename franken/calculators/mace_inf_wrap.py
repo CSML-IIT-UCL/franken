@@ -101,7 +101,7 @@ class MaceInferenceWrapper(torch.nn.Module):
         node_energy = energy.repeat(len(atom_nums)).div(len(atom_nums))
         virials: Optional[torch.Tensor] = None
         if compute_virials:
-            virials = preds[franken.data.base.STRESS_TARGET_KEY].squeeze(0)
+            virials = preds[franken.data.base.STRESS_TARGET_KEY]
         return {
             "total_energy_local": energy,
             "node_energy": node_energy,
