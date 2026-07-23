@@ -9,6 +9,7 @@ franken/datasets/water/*.zip
 
 # Random
 rsync.sh
+issue_lammps/
 
 # Docs
 docs/reference/franken-api/stubs
@@ -185,3 +186,5 @@ slurm*
 *baseline_/
 *.out
 .history/
+
+**.DS_Store
