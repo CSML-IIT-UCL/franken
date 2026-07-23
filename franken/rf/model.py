@@ -16,7 +16,7 @@ from franken.data.base import TargetType
 from franken.rf.atomic_energies import AtomicEnergiesShift
 from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
-from franken.utils.derivatives import forces_autograd, forces_stress_autograd
+from franken.utils.derivatives import _forces_bwdad_helper, _forces_stress_bwdad_helper
 from franken.utils.jac import jacfwd, tune_jacfwd_chunksize
 
 logger = logging.getLogger("franken")
@@ -172,7 +172,7 @@ class FrankenPotential(torch.nn.Module):
 
     @torch.jit.unused
     @torch.no_grad
-    def _compute_forces_stresses(
+    def _bwd_ad_forces_stress(
         self,
         data: Configuration,
         fmaps_func: bool,
@@ -206,7 +206,7 @@ class FrankenPotential(torch.nn.Module):
 
     @torch.jit.unused
     @torch.no_grad
-    def _compute_forces(
+    def _bwd_ad_forces(
         self,
         data: Configuration,
         fmaps_func: bool,
@@ -228,7 +228,7 @@ class FrankenPotential(torch.nn.Module):
             franken.data.base.ENERGY_TARGET_KEY: energy_fm,
         }
 
-    def _compute_forces_stresses_ag(
+    def _fwd_ad_forces_stress(
         self, data: Configuration, fmaps_func: bool, weights: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
         n_systems = data.natoms.numel()
@@ -244,7 +244,7 @@ class FrankenPotential(torch.nn.Module):
             _, energy = self._energy_aux(
                 data.atom_pos, displacement, data, weights=weights
             )
-        forces, stress = forces_stress_autograd(
+        forces, stress = _forces_stress_bwdad_helper(
             energies=energy, displacement=displacement, data=data
         )
         return {
@@ -253,7 +253,7 @@ class FrankenPotential(torch.nn.Module):
             franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
         }
 
-    def _compute_forces_ag(
+    def _fwd_ad_forces(
         self, data: Configuration, fmaps_func: bool, weights: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
         data.atom_pos.requires_grad_(True)
@@ -261,7 +261,7 @@ class FrankenPotential(torch.nn.Module):
             _, energy = self._feature_map_aux(data.atom_pos, None, data)
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights=weights)
-        forces = forces_autograd(energy, data)
+        forces = _forces_bwdad_helper(energy, data)
         return {
             franken.data.base.FORCES_TARGET_KEY: forces.detach(),
             franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
@@ -335,14 +335,14 @@ class FrankenPotential(torch.nn.Module):
         if compute_stress or (compute_forces and compute_stress):
             out = cast(
                 dict[TargetType, torch.Tensor],
-                self._compute_forces_stresses(
+                self._bwd_ad_forces_stress(
                     data, True, weights=None, cache_key="force_stress_fmap"
                 ),
             )
         elif compute_forces:
             out = cast(
                 dict[TargetType, torch.Tensor],
-                self._compute_forces(data, True, weights=None, cache_key="force_fmap"),
+                self._bwd_ad_forces(data, True, weights=None, cache_key="force_fmap"),
             )
         else:
             _, energy_fm = self._feature_map_aux(data.atom_pos, None, data)
@@ -391,40 +391,28 @@ class FrankenPotential(torch.nn.Module):
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress or (compute_force and compute_stress):
             if mode == "torch.func":
-                return self._compute_forces_stresses(
+                return self._bwd_ad_forces_stress(
                     data,
                     fmaps_func=False,
                     weights=weights,
                     cache_key="force_stress_energy",
                 )
             elif mode == "torch.autograd":
-                return self._compute_forces_stresses_ag(data, False, weights)
+                return self._fwd_ad_forces_stress(data, False, weights)
             else:
                 raise ValueError(f"Differentiation mode {mode} is invalid.")
         elif compute_force:
             if mode == "torch.func":
-                return self._compute_forces(
+                return self._bwd_ad_forces(
                     data, fmaps_func=False, weights=weights, cache_key="force_energy"
                 )
             elif mode == "torch.autograd":
-                return self._compute_forces_ag(data, False, weights)
+                return self._fwd_ad_forces(data, False, weights)
             else:
                 raise ValueError(f"Differentiation mode {mode} is invalid.")
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
             return {franken.data.base.ENERGY_TARGET_KEY: energy}
-
-    def _energy_from_gnn_descriptors(
-        self, gnn_descriptors: torch.Tensor, weights: torch.Tensor, data: Configuration
-    ) -> torch.Tensor:
-        # compute RFF energy
-        feature_map = self.rfs_from_descriptor(gnn_descriptors, data).to(
-            dtype=weights.dtype
-        )  # [N, F]
-        natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
-        rff_energies = torch.matmul(feature_map, weights.T).T  # [M, N]
-        rff_energies = natoms[None, :] * rff_energies
-        return rff_energies
 
     def _get_jacobian_chunk_size(
         self, func, func_inputs, argnums: int | tuple[int, int] = 0
@@ -434,7 +422,6 @@ class FrankenPotential(torch.nn.Module):
         else:
             jac_chunk_size = self.jac_chunk_size
             if jac_chunk_size == "auto":
-                # TODO: We can probably cache the value for different functions to avoid multiple tuner runs.
                 jac_chunk_size = tune_jacfwd_chunksize(
                     test_sample=func_inputs,
                     func=func,
