@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 metatomic_torch = pytest.importorskip("metatomic.torch")
-metatomic_ase_calculator = pytest.importorskip("metatomic.torch.ase_calculator")
+metatomic_ase_calculator = pytest.importorskip("metatomic_ase")
 pytest.importorskip("metatensor.torch")
 pytest.importorskip("metatrain")
 

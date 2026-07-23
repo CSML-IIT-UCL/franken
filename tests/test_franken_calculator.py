@@ -4,6 +4,7 @@ import subprocess
 
 import ase
 import ase.md
+import ase.md.melchionna
 import ase.md.npt
 import numpy as np
 import pytest
@@ -80,7 +81,7 @@ def init_npt_md(calc):
     assert isinstance(init_traj_atoms, ase.Atoms)
     init_traj_atoms.calc = calc
     MaxwellBoltzmannDistribution(init_traj_atoms, temperature_K=300)
-    dyn = ase.md.npt.NPT(
+    dyn = ase.md.melchionna.MelchionnaNPT(
         init_traj_atoms,
         timestep=1.0 * units.fs,
         temperature_K=300,

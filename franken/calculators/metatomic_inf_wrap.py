@@ -156,7 +156,7 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         # tensor maps. Otherwise, we sum the atomic predictions over the atoms
         # to get the final per-structure predictions for each requested output.
         for output_name, atomic_property in out_tmap.items():
-            if outputs[output_name].per_atom:
+            if outputs[output_name].sample_kind == "atom":
                 out_tmap[output_name] = atomic_property
             else:
                 out_tmap[output_name] = sum_over_atoms(atomic_property)

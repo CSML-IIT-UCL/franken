@@ -1,31 +1,20 @@
-from copy import deepcopy
 from pathlib import Path
 import os
-
-from tests.test_franken_calculator import GNN_CONFIGS
-
 os.environ["OMP_NUM_THREADS"] = "8"
-from unittest.mock import DEFAULT, patch
 
 import numpy as np
 import pytest
-import torch
 
 from franken.trainers.log_utils import LogCollection
 from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig
-from franken.calculators.ase_calc import FrankenCalculator
 from franken.autotune.cli import parse_cli
 from franken.autotune.script import init_loaders, run_autotune
-from franken.data import FrankenAtomsDataset
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
-from franken.rf.model import FrankenPotential
-from franken.rf.scaler import Statistics
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, TargetType
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
-from franken.utils.misc import garbage_collection_cuda
 from franken.datasets.registry import DATASET_REGISTRY
 
 from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
-from .utils import are_dicts_close, cleanup_dir, create_temp_dir, mocked_gnn
+from .utils import cleanup_dir, create_temp_dir
 
 RF_PARAMETRIZE = [
     GaussianRFConfig(num_random_features=128, length_scale=1.0),
@@ -66,12 +55,12 @@ def test_integration(gnn_cfg, device, atomic_energies):
         run_autotune(
             gnn_cfg=gnn_cfg,
             rf_cfg=rf_cfg,
+            les_cfg=None,
             loaders=loaders,
             scale_by_species=False,
             jac_chunk_size="auto",
             trainer=trainer,
             atomic_energies=atomic_energies,
-
         )
         print(f"{list(temp_dir.glob('*'))}")
         assert (temp_dir / "best.json").is_file()

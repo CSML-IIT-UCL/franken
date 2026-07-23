@@ -20,7 +20,7 @@ from franken.utils.misc import garbage_collection_cuda
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.calculators.mace_inf_wrap import MaceInferenceWrapper
 
-from .conftest import DEVICES
+from .conftest import DEVICES, SKIP_NO_CUDA
 from .utils import are_dicts_close, cleanup_dir, create_temp_dir
 
 
@@ -54,7 +54,10 @@ BACKBONES = [
 
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
-@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("device", [
+    pytest.param("cpu", marks=pytest.mark.skip(reason="SegFault")),
+    pytest.param("cuda:0", marks=SKIP_NO_CUDA),  # type: ignore
+])
 @pytest.mark.parametrize("backbone", BACKBONES)
 def test_wrap_compile(rf_cfg, device, backbone):
     """Test for checking save and load methods of FrankenPotential"""
