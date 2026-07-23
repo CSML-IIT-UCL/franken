@@ -177,8 +177,9 @@ def hps_from_config(cfg):
         hp_def = getattr(cfg, field.name)
         if isinstance(hp_def, HPSearchConfig):
             hp_iterators[field.name] = hp_def.get_vals()
+        elif isinstance(hp_def, (list, tuple)):
+            hp_iterators[field.name] = hp_def
         else:
-
             hp_iterators[field.name] = [hp_def]
     return hp_iterators
 
