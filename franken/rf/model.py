@@ -245,7 +245,7 @@ class FrankenPotential(torch.nn.Module):
                 data.atom_pos, displacement, data, weights=weights
             )
         forces, stress = _forces_stress_bwdad_helper(
-            energies=energy, displacement=displacement, data=data
+            energies=energy, displacement=displacement, data=data, is_training=False
         )
         return {
             franken.data.base.FORCES_TARGET_KEY: forces.detach(),
@@ -261,7 +261,7 @@ class FrankenPotential(torch.nn.Module):
             _, energy = self._feature_map_aux(data.atom_pos, None, data)
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights=weights)
-        forces = _forces_bwdad_helper(energy, data)
+        forces = _forces_bwdad_helper(energy, data, is_training=False)
         return {
             franken.data.base.FORCES_TARGET_KEY: forces.detach(),
             franken.data.base.ENERGY_TARGET_KEY: energy.detach(),

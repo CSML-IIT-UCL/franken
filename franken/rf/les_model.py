@@ -142,7 +142,7 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        les_energies = self.les(gnn_descriptors, data)
+        les_energies = self.les(gnn_descriptors, atom_pos, data)
         energies = rff_energies + les_energies
 
         return energies.sum(1), energies
@@ -154,36 +154,46 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self.les(gnn_descriptors, data)
-        return les_energies.sum(1), les_energies
+        les_energies = self.les(gnn_descriptors, atom_pos, data)
+        return les_energies, les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         weights: torch.Tensor | None,
         data: Configuration,
         targets: list[str],
+        is_training: bool,
     ) -> dict[str, torch.Tensor]:
         if weights is None:
             weights = self.rf.weights
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
-            return forces_stress_bwdad(data, fn=self._energy_aux, weights=weights)
+            return forces_stress_bwdad(
+                data, fn=self._energy_aux, is_training=is_training, weights=weights
+            )
         elif compute_force:
-            return forces_bwdad(data, fn=self._energy_aux, weights=weights)
+            return forces_bwdad(
+                data, fn=self._energy_aux, is_training=is_training, weights=weights
+            )
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
             return {franken.data.base.ENERGY_TARGET_KEY: energy}
 
     def predict_les(
-        self, data: Configuration, targets: list[str]
+        self,
+        data: Configuration,
+        targets: list[str],
+        is_training: bool = False,
     ) -> dict[str, torch.Tensor]:
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
-            return forces_stress_bwdad(data, fn=self._les_energy_aux)
+            return forces_stress_bwdad(
+                data, fn=self._les_energy_aux, is_training=is_training
+            )
         elif compute_force:
-            return forces_bwdad(data, fn=self._les_energy_aux)
+            return forces_bwdad(data, fn=self._les_energy_aux, is_training=is_training)
         else:
             _, energy = self._les_energy_aux(data.atom_pos, None, data)  # [M, N]
             return {franken.data.base.ENERGY_TARGET_KEY: energy}
@@ -195,6 +205,7 @@ class LESFrankenPotential(FrankenPotential):
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",
         add_energy_shift: bool = True,
+        is_training: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Infer energy, forces and other quantities for an atomic system with a learned RF model.
 
@@ -221,7 +232,7 @@ class LESFrankenPotential(FrankenPotential):
             Use `"torch.autograd"` if the model has been processed by :code:`torch.jit.script`.
         """
         natoms = torch.atleast_1d(data.natoms)
-        out = self._predict(weights, data, targets)
+        out = self._predict(weights, data, targets, is_training=is_training)
 
         if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in targets:
             out[franken.data.base.ENERGY_TARGET_KEY] = out[
