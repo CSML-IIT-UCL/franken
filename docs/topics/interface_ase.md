@@ -18,7 +18,10 @@ atoms.calc = FrankenCalculator("path/to/best_ckpt.pt", device="cuda:0")
 
 energy = atoms.get_potential_energy()
 forces = atoms.get_forces()
+stress = atoms.get_stress()
 ```
+
+> **Note**: `FrankenCalculator` strictly adheres to [ASE units](https://docs.ase-lib.org/ase/units.html). The predicted `energy` is returned in `eV`, `forces` in `eV/Å`, and `stress` in `eV/Å³`. Similarly, when coupling the calculator with an ASE molecular dynamics engine (like `NPT`), target pressures and parameters should be explicitly converted to these atomic units using the constants provided in `ase.units`.
 
 ## Run molecular dynamics in ASE
 

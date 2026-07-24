@@ -1,5 +1,12 @@
 # Minimal Example
 
+## Dataset format and Measurement Units
+
+When parsing `.xyz` or `.extxyz` files (such as `train.xyz` and `val.xyz` below), Franken inherits the default [ASE (Atomic Simulation Environment) standard for units](https://docs.ase-lib.org/ase/units.html). Ensure your data adheres to the following:
+* **Energy**: `eV`
+* **Forces**: `eV/Å`
+* **Stress**: `eV/Å³` (Note: if your simulation engine outputs stress in `kbar` -- such as VASP -- you must manually convert it before passing the dataset to Franken. The conversion factor is `1 kbar` $\approx 1/1602.176634$ `eV/Å³`).
+
 ### Train 
 
 Franken models can be easily trained using the autotune CLI tool:
