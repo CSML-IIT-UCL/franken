@@ -65,6 +65,13 @@ class LESHead(nn.Module):
             sigma=sigma,
         )
 
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.zeros_(module.weight)
+                # nn.init.normal_(module.weight, 0.01)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     def predict(
         self,
         atom_features: torch.Tensor,
