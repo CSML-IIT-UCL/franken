@@ -67,8 +67,7 @@ class LESHead(nn.Module):
 
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                nn.init.zeros_(module.weight)
-                # nn.init.normal_(module.weight, 0.01)
+                nn.init.normal_(module.weight, std=0.01)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
@@ -134,5 +133,4 @@ class LESHead(nn.Module):
             cell=cell,
             batch=configuration.batch_ids,
         )
-        print(f"{E_lr.requires_grad=} - {E_lr=}")
         return E_lr
