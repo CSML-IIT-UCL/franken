@@ -24,23 +24,32 @@ useful for when there is a single (or few) outputs and many inputs
 def forces_bwdad(
     data: Configuration,
     fn: Callable,
+    is_training: bool = False,
     **extra_args: torch.Tensor,
 ):
     data.atom_pos.requires_grad_(True)
-    _, energy = fn(data.atom_pos, displacement=None, data=data, **extra_args)
     with torch.enable_grad():
-        forces = _forces_bwdad_helper(energies=energy, data=data)
+        _, energy = fn(data.atom_pos, displacement=None, data=data, **extra_args)
+        forces = _forces_bwdad_helper(
+            energies=energy, data=data, is_training=is_training
+        )
+    if not is_training:
+        forces = forces.detach()
+        energy = energy.detach()
     return {
-        franken.data.base.FORCES_TARGET_KEY: forces.detach(),
-        franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
+        franken.data.base.FORCES_TARGET_KEY: forces,
+        franken.data.base.ENERGY_TARGET_KEY: energy,
     }
 
 
-def _forces_bwdad_helper(energies: torch.Tensor, data: Configuration):
+def _forces_bwdad_helper(
+    energies: torch.Tensor, data: Configuration, is_training: bool
+):
     n_sols = energies.shape[0]
     n_atoms = data.atom_pos.shape[0]
     force_lst = []
     for i in range(n_sols):  # each model (M) independently
+        retain_graph = True if is_training else i < n_sols - 1
         cur_energy: torch.Tensor = energies[i]
         # NOTE: complex type annotation required by jit.script
         grad_out: List[Optional[torch.Tensor]] = [torch.ones_like(cur_energy)]
@@ -48,7 +57,7 @@ def _forces_bwdad_helper(energies: torch.Tensor, data: Configuration):
             outputs=[cur_energy],
             inputs=[data.atom_pos],
             grad_outputs=grad_out,  # type: ignore
-            retain_graph=i < n_sols - 1,
+            retain_graph=retain_graph,
         )
         grad = grads[0]
         assert grad is not None
@@ -60,6 +69,7 @@ def _forces_bwdad_helper(energies: torch.Tensor, data: Configuration):
 def forces_stress_bwdad(
     data: Configuration,
     fn: Callable,
+    is_training: bool = False,
     **extra_args: torch.Tensor,
 ):
     n_systems = data.natoms.numel()
@@ -73,18 +83,28 @@ def forces_stress_bwdad(
         _, energy = fn(
             data.atom_pos, displacement=displacement, data=data, **extra_args
         )
-    forces, stress = _forces_stress_bwdad_helper(
-        energies=energy, displacement=displacement, data=data
-    )
+        forces, stress = _forces_stress_bwdad_helper(
+            energies=energy,
+            displacement=displacement,
+            data=data,
+            is_training=is_training,
+        )
+    if not is_training:
+        stress = stress.detach()
+        forces = forces.detach()
+        energy = energy.detach()
     return {
-        franken.data.base.FORCES_TARGET_KEY: forces.detach(),
-        franken.data.base.STRESS_TARGET_KEY: stress.detach(),
-        franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
+        franken.data.base.FORCES_TARGET_KEY: forces,
+        franken.data.base.STRESS_TARGET_KEY: stress,
+        franken.data.base.ENERGY_TARGET_KEY: energy,
     }
 
 
 def _forces_stress_bwdad_helper(
-    energies: torch.Tensor, displacement: torch.Tensor, data: Configuration
+    energies: torch.Tensor,
+    displacement: torch.Tensor,
+    data: Configuration,
+    is_training: bool,
 ):
     """
     energies: [n_sols, n_systems]
@@ -96,6 +116,7 @@ def _forces_stress_bwdad_helper(
 
     force_lst, virial_lst = [], []
     for i in range(n_sols):  # each model (M) independently
+        retain_graph = True if is_training else i < n_sols - 1
         cur_energy: torch.Tensor = energies[i]
         # NOTE: complex type annotation required by jit.script
         grad_out: List[Optional[torch.Tensor]] = [torch.ones_like(cur_energy)]
@@ -103,7 +124,7 @@ def _forces_stress_bwdad_helper(
             outputs=[cur_energy],
             inputs=[data.atom_pos, displacement],
             grad_outputs=grad_out,  # type: ignore
-            retain_graph=i < n_sols - 1,
+            retain_graph=retain_graph,
         )
         g0 = grads[0]
         assert g0 is not None
