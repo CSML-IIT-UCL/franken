@@ -361,6 +361,7 @@ def get_dataset_paths(
 
 
 def autotune(cfg: AutotuneConfig):
+    torch.manual_seed(cfg.seed)
     run_dir = Path(cfg.run_dir)
 
     if torch.cuda.is_available():

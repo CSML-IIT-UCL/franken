@@ -1,9 +1,11 @@
+from collections import defaultdict
 import hashlib
 import logging
 from pathlib import Path
 from time import perf_counter
 from typing import Literal, Mapping, cast
 
+import numpy as np
 import torch
 import torch.utils.data
 from torch import Tensor
@@ -59,15 +61,71 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             metrics=metrics,
         )
         # ensure no multi-weight
-        for k, v in self.solver_hps:
+        for k, v in self.solver_hps.items():
             if len(v) > 1:
                 raise ValueError(
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.num_les_iterations = 10
+        self.num_les_iterations = 100
         self.num_outer_iterations = 10
         self.les_lr = 1e-3
+
+    def create_log_entry(self, rf_hps, model):
+        model_hash = hashlib.md5(str(model.hyperparameters).encode())
+        model_hash = model_hash.hexdigest()
+        solver_hps = rf_hps | {
+            "dtype": self.buffer_dt,
+            "les_lr": self.les_lr,
+            "les_optim": "adam",
+            "num_outer": self.num_outer_iterations,
+            "num_inner": self.num_les_iterations,
+        }
+        hp_groups = model.hyperparameters | {"solver": solver_hps}
+        hyperparameters = []
+        for group_name, hps in hp_groups.items():
+            hyperparameters.append(HyperParameterGroup.from_dict(group_name, hps))
+
+        local_log = LogEntry(
+            checkpoint_hash=model_hash,
+            checkpoint_rf_weight_id=0,
+            timings_cov_coeffs=0,  # TODO: Fix timings in logs (need to allow arbitrary timings)
+            timings_solve=0,
+            hyperparameters=hyperparameters,
+        )
+        return local_log
+
+    def eval_summary(self, log: LogEntry, epoch: int, split: DataSplit) -> str:
+        hp_summary = f"[Epoch {epoch:3}] {split.name}"
+
+        def _get_first_available_metric(
+            candidates: list[str],
+        ) -> float | None:
+            for name in candidates:
+                try:
+                    return log.get_metric(name, split)
+                except KeyError:
+                    pass
+            return None
+
+        energy_error = _get_first_available_metric(
+            ["energy_MAE", "energy_RMSE"],
+        )
+        forces_error = _get_first_available_metric(
+            ["forces_MAE", "forces_RMSE"],
+        )
+        stress_error = _get_first_available_metric(
+            ["stress_MAE", "stress_RMSE"],
+        )
+        if energy_error is None:
+            energy_error = float("nan")
+        hp_summary += f" (energy {energy_error:.2f} meV/atom)"
+        if forces_error is None:
+            forces_error = float("nan")
+        hp_summary += f" (forces {forces_error:.2f} meV/Ang)"
+        if stress_error is not None:
+            hp_summary += f" (stress {stress_error:.2f} meV/Ang^3)"
+        return hp_summary
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -85,9 +143,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.patch_e3nn()
 
         model = model.to(self.device)
+        model.train()
         self.on_fit_start(model)
-        model_hash = hashlib.md5(str(model.hyperparameters).encode())
-        model_hash = model_hash.hexdigest()
 
         _, rf_hps = next(params_grid(self.solver_hps))
 
@@ -119,14 +176,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
             inner_data = iter(
                 self.train_dataloader
-            )  # TODO: Make sure this is randomized!
-            optim = torch.optim.Adam(model.les.parameters(), self.les_lr)
+            )  # TODO: Make sure this is randomized, otherwise every epoch may pick the same data
             # TODO: Fix for multi-process
+            optim = torch.optim.Adam(model.les.parameters(), self.les_lr)
+            avg_losses = defaultdict(list)
             for inner_it in (
                 pb := tqdm.tqdm(range(self.num_les_iterations), desc="LES")
             ):
-                data, targets = next(inner_data)
-                optim.zero_grad()
+                try:
+                    data, targets = next(inner_data)
+                except StopIteration:
+                    inner_data = iter(self.train_dataloader)
+                    data, targets = next(inner_data)
 
                 # 1. compute predictions of the joint model
                 t_les_fwd_start = perf_counter()
@@ -134,6 +195,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     targets=self.training_targets,  # type: ignore
                     data=data,
                     weights=rf_weights,
+                    is_training=True,
+                    add_energy_shift=False,
                 )
                 t_les_fwd += perf_counter() - t_les_fwd_start
 
@@ -148,44 +211,40 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         )
                     # TODO: This is only correct for batch-size=1
                     normalized_weight = target_weights[tt] / weights_norm_factor
-                    losses[tt] = torch.mean(
-                        normalized_weight * torch.square(preds[tt] - tgt)
+                    losses[tt] = normalized_weight * torch.mean(
+                        torch.square(preds[tt] - tgt)
                     )
+                    avg_losses[tt].append(losses[tt].item())
                 loss = cast(torch.Tensor, sum(losses.values()))
 
                 # 3. Optimize LES parameters
                 t_les_bwd_start = perf_counter()
+                optim.zero_grad()
                 loss.backward()
+                # with torch.no_grad():
+                #     for pname, param in model.les.named_parameters():
+                #         if param.grad is not None:
+                #             print(f"{pname}: {torch.linalg.norm(param.grad.view(-1))}")
                 optim.step()
                 t_les_bwd += perf_counter() - t_les_bwd_start
 
                 # Limited loss reporting
-                loss_str = f"[{outer_it:3}-{inner_it:4}] LES loss" ", ".join(
-                    [f"{k}={v.item():.2e}" for k, v in losses.items()]
+                loss_str = f"[{outer_it}/{inner_it}] LES loss " + ", ".join(
+                    [f"{k}={np.mean(v):.2e}" for k, v in avg_losses.items()]
                 )
                 pb.set_description(loss_str)
+            # Evaluate on training data
+            logc = LogCollection([self.create_log_entry(rf_hps, model)])
+            self.evaluate(
+                model,
+                self.train_dataloader,
+                log_collection=logc,
+                all_weights=rf_weights.unsqueeze(0),
+            )
+            print(self.eval_summary(log=logc[0], epoch=outer_it, split=DataSplit.TRAIN))
 
         # Logging
-        solver_hps = rf_hps | {
-            "dtype": self.buffer_dt,
-            "les_lr": self.les_lr,
-            "les_optim": "adam",
-            "num_outer": self.num_outer_iterations,
-            "num_inner": self.num_les_iterations,
-        }
-        hp_groups = model.hyperparameters | {"solver": solver_hps}
-        hyperparameters = []
-        for group_name, hps in hp_groups.items():
-            hyperparameters.append(HyperParameterGroup.from_dict(group_name, hps))
-
-        local_log = LogEntry(
-            checkpoint_hash=model_hash,
-            checkpoint_rf_weight_id=0,
-            timings_cov_coeffs=0,  # TODO: Fix timings in logs (need to allow arbitrary timings)
-            timings_solve=t_solve,
-            hyperparameters=hyperparameters,
-        )
-        log_collection = LogCollection([local_log])
+        log_collection = LogCollection([self.create_log_entry(rf_hps, model)])
 
         return log_collection, rf_weights
 
@@ -276,7 +335,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-
         progress_bar = throughput(
             dataloader, "coeffs", total=n_samples, device=self.device
         )
@@ -286,7 +344,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             assert data.natoms.numel() == 1, "Batched training is not supported"
             targets: Target = targets.to(device=self.device)
 
-            les_preds = model.predict_les(data, self.training_targets)
+            les_preds = model.predict_les(
+                data, self.training_targets, is_training=False
+            )
             target_fmaps = model.grad_feature_map(data, self.training_targets)
             for tgt_name in self.training_targets:
                 try:
