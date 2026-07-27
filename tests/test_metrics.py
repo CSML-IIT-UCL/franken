@@ -132,7 +132,7 @@ def random_target(cfg: Configuration, batch_size: int | None) -> Target:
 def test_batched_configs(metric_name, n_models):
     metric = fm.init_metric(metric_name, torch.device("cpu"))
     n_atoms = 4
-    
+
     cfgs = [random_cfg(n_atoms) for _ in range(5)]
     tgts = [random_target(cfg, None) for cfg in cfgs]
     prds = [random_target(cfg, n_models) for cfg in cfgs]
@@ -213,6 +213,7 @@ class TestMetricValues:
             [
                 ("forces_MAE_species_1", torch.tensor([(1.0 / 3.0) * 1000.0])),
                 ("forces_MAE_species_8", torch.tensor([(2.0 / 3.0) * 1000.0])),
+                ("forces_MAE_species_average", torch.tensor([500.0])),
             ]
         ),
         (
@@ -225,6 +226,19 @@ class TestMetricValues:
             [
                 ("forces_RMSE_species_1", torch.tensor([((1.0 / 3.0) ** 0.5) * 1000.0, 0.0])),
                 ("forces_RMSE_species_8", torch.tensor([((4.0 / 3.0) ** 0.5) * 1000.0, 0.0])),
+                (
+                    "forces_RMSE_species_average",
+                    torch.tensor(
+                        [
+                            (
+                                ((1.0 / 3.0) ** 0.5)
+                                + ((4.0 / 3.0) ** 0.5)
+                            )
+                            * 500.0,
+                            0.0,
+                        ]
+                    ),
+                ),
             ]
         )]
     )

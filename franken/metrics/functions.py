@@ -194,8 +194,11 @@ class PerSpeciesMAEMetric(BaseMetric):
         mae[:, mask] = self.buffer[:, mask] / self.samples_counter[mask]
         # unit conversion: eV/Å → meV/Å
         mae = mae * 1000
+        average = mae[:, mask].mean(dim=1)
         self.reset()
-        return [(f"{self.name}_{z}", mae[:, z]) for z in mask.nonzero().view(-1)]
+        values = [(f"{self.name}_{z}", mae[:, z]) for z in mask.nonzero().view(-1)]
+        values.append((f"{self.name}_average", average))
+        return values
 
 
 class PerSpeciesRMSEMetric(BaseMetric):
@@ -242,14 +245,17 @@ class PerSpeciesRMSEMetric(BaseMetric):
             )
         distributed.all_sum(self.buffer)
         distributed.all_sum(self.samples_counter)
-        # MAE per model, per species
+        # MSE per model, per species
         mse = torch.zeros_like(self.buffer)
         mask = self.samples_counter > 0
         mse[:, mask] = self.buffer[:, mask] / self.samples_counter[mask]
         # unit conversion: eV/Å → meV/Å
         rmse = torch.sqrt(mse) * 1000
+        average = rmse[:, mask].mean(dim=1)
         self.reset()
-        return [(f"{self.name}_{z}", rmse[:, z]) for z in mask.nonzero().view(-1)]
+        values = [(f"{self.name}_{z}", rmse[:, z]) for z in mask.nonzero().view(-1)]
+        values.append((f"{self.name}_average", average))
+        return values
 
 
 """Energy"""
