@@ -7,6 +7,7 @@ import torch
 import numpy as np
 import ase
 import ase.io
+from ase.calculators.calculator import PropertyNotImplementedError
 from tqdm import tqdm
 
 import franken.utils.distributed as dist_utils
@@ -14,7 +15,6 @@ from franken.config import BackboneConfig
 from franken.data.base import Configuration, Target
 from franken.data.distributed_sampler import SimpleUnevenDistributedSampler
 from franken.rf.atomic_energies import AtomicEnergiesShift
-
 
 logger = logging.getLogger("franken")
 
@@ -241,7 +241,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
 
         pos_pt = torch.tensor(pos, dtype=dtype)
         pbc_pt = torch.tensor(pbc, dtype=torch.bool)
-        atomic_numbers_pt = torch.tensor(atomic_numbers, dtype=torch.int32)
+        atomic_numbers_pt = torch.tensor(atomic_numbers, dtype=torch.int64)
 
         cell_vectors_are_not_zero = np.any(cell != 0, axis=1)
         if not np.all(cell_vectors_are_not_zero == pbc):
@@ -272,7 +272,7 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
         self, idx, no_targets: bool = False
     ) -> Union[Configuration, Tuple[Configuration, Target]]:
         """Returns an array of (inputs, outputs) with inputs being a configuration
-        and outputs being the target (energy and forces).
+        and outputs being the target (energy, forces, and optionally stress).
         Note: ONLY for the 'train' split, the energy_shift is removed from the target.
         """
         if self.graphs is None:
@@ -287,8 +287,15 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
         )
         if self.split == "train":
             energy = energy - self.energy_shifts[idx]
+        try:
+            stress = torch.Tensor(
+                self.ase_atoms[idx].get_stress(apply_constraint=False, voigt=False)
+            )
+        except PropertyNotImplementedError:
+            stress = None
         target = Target(
             energy=energy,
             forces=torch.Tensor(self.ase_atoms[idx].get_forces(apply_constraint=False)),
+            stress=stress,
         )
         return config, target

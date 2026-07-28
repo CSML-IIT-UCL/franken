@@ -4,7 +4,7 @@ import dataclasses
 import types
 import typing
 import docstring_parser
-from typing import Any, Sequence
+from typing import Any, Sequence, cast, get_args
 
 from franken.config import (
     AutotuneConfig,
@@ -16,8 +16,14 @@ from franken.config import (
     SolverConfig,
     DatasetConfig,
     HPSearchConfig,
-    DEFAULT_AUTOTUNE_METRICS,
-    DEFAULT_BEST_MODEL_SELECTION,
+)
+from franken.metrics import metric_registry
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    TargetType,
+    all_target_keys,
+    is_target_key,
 )
 
 
@@ -122,6 +128,14 @@ def parse_optional_literal(s: str) -> str | None:
     if s.lower() == "none":
         return None
     return s
+
+
+def parse_target(value: str) -> TargetType:
+    if not is_target_key(value.lower()):
+        raise argparse.ArgumentTypeError(
+            f"Invalid target type: {value}. Allowed types: {get_args(TargetType)}"
+        )
+    return cast(TargetType, value)
 
 
 class Argument:
@@ -344,6 +358,13 @@ def get_arg_groups():
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
             ),
+            Argument.from_dataclass(
+                SolverConfig,
+                "stress_weight",
+                "stress-weight",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
         ],
     )
     dset_arg_group = ArgumentGroup(
@@ -519,15 +540,9 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
     )
     parser.add_argument(
-        "--metrics",
-        nargs="+",
-        default=DEFAULT_AUTOTUNE_METRICS.copy(),
-        help=get_field_docstring(AutotuneConfig, "metrics"),
-    )
-    parser.add_argument(
         "--best-model-selection",
         nargs="+",
-        default=DEFAULT_BEST_MODEL_SELECTION.copy(),
+        default=[],
         help=get_field_docstring(AutotuneConfig, "best_model_selection"),
     )
     parser.add_argument(
@@ -567,6 +582,24 @@ def build_parser(return_groups: bool = False):
         default=None,
         help=get_field_docstring(AutotuneConfig, "atomic_energies"),
     )
+    parser.add_argument(
+        "--train-targets",
+        type=parse_target,
+        nargs="+",
+        choices=all_target_keys(),
+        default=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+        help=get_field_docstring(AutotuneConfig, "train_targets"),
+    )
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        choices=metric_registry.available_metrics,
+        default=None,
+        help=(
+            "Evaluation metrics to compute. If omitted, all metrics available for "
+            "the requested train targets are computed."
+        ),
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -578,7 +611,7 @@ def build_parser(return_groups: bool = False):
 
 
 def parse_cli(argv):
-    parser, groups = build_parser(True)
+    parser, groups = build_parser(True)  # pyright: ignore[reportGeneralTypeIssues]
     args = parser.parse_args(argv)
 
     if not getattr(args, "dataset_name", None) and not getattr(
@@ -614,5 +647,6 @@ def parse_cli(argv):
         seed=args.seed,
         console_logging_level=args.log_level,
         atomic_energies=args.atomic_energies,
+        train_targets=args.train_targets,
     )
     return autotune_cfg

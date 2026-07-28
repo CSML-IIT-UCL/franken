@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any, ClassVar, Literal, Optional, Sequence, Union
 
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+
 logger = logging.getLogger("franken")
 
 
@@ -37,12 +39,16 @@ def asdict_with_classvar(obj) -> dict[str, Any]:
             result.append((f.name, value))
         return dict(result)
     elif isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return type(obj)(*[asdict_with_classvar(v) for v in obj])
+        return type(obj)(
+            *[asdict_with_classvar(v) for v in obj]
+        )  # pyright: ignore[reportReturnType]
     elif isinstance(obj, (list, tuple)):
         # Assume we can create an object of this type by passing in a
         # generator (which is not true for namedtuples, handled
         # above).
-        return type(obj)(asdict_with_classvar(v) for v in obj)
+        return type(obj)(
+            asdict_with_classvar(v) for v in obj
+        )  # pyright: ignore[reportReturnType]
     elif isinstance(obj, dict):
         return type(obj)(
             (asdict_with_classvar(k), asdict_with_classvar(v)) for k, v in obj.items()
@@ -309,27 +315,18 @@ class SolverConfig:
     )
     """The amount of regularization. Should be a small positive number."""
 
+    energy_weight: HPSearchConfig | list[float] | float = 1.0
+    """Controls the weight of the energy loss term. Weights are normalized to sum to 1."""
+
     force_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(
-            start=0.01, stop=0.99, num=10, scale="linear"
-        )
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
     )
-    """Controls how much weight the forces term, as opposed to the energy term has in the loss. Should be a number between 0 and 1."""
+    """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
 
-
-DEFAULT_AUTOTUNE_METRICS = [
-    "energy_MAE",
-    "forces_MAE",
-    "energy_RMSE",
-    "forces_RMSE",
-    "forces_MAE_species",
-    "forces_cosim",
-]
-
-DEFAULT_BEST_MODEL_SELECTION = [
-    "energy_MAE",
-    "forces_MAE",
-]
+    stress_weight: HPSearchConfig | list[float] | float = field(
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
+    )
+    """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
 
 @dataclass
@@ -380,18 +377,18 @@ class AutotuneConfig:
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 
-    metrics: list[str] = field(default_factory=lambda: DEFAULT_AUTOTUNE_METRICS.copy())
-    """Metrics to compute during evaluation.
+    best_model_selection: list[str] = field(default_factory=lambda: [])
+    """Metrics used to select the best model among trials (does not affect the training loss).
 
-    Options include ``energy_MAE``, ``forces_MAE``, ``energy_RMSE``,
-    ``forces_RMSE``, ``forces_MAE_species``, ``forces_RMSE_species``,
-    and ``forces_cosim``.
+    Among the models on the Pareto frontier according to the chosen metrics, the one with the smallest norm will be chosen.
+    If the list is left empty, the MAE of all provided `train_targets` will be used as metrics.
     """
 
-    best_model_selection: list[str] = field(
-        default_factory=lambda: DEFAULT_BEST_MODEL_SELECTION.copy()
-    )
-    """Metrics used to select the best model among trials. This does not affect the training loss."""
+    metrics: list[str] | None = None
+    """Metrics to compute during evaluation.
+
+    If None, all metrics available for the requested `train_targets` are computed.
+    """
 
     scale_by_species: bool = True
     """how to scale the GNN features, whether globally (across species) or individually per species."""
@@ -415,3 +412,8 @@ class AutotuneConfig:
     """Optional dictionary mapping atomic numbers to their reference energies (eV).
     If provided, these energies will be subtracted from the prediction during training.
     Format: {atomic_number: energy_value, ...}. Example: {1: -0.5, 8: -75.3}"""
+
+    train_targets: list[TargetType] = field(
+        default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
+    )
+    """Which data labels to train Franken with."""

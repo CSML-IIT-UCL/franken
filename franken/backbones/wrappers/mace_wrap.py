@@ -258,6 +258,8 @@ class FrankenMACE(torch.nn.Module):
         )
         # Embeddings
         node_feats = self.node_embedding(node_attrs)  # type: ignore
+        # for stress calculation, data.atom_pos and shifts need to be
+        # differentiable wrt displacement/strain.
         vectors, lengths = get_edge_vectors_and_lengths(
             positions=data.atom_pos,
             edge_index=edge_index,
@@ -269,7 +271,7 @@ class FrankenMACE(torch.nn.Module):
         )  # type: ignore
         if torch.jit.isinstance(rad_emb, torch.Tensor):
             edge_feats, cutoff = rad_emb, None
-        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, torch.Tensor]):
+        elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[torch.Tensor]]):
             edge_feats, cutoff = rad_emb
         elif torch.jit.isinstance(rad_emb, Tuple[torch.Tensor, Optional[float]]):
             edge_feats, cutoff = rad_emb

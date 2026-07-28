@@ -1,5 +1,12 @@
 # Minimal Example
 
+## Dataset format
+
+Franken uses ASE to read the training/validation dataset. This should be in extended `.xyz` format, containing all the necessary data for the training. Franken uses the default [ASE (Atomic Simulation Environment) standard for units](https://docs.ase-lib.org/ase/units.html). Ensure your data adheres to the following:
+* **Energy**: `eV`
+* **Forces**: `eV/Å`
+* **Stress**: `eV/Å³`
+
 ### Train 
 
 Franken models can be easily trained using the autotune CLI tool:

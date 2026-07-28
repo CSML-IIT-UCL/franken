@@ -1,408 +1,354 @@
+import typing
+
 import numpy as np
 import torch
 
-from franken.data.base import Configuration, Target
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    Configuration,
+    Target,
+    TargetType,
+)
 from franken.metrics.base import BaseMetric
-from franken.metrics.registry import registry
+from franken.metrics.registry import metric_registry
 from franken.utils import distributed
 
-
 __all__ = [
-    "EnergyMAE",
-    "EnergyRMSE",
-    "ForcesMAE",
-    "ForcesMAESpecies",
-    "ForcesRMSE",
-    "ForcesRMSESpecies",
-    "ForcesCosineSimilarity",
+    "EnergyPerAtomMAE",
+    "EnergyPerAtomRMSE",
+    "ForceMAE",
+    "ForcePerSpeciesMAE",
+    "ForceRMSE",
+    "ForcePerSpeciesRMSE",
+    "ForceCosineSimilarity",
+    "StressMAE",
+    "StressRMSE",
     "is_pareto_efficient",
 ]
 
 
-def add_batch_dim(t: torch.Tensor, expected_dims: int) -> torch.Tensor:
-    if t.ndim == expected_dims:
-        return t
-    if t.ndim == expected_dims - 1:
-        return t[None, ...]
-    raise ValueError(
-        f"Tensor has too few dimensions. Expected at least {expected_dims - 1} but found {t.ndim}"
-    )
+def get_tgt_pred(targets: Target, predictions: Target, target_type: TargetType):
+    pred_t = predictions[target_type]
+    tgt_t = targets[target_type]
+    if pred_t.ndim == tgt_t.ndim:
+        pred_t = pred_t.unsqueeze(0)
+    tgt_t = tgt_t.reshape(-1)
+    pred_t = pred_t.reshape(pred_t.shape[0], -1)
+    return tgt_t, pred_t
 
 
-def check_energy_sizes(pred: Target, tgt: Target):
-    # energy. preds: [n_models, n_configs], targets: [n_configs]
-    e_pred = add_batch_dim(pred.energy, 2)
-    e_tgt = torch.atleast_1d(tgt.energy)
-    if e_tgt.ndim != 1:
-        raise ValueError(f"Energy target has invalid shape {e_tgt.shape}")
-    n_models, n_configs = e_pred.shape
-    if e_tgt.shape[0] != n_configs:
-        raise ValueError(
-            f"Energy target has invalid shape {e_tgt.shape} because predictions have shape {e_pred.shape}"
-        )
-    return e_pred, e_tgt
+def check_single_system(data):
+    if data.batch_ids is None:
+        return 1
+    return len(data.batch_ids.unique())
+    # assert data.batch_ids is None or  == 1, "Multiple systems not supported."
 
 
-def check_force_sizes(pred: Target, tgt: Target):
-    if tgt.forces is None or pred.forces is None:
-        raise AttributeError(
-            "Forces must be specified to compute a force-based metric."
-        )
-    f_pred = add_batch_dim(pred.forces, 3)
-    f_tgt = tgt.forces
-    if f_tgt.ndim != 2:
-        raise ValueError(f"Energy target has invalid shape {f_tgt.shape}")
-    return f_pred, f_tgt
-
-
-class EnergyMAE(BaseMetric):
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV",
-            "outputs": "meV/atom",
-        }
-        super().__init__("energy_MAE", device, dtype, units)
+class MAEPerAtomMetric(BaseMetric):
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
+        n_sys = check_single_system(data)
         num_atoms = torch.atleast_1d(data.natoms)
-        # energy. preds: [n_models, n_configs], targets: [n_configs]
-        e_pred, e_tgt = check_energy_sizes(predictions, targets)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        error = (1000 * torch.abs(tgt_t[None, :] - pred_t) / num_atoms[None, :]).mean(
+            1
+        ) * n_sys
+        self.buffer_add(error, num_samples=n_sys)
 
-        error = (1000 * torch.abs(e_tgt[None, :] - e_pred) / num_atoms[None, :]).sum(1)
 
-        self.buffer_add(error, num_samples=e_tgt.shape[0])
-
-
-class EnergyRMSE(BaseMetric):
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV",
-            "outputs": "meV/atom",
-        }
-        super().__init__("energy_RMSE", device, dtype, units)
+class RMSEPerAtomMetric(BaseMetric):
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
+        n_sys = check_single_system(data)
         num_atoms = torch.atleast_1d(data.natoms)
-        # energy. preds: [n_models, n_configs], targets: [n_configs]
-        e_pred, e_tgt = check_energy_sizes(predictions, targets)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        error = (
+            torch.square((tgt_t[None, :] - pred_t) / num_atoms[None, :]).mean(1) * n_sys
+        )
+        self.buffer_add(error, num_samples=n_sys)
 
-        error = torch.square((e_tgt[None, :] - e_pred) / num_atoms[None, :]).sum(1)
+    def compute(self) -> list[tuple[str, torch.Tensor]]:
+        sq_error = super()._compute_val()
+        error = torch.sqrt(sq_error) * 1000
+        self.reset()
+        return [(self.name, error)]
 
-        self.buffer_add(error, num_samples=e_tgt.shape[0])
 
-    def compute(self, reset: bool = True) -> torch.Tensor:
-        if self.buffer is None:
-            raise ValueError(
-                f"Cannot compute value for metric '{self.name}' "
-                "because it was never updated."
+class MAEMetric(BaseMetric):
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
+
+    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
+        n_sys = check_single_system(data)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        error = 1000 * torch.abs(tgt_t[None, :] - pred_t).mean(1) * n_sys
+        self.buffer_add(error, num_samples=n_sys)
+
+
+class RMSEMetric(BaseMetric):
+    def __init__(self, units, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__(device, dtype, units)
+
+    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
+        n_sys = check_single_system(data)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        error = torch.square(tgt_t[None, :] - pred_t).mean(1) * n_sys
+        self.buffer_add(error, num_samples=n_sys)
+
+    def compute(self) -> list[tuple[str, torch.Tensor]]:
+        sq_error = super()._compute_val()
+        error = torch.sqrt(sq_error) * 1000
+        self.reset()
+        return [(self.name, error)]
+
+
+class CosineSimilarityMetric(BaseMetric):
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
+
+    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
+        pred_systems = predictions.iter_individual_systems(data)
+        tgt_systems = targets.iter_individual_systems(data)
+        for pred_sys, tgt_sys in zip(pred_systems, tgt_systems):
+            tgt_t, pred_t = get_tgt_pred(tgt_sys, pred_sys, self.target_type)
+            cos_similarity = torch.nn.functional.cosine_similarity(
+                pred_t, tgt_t[None, ...], dim=-1
             )
-        distributed.all_sum(self.buffer)
-        distributed.all_sum(self.samples_counter)
-        error = self.buffer / self.samples_counter
-        # square-root and fix units
-        error = torch.sqrt(error) * 1000
-        if reset:
-            self.reset()
-        return error
+            self.buffer_add(cos_similarity, num_samples=1)
 
 
-class ForcesMAE(BaseMetric):
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__("forces_MAE", device, dtype, units)
-
-    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
-
-        error = 1000 * torch.abs(f_tgt[None, ...] - f_pred)
-        error = error.mean(dim=(-1, -2))  # Average over atoms and components
-
-        self.buffer_add(error, num_samples=1)
-
-
-class ForcesMAESpecies(BaseMetric):
-    """
-    Returns force MAE computed for each species.
-    """
-
+class PerSpeciesMAEMetric(BaseMetric):
     Z_MAX = 90  # upper bound
 
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__(
-            name="forces_MAE_species",
-            device=device,
-            dtype=dtype,
-            units=units,
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
+        self.samples_counter = torch.zeros(
+            self.Z_MAX + 1, device=device, dtype=torch.int64
         )
 
-        # buffers will be initialized later once we know n_models
-        self.buffer = None
-        self.samples_counter = torch.zeros(self.Z_MAX + 1, device=device, dtype=dtype)
-
-    def reset(self) -> None:
-        if self.buffer is not None:
-            self.buffer.zero_()
-        self.samples_counter.zero_()
-
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
-        atomic_numbers = data.atomic_numbers
-        assert atomic_numbers.ndim == 1
-        assert atomic_numbers.shape[0] == f_tgt.shape[-2]
+        check_single_system(data)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        atomic_numbers = data.atomic_numbers.to(dtype=torch.int64)  # A
         assert atomic_numbers.max() <= self.Z_MAX
+        n_models = pred_t.shape[0]
+        error = torch.abs(tgt_t[None, ...] - pred_t)  # N, A*?
+        error = error.reshape(error.shape[0], len(atomic_numbers), -1)  # N, A, ?
+        error = error.mean(-1)  # N, A
 
-        # |ΔF| in eV/Å, averaged over Cartesian components
-        error = torch.abs(f_tgt[None, ...] - f_pred).mean(dim=-1)
-        n_models = error.shape[0]
-
-        # lazy buffer initialization
         if self.buffer is None:
             self.buffer = torch.zeros(
-                self.Z_MAX + 1, n_models, device=self.device, dtype=self.dtype
+                n_models, self.Z_MAX + 1, device=self.device, dtype=self.dtype
             )
+        self.buffer.scatter_add_(
+            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error.to(self.dtype)
+        )
+        self.samples_counter.scatter_add_(
+            dim=0,
+            index=atomic_numbers,
+            src=torch.ones_like(atomic_numbers, dtype=torch.int64),
+        )
 
-        species = torch.unique(atomic_numbers)
-
-        # accumulate per species
-        for z in species:
-            z_int = int(z)
-            mask = atomic_numbers == z  # (N,)
-
-            # sum over atoms, keep models
-            # (M, N_z) → (M,)
-            self.buffer[z_int] += error[:, mask].sum(dim=1)
-
-            # count atoms (same for all models)
-            self.samples_counter[z_int] += mask.sum()
-
-    def compute(self, reset: bool = True) -> torch.Tensor:
+    def compute(self) -> list[tuple[str, torch.Tensor]]:
         if self.buffer is None:
             raise ValueError(
                 f"Cannot compute value for metric '{self.name}' "
                 "because it was never updated."
             )
-
-        # sync across ranks
         distributed.all_sum(self.buffer)
         distributed.all_sum(self.samples_counter)
-
-        # buffer shape: (Z, M) → transpose to (M, Z)
-        buffer = self.buffer.transpose(0, 1)  # (M, Z)
-
         # MAE per model, per species
-        mae = torch.zeros_like(buffer)
-
+        mae = torch.zeros_like(self.buffer)
         mask = self.samples_counter > 0
-        mae[:, mask] = buffer[:, mask] / self.samples_counter[mask]
-
+        mae[:, mask] = self.buffer[:, mask] / self.samples_counter[mask]
         # unit conversion: eV/Å → meV/Å
         mae = mae * 1000
-
-        # store average across present species at index 0
-        species_mask = mask.clone()
-        species_mask[0] = False
-        if species_mask.any():
-            mae[:, 0] = mae[:, species_mask].mean(dim=1)
-
-        if reset:
-            self.reset()
-
-        return mae
+        average = mae[:, mask].mean(dim=1)
+        self.reset()
+        values = [(f"{self.name}_{z}", mae[:, z]) for z in mask.nonzero().view(-1)]
+        values.append((f"{self.name}_average", average))
+        return values
 
 
-class ForcesRMSESpecies(BaseMetric):
-    """
-    Returns force RMSE computed for each species.
-    """
-
+class PerSpeciesRMSEMetric(BaseMetric):
     Z_MAX = 90  # upper bound
 
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__(
-            name="forces_RMSE_species",
-            device=device,
-            dtype=dtype,
-            units=units,
+    def __init__(
+        self,
+        units: dict[str, str],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ):
+        super().__init__(device, dtype, units)
+        self.samples_counter = torch.zeros(
+            self.Z_MAX + 1, device=device, dtype=torch.int64
         )
 
-        # buffers will be initialized later once we know n_models
-        self.buffer = None
-        self.samples_counter = torch.zeros(self.Z_MAX + 1, device=device, dtype=dtype)
-
-    def reset(self) -> None:
-        if self.buffer is not None:
-            self.buffer.zero_()
-        self.samples_counter.zero_()
-
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
         atomic_numbers = data.atomic_numbers
-        assert atomic_numbers.ndim == 1
-        assert atomic_numbers.shape[0] == f_tgt.shape[-2]
         assert atomic_numbers.max() <= self.Z_MAX
-        # ΔF^2 in (eV/Å)^2, averaged over Cartesian components
-        error = torch.square(f_tgt[None, ...] - f_pred).mean(dim=-1)
-        n_models = error.shape[0]
+        n_models = pred_t.shape[0]
+        error = torch.square(tgt_t[None, ...] - pred_t)  # N, A*?
+        error = error.reshape(error.shape[0], len(atomic_numbers), -1)  # N, A, ?
+        error = error.mean(-1)  # N, A
 
-        # lazy buffer initialization
         if self.buffer is None:
             self.buffer = torch.zeros(
-                self.Z_MAX + 1,
-                n_models,
-                device=self.device,
-                dtype=self.dtype,
+                n_models, self.Z_MAX + 1, device=self.device, dtype=self.dtype
             )
-
-        species = torch.unique(atomic_numbers)
-
-        # accumulate per species
-        for z in species:
-            z_int = int(z)
-            mask = atomic_numbers == z  # (N,)
-
-            # sum over atoms, keep models
-            # (M, N_z) -> (M,)
-            self.buffer[z_int] += error[:, mask].sum(dim=1)
-
-            # count atoms (same for all models)
-            self.samples_counter[z_int] += mask.sum()
-
-    def compute(self, reset: bool = True) -> torch.Tensor:
-        if self.buffer is None:
-            raise ValueError(
-                f"Cannot compute value for metric '{self.name}' "
-                "because it was never updated."
-            )
-
-        # sync across ranks
-        distributed.all_sum(self.buffer)
-        distributed.all_sum(self.samples_counter)
-
-        # buffer shape: (Z, M) -> transpose to (M, Z)
-        buffer = self.buffer.transpose(0, 1)  # (M, Z)
-
-        # mean squared error per model, per species
-        mse = torch.zeros_like(buffer)
-
-        mask = self.samples_counter > 0
-        mse[:, mask] = buffer[:, mask] / self.samples_counter[mask]
-
-        # RMSE and unit conversion: eV/Å -> meV/Å
-        rmse = torch.sqrt(mse) * 1000
-
-        # store average across present species at index 0
-        species_mask = mask.clone()
-        species_mask[0] = False
-        if species_mask.any():
-            rmse[:, 0] = rmse[:, species_mask].mean(dim=1)
-
-        if reset:
-            self.reset()
-
-        return rmse
-
-
-class ForcesRMSE(BaseMetric):
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__("forces_RMSE", device, dtype, units)
-
-    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
-
-        error = torch.square(f_tgt[None, ...] - f_pred)
-        error = error.mean(dim=(-1, -2))  # Average over atoms and components
-
-        self.buffer_add(error, num_samples=1)
-
-    def compute(self, reset: bool = True) -> torch.Tensor:
-        if self.buffer is None:
-            raise ValueError(
-                f"Cannot compute value for metric '{self.name}' "
-                "because it was never updated."
-            )
-        distributed.all_sum(self.buffer)
-        distributed.all_sum(self.samples_counter)
-        error = self.buffer / self.samples_counter
-        # square-root and fix units
-        error = torch.sqrt(error) * 1000
-        if reset:
-            self.reset()
-        return error
-
-
-class ForcesRMSE2(BaseMetric):
-    """Average of RMSE along individual structures"""
-
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": "meV/ang",
-        }
-        super().__init__("forces_RMSE", device, dtype, units)
-
-    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
-        n_models = f_pred.shape[0]
-
-        # initial averaging over XYZ
-        error = torch.square(f_tgt[None, ...] - f_pred).mean(-1)  # [M, A]
-        if data.batch_ids is not None:
-            # Compute RMSE within each structure
-            n_configs = len(torch.atleast_1d(data.natoms))
-            batch_ids = data.batch_ids.unsqueeze(0).expand(n_models, -1)
-            error = torch.zeros(
-                (n_models, n_configs), device=self.device, dtype=self.dtype
-            ).scatter_reduce_(1, batch_ids, error, "mean", include_self=False)
-            error = torch.sqrt(error) * 1000
-            # Average over structures
-            error = error.mean(dim=-1)
-        else:
-            # Average over atoms in structure
-            error = error.mean(dim=-1)
-            error = torch.sqrt(error) * 1000
-        self.buffer_add(error, num_samples=1)
-
-
-class ForcesCosineSimilarity(BaseMetric):
-    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
-        units = {
-            "inputs": "eV/ang",
-            "outputs": None,
-        }
-        super().__init__("forces_cosim", device, dtype, units)
-
-    def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        # forces (predicted): [n_models, n_atoms, 3]  (target): [n_atoms, 3]
-        f_pred, f_tgt = check_force_sizes(predictions, targets)
-
-        cos_similarity = torch.nn.functional.cosine_similarity(
-            f_pred, f_tgt[None, ...], dim=-1
+        self.buffer.scatter_add_(
+            dim=1, index=atomic_numbers.repeat(n_models, 1), src=error.to(self.dtype)
         )
-        cos_similarity = cos_similarity.mean(dim=-1)
-        self.buffer_add(cos_similarity, num_samples=1)
+        self.samples_counter.scatter_add_(
+            dim=0,
+            index=atomic_numbers,
+            src=torch.ones_like(atomic_numbers, dtype=torch.int64),
+        )
+
+    def compute(self) -> list[tuple[str, torch.Tensor]]:
+        if self.buffer is None:
+            raise ValueError(
+                f"Cannot compute value for metric '{self.name}' "
+                "because it was never updated."
+            )
+        distributed.all_sum(self.buffer)
+        distributed.all_sum(self.samples_counter)
+        # MSE per model, per species
+        mse = torch.zeros_like(self.buffer)
+        mask = self.samples_counter > 0
+        mse[:, mask] = self.buffer[:, mask] / self.samples_counter[mask]
+        # unit conversion: eV/Å → meV/Å
+        rmse = torch.sqrt(mse) * 1000
+        average = rmse[:, mask].mean(dim=1)
+        self.reset()
+        values = [(f"{self.name}_{z}", rmse[:, z]) for z in mask.nonzero().view(-1)]
+        values.append((f"{self.name}_average", average))
+        return values
 
 
-def is_pareto_efficient(costs):
+"""Energy"""
+
+
+@metric_registry.register()
+class EnergyPerAtomMAE(MAEPerAtomMetric):
+    target_type: typing.ClassVar[TargetType] = ENERGY_TARGET_KEY
+    name: typing.ClassVar[str] = "energy_MAE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV", "outputs": "meV/atom"}, device, dtype)
+
+
+@metric_registry.register()
+class EnergyPerAtomRMSE(RMSEPerAtomMetric):
+    target_type: typing.ClassVar[TargetType] = ENERGY_TARGET_KEY
+    name: typing.ClassVar[str] = "energy_RMSE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV", "outputs": "meV/atom"}, device, dtype)
+
+
+"""Force"""
+
+
+@metric_registry.register()
+class ForceMAE(MAEMetric):
+    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    name: typing.ClassVar[str] = "forces_MAE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+
+
+@metric_registry.register()
+class ForcePerSpeciesMAE(PerSpeciesMAEMetric):
+    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    name: typing.ClassVar[str] = "forces_MAE_species"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+
+
+@metric_registry.register()
+class ForceRMSE(RMSEMetric):
+    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    name: typing.ClassVar[str] = "forces_RMSE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+
+
+@metric_registry.register()
+class ForcePerSpeciesRMSE(PerSpeciesRMSEMetric):
+    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    name: typing.ClassVar[str] = "forces_RMSE_species"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang", "outputs": "meV/ang"}, device, dtype)
+
+
+@metric_registry.register()
+class ForceCosineSimilarity(CosineSimilarityMetric):
+    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    name: typing.ClassVar[str] = "forces_cosim"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang", "outputs": ""}, device, dtype)
+
+
+"""Stress"""
+
+
+@metric_registry.register()
+class StressMAE(MAEMetric):
+    target_type: typing.ClassVar[TargetType] = STRESS_TARGET_KEY
+    name: typing.ClassVar[str] = "stress_MAE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang^3", "outputs": "meV/ang^3"}, device, dtype)
+
+
+@metric_registry.register()
+class StressRMSE(RMSEMetric):
+    target_type: typing.ClassVar[TargetType] = STRESS_TARGET_KEY
+    name: typing.ClassVar[str] = "stress_RMSE"
+
+    def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
+        super().__init__({"inputs": "eV/ang^3", "outputs": "meV/ang^3"}, device, dtype)
+
+
+def is_pareto_efficient(costs: np.ndarray) -> np.ndarray:
     """
     Find the pareto-efficient points
     :param costs: An (n_points, n_costs) array
@@ -416,13 +362,3 @@ def is_pareto_efficient(costs):
             )  # Keep any point with a lower cost
             is_efficient[i] = True  # And keep self
     return is_efficient
-
-
-registry.register("energy_MAE", EnergyMAE)
-registry.register("energy_RMSE", EnergyRMSE)
-registry.register("forces_MAE", ForcesMAE)
-registry.register("forces_RMSE", ForcesRMSE)
-registry.register("forces_RMSE2", ForcesRMSE2)
-registry.register("forces_cosim", ForcesCosineSimilarity)
-registry.register("forces_MAE_species", ForcesMAESpecies)
-registry.register("forces_RMSE_species", ForcesRMSESpecies)

@@ -10,6 +10,7 @@ from franken.backbones import REGISTRY
 from franken.backbones.utils import get_checkpoint_path, load_checkpoint
 from franken.config import BackboneConfig, GaussianRFConfig
 from franken.data import FrankenAtomsDataset
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.rf.model import FrankenPotential
 
@@ -139,6 +140,6 @@ def test_force_maps(model_name):
     data = dataset_el[0].to(device)
     with torch.no_grad(), no_jit():
         # Need to call this multiple times to make sure test passes!
-        emap, fmap = model.grad_feature_map(data)
-        emap, fmap = model.grad_feature_map(data)
-        emap, fmap = model.grad_feature_map(data)
+        fmaps = model.grad_feature_map(data, targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY])
+        fmaps = model.grad_feature_map(data, targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY])
+        fmaps = model.grad_feature_map(data, targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY])

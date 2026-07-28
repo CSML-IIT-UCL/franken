@@ -110,7 +110,7 @@ def expand_part(s):
     # 3) the rest
 
     m = re.match(r"([^,\[]*)(\[[^\]]*\])?(.*)", s)
-    (prefix, rangelist, rest) = m.group(1, 2, 3)
+    prefix, rangelist, rest = m.group(1, 2, 3)
 
     # Expand the rest first (here is where we recurse!)
     rest_expanded = expand_part(rest)
@@ -156,7 +156,7 @@ def expand_range(prefix, range_):
     if not m:
         raise BadHostlist("bad range")
 
-    (s_low, s_high) = m.group(1, 2)
+    s_low, s_high = m.group(1, 2)
     low = int(s_low)
     high = int(s_high)
     width = len(s_low)
@@ -245,7 +245,7 @@ def collect_hostlist_1(left_right):
 
         # Match the left part into parts
         m = re.match(r"^(.*?)([0-9]+)?([^0-9]*)$", left)
-        (prefix, num_str, suffix) = m.group(1, 2, 3)
+        prefix, num_str, suffix = m.group(1, 2, 3)
 
         # Add the right part unprocessed to the suffix.
         # This ensures than an already computed range expression

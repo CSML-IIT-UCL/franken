@@ -16,21 +16,27 @@ from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
-    DEFAULT_AUTOTUNE_METRICS,
-    DEFAULT_BEST_MODEL_SELECTION,
     HPSearchConfig,
     RFConfig,
     SolverConfig,
     asdict_with_classvar,
 )
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    TargetType,
+)
 from franken.datasets.registry import DATASET_REGISTRY
-from franken.trainers.rf_cuda_lowmem import RandomFeaturesTrainer
+from franken.trainers import (
+    LowMemRandomFeaturesTrainer,
+    RandomFeaturesTrainer,
+)
+from franken.trainers.log_utils import DataSplit, LogEntry
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-from franken.trainers import BaseTrainer
-from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.utils.misc import (
     garbage_collection_cuda,
     get_device_name,
@@ -83,7 +89,7 @@ def set_dataset_atomic_energies(
             sorted(extra_species),
         )
 
-    train_dataset.atomic_energies_ = {
+    train_dataset.atomic_energies_ = {  # type: ignore
         z: atomic_energies[z] for z in train_dataset.species
     }
     train_dataset.energy_shifts_ = None
@@ -142,24 +148,23 @@ def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) 
         [DataSplit.VALIDATION, DataSplit.TRAIN],
     )
     forces_error = _get_first_available_metric(
-        [
-            "forces_MAE",
-            "forces_MAE_species_average",
-            "forces_RMSE",
-            "forces_RMSE_species_average",
-        ],
+        ["forces_MAE", "forces_RMSE"],
+        [DataSplit.VALIDATION, DataSplit.TRAIN],
+    )
+    stress_error = _get_first_available_metric(
+        ["stress_MAE", "stress_RMSE"],
         [DataSplit.VALIDATION, DataSplit.TRAIN],
     )
 
+    hp_summary += f" Best trial {current_best.trial_id}"
     if energy_error is None:
         energy_error = float("nan")
+    hp_summary += f" (energy {energy_error:.2f} meV/atom)"
     if forces_error is None:
         forces_error = float("nan")
-
-    hp_summary += (
-        f" Best trial {current_best.trial_id} (energy {energy_error:.2f} meV/atom - "
-        f"forces {forces_error:.1f} meV/Ang)"
-    )
+    hp_summary += f" (forces {forces_error:.2f} meV/Ang)"
+    if stress_error is not None:
+        hp_summary += f" (stress {stress_error:.2f} meV/Ang^3)"
     return hp_summary
 
 
@@ -195,31 +200,35 @@ def create_rf_hpsearch_grid(
         yield (exp_id, type(cfg)(**grid_item))
 
 
-def create_solver_hpsearch_grid(cfg: SolverConfig):
-    return hps_from_config(cfg)
+def create_solver_hpsearch_grid(
+    cfg: SolverConfig,
+) -> tuple[list[float], dict[TargetType, list[float]]]:
+    solver_hps = hps_from_config(cfg)
+    weight_dict: dict[TargetType, list[float]] = {
+        ENERGY_TARGET_KEY: solver_hps["energy_weight"],
+        FORCES_TARGET_KEY: solver_hps["force_weight"],
+        STRESS_TARGET_KEY: solver_hps["stress_weight"],
+    }
+    return solver_hps["l2_penalty"], weight_dict
 
 
 def run_autotune(
     gnn_cfg: BackboneConfig,
     rf_cfg: RFConfig,
-    solver_cfg: SolverConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
     scale_by_species: bool,
     jac_chunk_size: int | Literal["auto"],
-    trainer: BaseTrainer,
-    metrics: list[str] | None = None,
+    trainer: RandomFeaturesTrainer,
     best_model_selection: list[str] | None = None,
     eval_splits: list[str] | None = None,
     atomic_energies: dict[int, float] | None = None,
 ):
-    if metrics is None:
-        metrics = DEFAULT_AUTOTUNE_METRICS.copy()
-    if best_model_selection is None:
-        best_model_selection = DEFAULT_BEST_MODEL_SELECTION.copy()
+    # default best model selection: MAE for all training targets.
+    if best_model_selection is None or len(best_model_selection) == 0:
+        best_model_selection = [f"{tgt}_MAE" for tgt in trainer.training_targets]
 
-    current_best = BestTrial(None, None)
+    current_best = BestTrial(None, None)  # type: ignore
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
-    solver_param_grid = create_solver_hpsearch_grid(solver_cfg)
     for trial_id, rf_params in rf_param_grid:
         logger.debug(f"Autotune iteration with RF parameters {rf_params}")
 
@@ -233,7 +242,7 @@ def run_autotune(
             jac_chunk_size=jac_chunk_size,
         )
 
-        logs, weights = trainer.fit(model, solver_param_grid)
+        logs, weights = trainer.fit(model)
         for split_name, loader in loaders.items():
             if eval_splits is not None and split_name not in eval_splits:
                 continue
@@ -242,7 +251,6 @@ def run_autotune(
                 loader,
                 logs,
                 weights,
-                metrics=metrics,
             )
         split_for_best_model = (
             DataSplit.VALIDATION if "val" in loaders else DataSplit.TRAIN
@@ -253,8 +261,8 @@ def run_autotune(
                     model,
                     logs,
                     weights,
-                    split_for_best_model,
                     best_model_selection=best_model_selection,
+                    best_model_split=split_for_best_model,
                 )
         dist_utils.barrier()
 
@@ -395,22 +403,30 @@ def autotune(cfg: AutotuneConfig):
 
         set_dataset_atomic_energies(loaders, cfg.atomic_energies)
 
-        trainer = RandomFeaturesTrainer(
+        solver_l2, solver_weights = create_solver_hpsearch_grid(cfg.solver)
+
+        trainer_cls = RandomFeaturesTrainer
+        if len(cfg.train_targets) == 2:
+            trainer_cls = LowMemRandomFeaturesTrainer
+
+        trainer = trainer_cls(
             train_dataloader=loaders["train"],
+            l2_penalty=solver_l2,
+            training_targets=cfg.train_targets,
+            target_weight=solver_weights,
             random_features_normalization=cfg.rf_normalization,
             save_every_model=cfg.save_every_model,
             dtype=cfg.dtype,
             save_fmaps=cfg.save_fmaps,
             log_dir=run_dir,
             device=device,
+            metrics=cfg.metrics,
         )
 
         run_autotune(
             gnn_cfg=cfg.backbone,
             rf_cfg=cfg.rfs,
-            solver_cfg=cfg.solver,
             loaders=loaders,
-            metrics=cfg.metrics,
             best_model_selection=cfg.best_model_selection,
             scale_by_species=cfg.scale_by_species,
             jac_chunk_size=cfg.jac_chunk_size,

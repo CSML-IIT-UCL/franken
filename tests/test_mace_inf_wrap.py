@@ -195,7 +195,8 @@ def test_wrap_asemd(rf_cfg, device, backbone):
             assert isinstance(dataset_el, tuple)
             config = dataset_el[0].to(device=device)
             node_attrs = atom_numbers_to_node_attrs(
-                frame_nums=config.atomic_numbers, all_nums=model.gnn.supported_atomic_types().to(device), dtype=torch.float64
+                frame_nums=config.atomic_numbers, all_nums=model.gnn.supported_atomic_types().to(device), 
+                dtype=config.atom_pos.dtype
             )
             assert config.edge_index is not None
             comp_data = {
