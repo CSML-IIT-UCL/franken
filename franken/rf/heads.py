@@ -60,8 +60,10 @@ class RandomFeaturesHead(torch.nn.Module):
         )
 
         # Register weights buffer
-        self.weights: torch.Tensor
-        self.register_buffer("weights", torch.zeros((1, self.total_random_features)))
+        self.weights = torch.nn.Parameter(
+            torch.zeros((1, self.total_random_features)), requires_grad=True
+        )  #: torch.Tensor
+        # self.register_parameter("weights", self.weights)
 
     def species_scatter_sum(
         self,

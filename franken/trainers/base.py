@@ -179,7 +179,7 @@ class BaseTrainer(abc.ABC):
             with open(best_model_file, "w") as f:
                 json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
             weights = all_weights[best_model.checkpoint_rf_weight_id]
-            model.rf.weights = weights.reshape_as(model.rf.weights)
+            model.rf.weights = torch.nn.Parameter(weights.reshape_as(model.rf.weights))
             model.save(self.log_dir / "best_ckpt.pt")
             logger.debug(
                 f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "

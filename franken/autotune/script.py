@@ -440,6 +440,7 @@ def autotune(cfg: AutotuneConfig):
             device=device,
             metrics=cfg.metrics,
         )
+        trainer.val_dataloader = loaders["val"]
 
         run_autotune(
             gnn_cfg=cfg.backbone,
