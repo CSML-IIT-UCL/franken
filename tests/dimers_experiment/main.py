@@ -317,6 +317,7 @@ if __name__ == "__main__":
                 bbone=bb_cfg,
                 rfs=rf_cfg,
             )
+            # Only do the first dimer to start!
             break
 
 
