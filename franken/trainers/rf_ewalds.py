@@ -68,11 +68,26 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.solver = "cg"
-        self.num_les_iterations = 3000
+        # Begin RFEwaldsTrainer configuration
+        # mode: how optimization is performed. 'alternating' alternates between
+        # GD steps to update the LES model and steps of the solver to update the RFF (Franken)
+        # model. 'joint' updates both models simultaneously with the same GD optimizer.
+        self.mode: Literal["alternating", "joint"] = "alternating"
+        # solver: which solver to use for RFF. "direct" is the usual one (solving in closed form)
+        # 'cg' uses the conjugate gradient algorithm for 'cg_num_iter' iterations.
+        self.solver: Literal["cg", "direct"] = "direct"
+        # cg_num_iter: number of CG iterations if solver == 'cg'
+        self.cg_num_iter: int = 10
+        # num_inner_iterations: number of iterations for the inner loop (in alternating mode this
+        # is the loop which updates the LES model).
+        self.num_inner_iterations = 3000
+        # num_outer_iterations: number of iterations for the outer loop.
         self.num_outer_iterations = 10
+        # learning rate for the Adam optimizer in the inner loop
         self.les_lr = 1e-4
+        # lr will be multiplied by scheduling_gamma every outer iteration
         self.lr_scheduling_gamma = 0.5
+        # End RFEwaldsTrainer configuration
         self.val_dataloader = None
 
     def create_log_entry(self, rf_hps, model):
@@ -83,7 +98,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             "les_lr": self.les_lr,
             "les_optim": "adam",
             "num_outer": self.num_outer_iterations,
-            "num_inner": self.num_les_iterations,
+            "num_inner": self.num_inner_iterations,
         }
         hp_groups = model.hyperparameters | {"solver": solver_hps}
         hyperparameters = []
@@ -133,24 +148,19 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
         return hp_summary
 
-    def _fit_rff(self, model, weights, covs, norm_coeffs, rf_hps, epoch):
-        coeffs = self.residual_coeffs(
-            model, self.train_dataloader, normalization=norm_coeffs
-        )
-        rf_weights = self.solve(
-            covs=covs, coeffs=coeffs, x0=weights, cg_maxiter=1, cg_tol=1e-6, **rf_hps
-        )
-        # Evaluate on training data
+    def _print_eval(self, rf_hps, model, weights, epoch):
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
+        if weights is not None:
+            weights = weights.unsqueeze(0)
         self.evaluate(
             model,
             self.train_dataloader,
             log_collection=logc,
-            all_weights=rf_weights.unsqueeze(0),
+            all_weights=weights,
         )
         print(
             self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after Franken"
+                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after LES"
             )
         )
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
@@ -158,14 +168,29 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             model,
             self.val_dataloader,
             log_collection=logc,
-            all_weights=rf_weights.unsqueeze(0),
+            all_weights=weights,
         )
         print(
             self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after Franken"
+                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after LES"
             )
         )
         print()
+
+    def _fit_rff(self, model, weights, covs, norm_coeffs, rf_hps, epoch):
+        coeffs = self.residual_coeffs(
+            model, self.train_dataloader, normalization=norm_coeffs
+        )
+        rf_weights = self.solve(
+            covs=covs,
+            coeffs=coeffs,
+            x0=weights,
+            cg_maxiter=self.cg_num_iter,
+            cg_tol=1e-6,
+            **rf_hps,
+        )
+        # Evaluate on training data
+        self._print_eval(rf_hps, model, rf_weights, epoch)
         return rf_weights
 
     def _fit_les(self, model, weights, epoch, rf_hps):
@@ -182,11 +207,16 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             self.train_dataloader
         )  # TODO: Make sure this is randomized, otherwise every epoch may pick the same data. Currently NOT RANDOMIZED.
         # TODO: Fix for multi-process
+
         print(f"LES has {sum(p.numel() for p in model.les.parameters())} parameters")
-        params = list(model.les.parameters()) + list(model.rf.parameters())
+        params = list(model.les.parameters())
+        if self.mode == "joint":
+            params += list(model.rf.parameters())
+            print(f"RFF has {sum(p.numel() for p in model.rf.parameters())} parameters")
+
         optim = torch.optim.Adam(params, cur_lr, eps=1e-8)
         avg_losses = defaultdict(list)
-        for inner_it in (pb := tqdm.tqdm(range(self.num_les_iterations), desc="LES")):
+        for inner_it in (pb := tqdm.tqdm(range(self.num_inner_iterations), desc="LES")):
             try:
                 data, targets = next(inner_data)
             except StopIteration:
@@ -228,33 +258,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             )
             pb.set_description(loss_str)
         # Evaluate on training and validation data
-        logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        if weights is not None:
-            weights = weights.unsqueeze(0)
-        self.evaluate(
-            model,
-            self.train_dataloader,
-            log_collection=logc,
-            all_weights=weights,
-        )
-        print(
-            self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after LES"
-            )
-        )
-        logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        self.evaluate(
-            model,
-            self.val_dataloader,
-            log_collection=logc,
-            all_weights=weights,
-        )
-        print(
-            self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after LES"
-            )
-        )
-        print()
+        self._print_eval(rf_hps, model, weights, epoch)
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -277,9 +281,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
         _, rf_hps = next(params_grid(self.solver_hps))
 
-        t_cov = perf_counter()
-        covs, norm_coeffs = self.covariances(model, self.train_dataloader)
-        t_cov = perf_counter() - t_cov
+        covs, norm_coeffs = None, None
+        if self.mode != "joint":
+            # Joint doesn't need covariance!
+            t_cov = perf_counter()
+            covs, norm_coeffs = self.covariances(model, self.train_dataloader)
+            t_cov = perf_counter() - t_cov
 
         rf_weights = None
 
@@ -287,7 +294,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             # Compute LES predictions and update targets
             # recompute coefficients and solve RFF problem
             self._fit_les(model, rf_weights, outer_it, rf_hps)
-            # rf_weights = self._fit_rff(model, rf_weights, covs, norm_coeffs, rf_hps, outer_it)
+            if self.mode == "alternating":
+                assert covs is not None
+                assert norm_coeffs is not None
+                rf_weights = self._fit_rff(
+                    model, rf_weights, covs, norm_coeffs, rf_hps, outer_it
+                )
 
         # Logging
         log_collection = LogCollection([self.create_log_entry(rf_hps, model)])
