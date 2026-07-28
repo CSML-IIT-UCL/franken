@@ -23,6 +23,7 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
+from franken.utils.linalg.cgsolve import conjugate_gradient
 from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import no_jit, params_grid, throughput
 
@@ -67,9 +68,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.num_les_iterations = 100
+        self.solver = "cg"
+        self.num_les_iterations = 3000
         self.num_outer_iterations = 10
-        self.les_lr = 1e-3
+        self.les_lr = 1e-4
+        self.lr_scheduling_gamma = 0.5
+        self.val_dataloader = None
 
     def create_log_entry(self, rf_hps, model):
         model_hash = hashlib.md5(str(model.hyperparameters).encode())
@@ -95,37 +99,162 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         )
         return local_log
 
-    def eval_summary(self, log: LogEntry, epoch: int, split: DataSplit) -> str:
-        hp_summary = f"[Epoch {epoch:3}] {split.name}"
+    def eval_summary(
+        self, log: LogEntry, epoch: int, split: DataSplit, title=""
+    ) -> str:
+        hp_summary = f"[Epoch {epoch:3}] {title} {split.name}"
 
         def _get_first_available_metric(
             candidates: list[str],
-        ) -> float | None:
+        ) -> tuple[float, str] | tuple[None, None]:
             for name in candidates:
                 try:
-                    return log.get_metric(name, split)
+                    return log.get_metric(name, split), name
                 except KeyError:
                     pass
-            return None
+            return None, None
 
-        energy_error = _get_first_available_metric(
+        energy_error, energy_metric = _get_first_available_metric(
             ["energy_MAE", "energy_RMSE"],
         )
-        forces_error = _get_first_available_metric(
+        forces_error, forces_metric = _get_first_available_metric(
             ["forces_MAE", "forces_RMSE"],
         )
-        stress_error = _get_first_available_metric(
+        stress_error, stress_metric = _get_first_available_metric(
             ["stress_MAE", "stress_RMSE"],
         )
         if energy_error is None:
             energy_error = float("nan")
-        hp_summary += f" (energy {energy_error:.2f} meV/atom)"
+        hp_summary += f" ({energy_metric} {energy_error:.2f} meV/atom)"
         if forces_error is None:
             forces_error = float("nan")
-        hp_summary += f" (forces {forces_error:.2f} meV/Ang)"
+        hp_summary += f" ({forces_metric} {forces_error:.2f} meV/Ang)"
         if stress_error is not None:
-            hp_summary += f" (stress {stress_error:.2f} meV/Ang^3)"
+            hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
         return hp_summary
+
+    def _fit_rff(self, model, weights, covs, norm_coeffs, rf_hps, epoch):
+        coeffs = self.residual_coeffs(
+            model, self.train_dataloader, normalization=norm_coeffs
+        )
+        rf_weights = self.solve(
+            covs=covs, coeffs=coeffs, x0=weights, cg_maxiter=1, cg_tol=1e-6, **rf_hps
+        )
+        # Evaluate on training data
+        logc = LogCollection([self.create_log_entry(rf_hps, model)])
+        self.evaluate(
+            model,
+            self.train_dataloader,
+            log_collection=logc,
+            all_weights=rf_weights.unsqueeze(0),
+        )
+        print(
+            self.eval_summary(
+                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after Franken"
+            )
+        )
+        logc = LogCollection([self.create_log_entry(rf_hps, model)])
+        self.evaluate(
+            model,
+            self.val_dataloader,
+            log_collection=logc,
+            all_weights=rf_weights.unsqueeze(0),
+        )
+        print(
+            self.eval_summary(
+                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after Franken"
+            )
+        )
+        print()
+        return rf_weights
+
+    def _fit_les(self, model, weights, epoch, rf_hps):
+        # Determine and normalize target weights
+        target_weights = {}
+        for k, v in rf_hps.items():
+            if k.split("_")[1] == "weight":
+                target_weights[k.split("_")[0]] = v
+        weights_norm_factor = sum(target_weights.values())
+
+        cur_lr = self.les_lr * (self.lr_scheduling_gamma**epoch)
+
+        inner_data = iter(
+            self.train_dataloader
+        )  # TODO: Make sure this is randomized, otherwise every epoch may pick the same data. Currently NOT RANDOMIZED.
+        # TODO: Fix for multi-process
+        print(f"LES has {sum(p.numel() for p in model.les.parameters())} parameters")
+        params = list(model.les.parameters()) + list(model.rf.parameters())
+        optim = torch.optim.Adam(params, cur_lr, eps=1e-8)
+        avg_losses = defaultdict(list)
+        for inner_it in (pb := tqdm.tqdm(range(self.num_les_iterations), desc="LES")):
+            try:
+                data, targets = next(inner_data)
+            except StopIteration:
+                inner_data = iter(self.train_dataloader)
+                data, targets = next(inner_data)
+
+            # 1. compute predictions of the joint model
+            preds = model.predict(
+                targets=self.training_targets,  # type: ignore
+                data=data,
+                weights=None,
+                is_training=True,
+                add_energy_shift=False,
+            )
+
+            # 2. compute LES loss
+            losses = {}
+            for tt in self.training_targets:
+                try:
+                    tgt = targets[tt].to(dtype=self.buffer_dt)
+                except KeyError:
+                    raise RuntimeError(f"Target does not contain any values for {tt}.")
+                # TODO: This is only correct for batch-size=1
+                normalized_weight = target_weights[tt] / weights_norm_factor
+                losses[tt] = normalized_weight * torch.mean(
+                    torch.square(preds[tt] - tgt)
+                )
+                avg_losses[tt].append(losses[tt].item())
+            loss = cast(torch.Tensor, sum(losses.values()))
+
+            # 3. Optimize LES parameters
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+
+            # Limited loss reporting
+            loss_str = f"[{epoch}/{inner_it}] LES loss " + ", ".join(
+                [f"{k}={np.mean(v):.2e}" for k, v in avg_losses.items()]
+            )
+            pb.set_description(loss_str)
+        # Evaluate on training and validation data
+        logc = LogCollection([self.create_log_entry(rf_hps, model)])
+        if weights is not None:
+            weights = weights.unsqueeze(0)
+        self.evaluate(
+            model,
+            self.train_dataloader,
+            log_collection=logc,
+            all_weights=weights,
+        )
+        print(
+            self.eval_summary(
+                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after LES"
+            )
+        )
+        logc = LogCollection([self.create_log_entry(rf_hps, model)])
+        self.evaluate(
+            model,
+            self.val_dataloader,
+            log_collection=logc,
+            all_weights=weights,
+        )
+        print(
+            self.eval_summary(
+                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after LES"
+            )
+        )
+        print()
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -152,101 +281,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         covs, norm_coeffs = self.covariances(model, self.train_dataloader)
         t_cov = perf_counter() - t_cov
 
-        # Determine and normalize target weights
-        target_weights = {}
-        for k, v in rf_hps.items():
-            if k.split("_")[1] == "weight":
-                target_weights[k.split("_")[0]] = v
-        weights_norm_factor = sum(target_weights.values())
-
-        t_coef = t_solve = t_les_fwd = t_les_bwd = 0
+        rf_weights = None
 
         for outer_it in range(self.num_outer_iterations):
             # Compute LES predictions and update targets
             # recompute coefficients and solve RFF problem
-            t_coef_start = perf_counter()
-            coeffs = self.residual_coeffs(
-                model, self.train_dataloader, normalization=norm_coeffs
-            )
-            t_coef += perf_counter() - t_coef_start
-
-            t_solve_start = perf_counter()
-            rf_weights = self.solve(covs=covs, coeffs=coeffs, **rf_hps)
-            t_solve += perf_counter() - t_solve_start
-
-            inner_data = iter(
-                self.train_dataloader
-            )  # TODO: Make sure this is randomized, otherwise every epoch may pick the same data
-            # TODO: Fix for multi-process
-            optim = torch.optim.Adam(model.les.parameters(), self.les_lr)
-            avg_losses = defaultdict(list)
-            for inner_it in (
-                pb := tqdm.tqdm(range(self.num_les_iterations), desc="LES")
-            ):
-                try:
-                    data, targets = next(inner_data)
-                except StopIteration:
-                    inner_data = iter(self.train_dataloader)
-                    data, targets = next(inner_data)
-
-                # 1. compute predictions of the joint model
-                t_les_fwd_start = perf_counter()
-                preds = model.predict(
-                    targets=self.training_targets,  # type: ignore
-                    data=data,
-                    weights=rf_weights,
-                    is_training=True,
-                    add_energy_shift=False,
-                )
-                t_les_fwd += perf_counter() - t_les_fwd_start
-
-                # 2. compute LES loss
-                losses = {}
-                for tt in self.training_targets:
-                    try:
-                        tgt = targets[tt].to(dtype=self.buffer_dt)
-                    except KeyError:
-                        raise RuntimeError(
-                            f"Target does not contain any values for {tt}."
-                        )
-                    # TODO: This is only correct for batch-size=1
-                    normalized_weight = target_weights[tt] / weights_norm_factor
-                    losses[tt] = normalized_weight * torch.mean(
-                        torch.square(preds[tt] - tgt)
-                    )
-                    avg_losses[tt].append(losses[tt].item())
-                loss = cast(torch.Tensor, sum(losses.values()))
-
-                # 3. Optimize LES parameters
-                t_les_bwd_start = perf_counter()
-                optim.zero_grad()
-                loss.backward()
-                # with torch.no_grad():
-                #     for pname, param in model.les.named_parameters():
-                #         if param.grad is not None:
-                #             print(f"{pname}: {torch.linalg.norm(param.grad.view(-1))}")
-                optim.step()
-                t_les_bwd += perf_counter() - t_les_bwd_start
-
-                # Limited loss reporting
-                loss_str = f"[{outer_it}/{inner_it}] LES loss " + ", ".join(
-                    [f"{k}={np.mean(v):.2e}" for k, v in avg_losses.items()]
-                )
-                pb.set_description(loss_str)
-            # Evaluate on training data
-            logc = LogCollection([self.create_log_entry(rf_hps, model)])
-            self.evaluate(
-                model,
-                self.train_dataloader,
-                log_collection=logc,
-                all_weights=rf_weights.unsqueeze(0),
-            )
-            print(self.eval_summary(log=logc[0], epoch=outer_it, split=DataSplit.TRAIN))
+            self._fit_les(model, rf_weights, outer_it, rf_hps)
+            # rf_weights = self._fit_rff(model, rf_weights, covs, norm_coeffs, rf_hps, outer_it)
 
         # Logging
         log_collection = LogCollection([self.create_log_entry(rf_hps, model)])
 
-        return log_collection, rf_weights
+        return log_collection, rf_weights.unsqueeze(0)
 
     @no_jit()
     def evaluate(
@@ -307,7 +353,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         for metric in metric_objects:
             metric_values = metric.compute()
             for metric_name, metric_value in metric_values:
-                assert metric_value.shape == (num_models,)
+                assert metric_value.shape == (
+                    num_models,
+                ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
                 for model_idx in range(metric_value.shape[0]):
                     log_entry = log_collection[model_idx]
                     try:
@@ -425,6 +473,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
+        x0: Tensor | None = None,
+        cg_maxiter: int = 50,
+        cg_tol: float = 1e-4,
         **weights,
     ) -> Tensor:
         target_weight = {}
@@ -441,4 +492,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+        if self.solver == "cg":
+            solve_cov.diagonal().add_(l2_penalty)
+            return conjugate_gradient(
+                A=solve_cov, b=solve_coeff, x0=x0, max_iter=cg_maxiter, tol=cg_tol
+            )
+        else:
+            return psd_ridge(solve_cov, solve_coeff, l2_penalty)

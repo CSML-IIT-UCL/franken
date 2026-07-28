@@ -57,7 +57,7 @@ def _forces_bwdad_helper(
             outputs=[cur_energy],
             inputs=[data.atom_pos],
             grad_outputs=grad_out,  # type: ignore
-            retain_graph=retain_graph,
+            create_graph=retain_graph,
         )
         grad = grads[0]
         assert grad is not None
@@ -124,7 +124,7 @@ def _forces_stress_bwdad_helper(
             outputs=[cur_energy],
             inputs=[data.atom_pos, displacement],
             grad_outputs=grad_out,  # type: ignore
-            retain_graph=retain_graph,
+            create_graph=retain_graph,
         )
         g0 = grads[0]
         assert g0 is not None
