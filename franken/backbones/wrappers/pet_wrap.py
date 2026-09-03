@@ -272,8 +272,7 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             unit_shifts,
             species,
             nl_options,
-            # NOTE: species_to_species_index will be moved to .backend.species_to_species_index in v16
-            self.base_model.species_to_species_index,  # pyright: ignore[reportArgumentType]
+            self.base_model.backend.species_to_species_index,
             self.base_model.cutoff_function,
             self.base_model.cutoff_width,
             batch_ids=batch_ids,
@@ -282,7 +281,6 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             cutoff_width_adaptive=cutoff_width_adaptive,
             cartesian_shifts=cartesian_shifts,
         )
-        # Franken: use_manual_attention switches FlashAttention off. It is required for forward autograd!
         # **Stage 1: Feature Computation via GNN Layers**
         featurizer_inputs: dict[str, torch.Tensor] = dict(
             element_indices_nodes=element_indices_nodes,
@@ -293,10 +291,22 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             padding_mask=padding_mask,
             cutoff_factors=cutoff_factors,
         )
-        node_features_list, edge_features_list = self.base_model._calculate_features(
-            featurizer_inputs,
-            use_manual_attention=self.use_manual_attention,
-        )  # pyright: ignore[reportCallIssue]
+        # PET's public ``calculate_features`` selects manual attention when reverse
+        # gradients are enabled, but Franken also differentiates with forward AD.
+        # Forward-AD dual tensors do not set ``requires_grad``, so pass the mode to
+        # the v16 backend implementations explicitly.
+        if self.base_model.backend.featurizer_type == "feedforward":
+            node_features_list, edge_features_list = (
+                self.base_model.backend._feedforward_featurization_impl(
+                    featurizer_inputs, self.use_manual_attention
+                )
+            )
+        else:
+            node_features_list, edge_features_list = (
+                self.base_model.backend._residual_featurization_impl(
+                    featurizer_inputs, self.use_manual_attention
+                )
+            )
 
         node_features = torch.cat(node_features_list, dim=1)
         edge_features = torch.cat(edge_features_list, dim=2)
@@ -340,14 +350,16 @@ class PETModelWrapper(torch.nn.Module, MetatomicModelWrapper):
             pbc=partial_config.pbc,
         )
         # 2. neighbor calc
-        neighbor_list_opt = self.requested_neighbor_lists()
-        vesin.metatomic.compute_requested_neighbors_from_options(
-            [sys],
-            options=neighbor_list_opt,
+        neighbor_list_calculators = vesin.metatomic.neighbor_lists_for_model(
             system_length_unit="Angstrom",
-            check_consistency=True,  # pyright: ignore[reportArgumentType]
+            model=self.base_model,
+            model_length_unit="angstrom",
+            check_consistency=True,
         )
-        neighbor_list = sys.get_neighbor_list(neighbor_list_opt[0])
+        for calculator in neighbor_list_calculators:
+            calculator.add_neighbor_list(sys)
+
+        neighbor_list = sys.get_neighbor_list(self.requested_neighbor_lists()[0])
         nl_values = neighbor_list.samples.values
         # 3. system to config
         return Configuration(

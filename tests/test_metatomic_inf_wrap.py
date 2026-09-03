@@ -13,12 +13,12 @@ import numpy as np
 import torch
 
 metatomic_torch = pytest.importorskip("metatomic.torch")
-metatomic_ase_calculator = pytest.importorskip("metatomic.torch.ase_calculator")
+metatomic_ase = pytest.importorskip("metatomic_ase")
 pytest.importorskip("metatensor.torch")
 pytest.importorskip("metatrain")
 
 load_atomistic_model = metatomic_torch.load_atomistic_model
-MetatomicCalculator = metatomic_ase_calculator.MetatomicCalculator
+MetatomicCalculator = metatomic_ase.MetatomicCalculator
 
 HAS_MACE = importlib.util.find_spec("mace") is not None
 HAS_PET = importlib.util.find_spec("metatrain.pet") is not None
