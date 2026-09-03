@@ -26,7 +26,7 @@ import ase.md.velocitydistribution
 import ase.units
 import numpy as np
 
-from metatomic.torch.ase_calculator import MetatomicCalculator
+from metatomic_ase import MetatomicCalculator
 
 primitive = ase.build.bulk(name="C", crystalstructure="diamond", a=3.567)
 atoms = ase.build.make_supercell(primitive, 3 * np.eye(3))

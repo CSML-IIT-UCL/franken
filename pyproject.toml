@@ -61,12 +61,12 @@ mace = ["mace-torch >= 0.3.10"]
 sevenn = ["sevenn ~= 0.11"]
 pet = [
     "metatomic-torch", 
-    "metatrain >= 2026.3.1",
+    "metatrain >= 2026.4",
 ]
 "torch-sim" = ["torch-sim-atomistic"]
 metatomic = [
     "metatomic-torch", 
-    "metatrain >= 2026.3.1",
+    "metatrain >= 2026.4",
 ]
 
 cuda = ["cupy"]
