@@ -189,7 +189,6 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             and coeff_upper is not None
             and coeff_lower is not None
         )
-        print(f"{target_weight=} {weight_lower=}")
 
         # This is the 2nd copy of the covariance matrix that we need to store.
         lerped_cov, lerped_diag = triangular_lerp(
