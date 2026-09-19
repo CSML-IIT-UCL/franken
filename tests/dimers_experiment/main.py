@@ -26,8 +26,8 @@ from franken.rf.model import FrankenPotential
 
 # Download the data from here:
 # https://archive.materialscloud.org/records/405an-d8183
-monomers = read("../../../franken/datasets/dimers/bio_dimers_monomers.xyz", index=":")
-dimers = read("../../../franken/datasets/dimers/bio_dimers.xyz", index=":")
+monomers = read("../../franken/datasets/dimers/bio_dimers_monomers.xyz", index=":")
+dimers = read("../../franken/datasets/dimers/bio_dimers.xyz", index=":")
 
 
 @dataclass
@@ -139,7 +139,8 @@ def train_franken_les(
 ):
     les_cfg = LESConfig(
         hidden_dim=(64, 32),
-        les_output_scale=0.1
+        les_output_scale=1.0,
+        add_linear_nn=False,
     )
     # Write dset to a temporary folder
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -307,9 +308,9 @@ if __name__ == "__main__":
             with open(franken_dir / "best.json", "r") as fh:
                 best_log = json.load(fh)
             slv_cfg = SolverConfig(
-                l2_penalty=1e-11,#best_log["hyperparameters"]["solver"]["l2_penalty"],
+                l2_penalty=best_log["hyperparameters"]["solver"]["l2_penalty"],
                 energy_weight=1,
-                force_weight=1#best_log["hyperparameters"]["solver"]["forces_weight"],
+                force_weight=best_log["hyperparameters"]["solver"]["forces_weight"],
             )
             train_franken_les(
                 dset=dataset,
