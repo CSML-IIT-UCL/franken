@@ -80,7 +80,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.cg_num_iter: int = 10
         # num_inner_iterations: number of iterations for the inner loop (in alternating mode this
         # is the loop which updates the LES model).
-        self.num_inner_iterations = 3000
+        self.num_inner_iterations = 200
         # num_outer_iterations: number of iterations for the outer loop.
         self.num_outer_iterations = 10
         # learning rate for the Adam optimizer in the inner loop
@@ -148,10 +148,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
         return hp_summary
 
-    def _print_eval(self, rf_hps, model, weights, epoch):
+    def _print_eval(self, rf_hps, model, weights, epoch, after_what: str):
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        if weights is not None:
-            weights = weights.unsqueeze(0)
         self.evaluate(
             model,
             self.train_dataloader,
@@ -160,7 +158,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         )
         print(
             self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.TRAIN, title="after LES"
+                log=logc[0],
+                epoch=epoch,
+                split=DataSplit.TRAIN,
+                title=f"after {after_what}",
             )
         )
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
@@ -172,28 +173,46 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         )
         print(
             self.eval_summary(
-                log=logc[0], epoch=epoch, split=DataSplit.VAL, title="after LES"
+                log=logc[0],
+                epoch=epoch,
+                split=DataSplit.VAL,
+                title=f"after {after_what}",
             )
         )
         print()
 
-    def _fit_rff(self, model, weights, covs, norm_coeffs, rf_hps, epoch):
-        coeffs = self.residual_coeffs(
-            model, self.train_dataloader, normalization=norm_coeffs
-        )
+    def _fit_rff(
+        self,
+        model: LESFrankenPotential,
+        covs: dict[TargetType, Tensor],
+        normalization: dict[str, Tensor],
+        rf_hps: dict,
+        epoch: int,
+        direct_coeffs: dict[TargetType, Tensor] | None = None,
+    ) -> Tensor:
+        if direct_coeffs is not None:
+            coeffs = direct_coeffs
+        else:
+            coeffs = self.residual_coeffs(
+                model, self.train_dataloader, normalization=normalization
+            )
+        # old weights are used as starting point for optimization
+        old_rf_weights = model.rf.weights.squeeze(0)
         rf_weights = self.solve(
             covs=covs,
             coeffs=coeffs,
-            x0=weights,
+            x0=old_rf_weights,
             cg_maxiter=self.cg_num_iter,
             cg_tol=1e-6,
             **rf_hps,
         )
+        # weights from [n_rf] to [1, n_rf]
+        rf_weights = rf_weights.unsqueeze(0)
         # Evaluate on training data
-        self._print_eval(rf_hps, model, rf_weights, epoch)
+        self._print_eval(rf_hps, model, rf_weights, epoch, after_what="RFF training")
         return rf_weights
 
-    def _fit_les(self, model, weights, epoch, rf_hps):
+    def _fit_les(self, model, epoch, rf_hps):
         # Determine and normalize target weights
         target_weights = {}
         for k, v in rf_hps.items():
@@ -227,7 +246,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             preds = model.predict(
                 targets=self.training_targets,  # type: ignore
                 data=data,
-                weights=None,
                 is_training=True,
                 add_energy_shift=False,
             )
@@ -257,8 +275,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 [f"{k}={np.mean(v):.2e}" for k, v in avg_losses.items()]
             )
             pb.set_description(loss_str)
+
         # Evaluate on training and validation data
-        self._print_eval(rf_hps, model, weights, epoch)
+        self._print_eval(
+            rf_hps, model, weights=None, epoch=epoch, after_what="LES training"
+        )
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -281,30 +302,44 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
         _, rf_hps = next(params_grid(self.solver_hps))
 
-        covs, norm_coeffs = None, None
+        covs, coeffs, normalization = None, None, None
         if self.mode != "joint":
             # Joint doesn't need covariance!
             t_cov = perf_counter()
-            covs, norm_coeffs = self.covariances(model, self.train_dataloader)
+            covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
             t_cov = perf_counter() - t_cov
 
-        rf_weights = None
-
         for outer_it in range(self.num_outer_iterations):
-            # Compute LES predictions and update targets
-            # recompute coefficients and solve RFF problem
-            self._fit_les(model, rf_weights, outer_it, rf_hps)
+            # 1. Train RFF on full targets (original coefficients)
+            #    or on residual coefficients depending on the iteration
             if self.mode == "alternating":
                 assert covs is not None
-                assert norm_coeffs is not None
-                rf_weights = self._fit_rff(
-                    model, rf_weights, covs, norm_coeffs, rf_hps, outer_it
-                )
+                assert normalization is not None
+                assert coeffs is not None
+                if outer_it == 0:
+                    # 1st iteration has no valid LES residual: train against full target
+                    rf_weights = self._fit_rff(
+                        model,
+                        covs,
+                        normalization,
+                        rf_hps,
+                        epoch=outer_it,
+                        direct_coeffs=coeffs,
+                    )
+                else:
+                    # From 2nd iteration, train against y - y_les
+                    rf_weights = self._fit_rff(
+                        model, covs, normalization, rf_hps, epoch=outer_it
+                    )
+                model.rf.weights = torch.nn.Parameter(rf_weights)
+            # 2. Train LES on residuals from RFF training
+            #    or in joint mode, train also RFF coefficients jointly.
+            self._fit_les(model, epoch=outer_it, rf_hps=rf_hps)
 
         # Logging
         log_collection = LogCollection([self.create_log_entry(rf_hps, model)])
 
-        return log_collection, rf_weights.unsqueeze(0)
+        return log_collection, model.rf.weights.detach()
 
     @no_jit()
     def evaluate(
@@ -446,25 +481,39 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
+        coeffs = {
+            t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
+            for t in self.training_targets
+        }
 
         progress_bar = throughput(
             dataloader, "covs", total=n_samples, device=self.device
         )
-        for data, targets in progress_bar:
+        for i, (data, targets) in enumerate(progress_bar):
             assert isinstance(data, Configuration)
             data = data.to(device=self.device)
             assert data.natoms.numel() == 1, "Batched training is not supported"
 
             target_fmaps = model.grad_feature_map(data, self.training_targets)
             for tgt_name in self.training_targets:
+                try:
+                    tgt = targets[tgt_name]
+                except KeyError:
+                    raise RuntimeError(
+                        f"Target {i} does not contain any values for {tgt_name}."
+                    )
+                tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
                 if is_scalar_target(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
+                    coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
                 else:
                     covs[tgt_name].addmm_(fmap, fmap.T)
+                    coeffs[tgt_name].addmv_(fmap, tgt_per_atom.reshape(-1))
         # Sync covariance matrices & coefficients
         for tgt_name in self.training_targets:
             dist_utils.all_sum(covs[tgt_name])
+            dist_utils.all_sum(coeffs[tgt_name])
         # RF normalization
         norm_coefs = None
         if self.random_features_normalization == "leading_eig":
@@ -473,11 +522,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 norm, _ = torch.lobpcg(covs[tgt_name], k=1, largest=True)
                 norm_coefs[tgt_name] = norm
                 covs[tgt_name].div_(norm)
+                coeffs[tgt_name].div_(norm)
         elif self.random_features_normalization is not None:
             raise NotImplementedError(
                 f"Covariance normalization {self.random_features_normalization} is not implemented."
             )
-        return covs, norm_coefs
+        return covs, coeffs, norm_coefs
 
     @torch.no_grad()
     def solve(
