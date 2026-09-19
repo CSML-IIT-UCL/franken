@@ -53,7 +53,9 @@ class LESHead(nn.Module):
         layers = []
         for i in range(n_layers - 1):
             layers.append(nn.Linear(n_neurons[i], n_neurons[i + 1]))
-            layers.append(nn.SiLU(inplace=True))
+            layers.append(nn.LayerNorm((n_neurons[i + 1],)))
+            layers.append(nn.ReLU(inplace=True))
+
         layers.append(nn.Linear(n_neurons[-2], n_neurons[-1]))
         self.outnet = nn.Sequential(*layers)
         self.linear_nn = None
