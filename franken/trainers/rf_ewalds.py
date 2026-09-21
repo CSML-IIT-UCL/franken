@@ -1,5 +1,6 @@
 from collections import defaultdict
 import hashlib
+import json
 import logging
 from pathlib import Path
 from time import perf_counter
@@ -15,7 +16,15 @@ from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType, is_scalar_target
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    Configuration,
+    Target,
+    TargetType,
+    is_scalar_target,
+)
 from franken.rf.model import FrankenPotential
 from franken.trainers.log_utils import (
     DataSplit,
@@ -80,15 +89,16 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.cg_num_iter: int = 10
         # num_inner_iterations: number of iterations for the inner loop (in alternating mode this
         # is the loop which updates the LES model).
-        self.num_inner_iterations = 200
+        self.num_inner_iterations = 10
         # num_outer_iterations: number of iterations for the outer loop.
         self.num_outer_iterations = 10
         # learning rate for the Adam optimizer in the inner loop
         self.les_lr = 1e-4
         # lr will be multiplied by scheduling_gamma every outer iteration
-        self.lr_scheduling_gamma = 0.5
+        self.lr_scheduling_gamma = 1
         # End RFEwaldsTrainer configuration
         self.val_dataloader = None
+        self.training_history: list[dict] = []
 
     def create_log_entry(self, rf_hps, model):
         model_hash = hashlib.md5(str(model.hyperparameters).encode())
@@ -148,38 +158,48 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
         return hp_summary
 
-    def _print_eval(self, rf_hps, model, weights, epoch, after_what: str):
+    def _print_eval(
+        self, rf_hps, model, weights, epoch, step: Literal["rff", "les", "joint"]
+    ):
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        self.evaluate(
-            model,
-            self.train_dataloader,
-            log_collection=logc,
-            all_weights=weights,
-        )
-        print(
-            self.eval_summary(
-                log=logc[0],
-                epoch=epoch,
-                split=DataSplit.TRAIN,
-                title=f"after {after_what}",
+        for split, loader in (
+            (DataSplit.TRAIN, self.train_dataloader),
+            (DataSplit.VAL, self.val_dataloader),
+        ):
+            if loader is None:
+                continue
+            self.evaluate(
+                model,
+                loader,
+                log_collection=logc,
+                all_weights=weights,
             )
-        )
-        logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        self.evaluate(
-            model,
-            self.val_dataloader,
-            log_collection=logc,
-            all_weights=weights,
-        )
-        print(
-            self.eval_summary(
-                log=logc[0],
-                epoch=epoch,
-                split=DataSplit.VAL,
-                title=f"after {after_what}",
+            if dist_utils.get_rank() == 0:
+                print(
+                    self.eval_summary(
+                        log=logc[0],
+                        epoch=epoch,
+                        split=split,
+                        title=f"after {step.upper()} training",
+                    )
+                )
+
+        if dist_utils.get_rank() == 0:
+            self.training_history.append(
+                {
+                    "cycle": epoch + 1,
+                    "step": step,
+                    "metrics": logc[0].to_dict()["metrics"],
+                }
             )
-        )
-        print()
+            if self.log_dir is not None:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+                history_path = self.log_dir / "training_history.json"
+                # Preserve completed stages even if a later training step fails.
+                temp_path = history_path.with_suffix(".json.tmp")
+                temp_path.write_text(json.dumps(self.training_history, indent=2))
+                temp_path.replace(history_path)
+            print()
 
     def _fit_rff(
         self,
@@ -209,7 +229,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         # weights from [n_rf] to [1, n_rf]
         rf_weights = rf_weights.unsqueeze(0)
         # Evaluate on training data
-        self._print_eval(rf_hps, model, rf_weights, epoch, after_what="RFF training")
+        self._print_eval(rf_hps, model, rf_weights, epoch, step="rff")
         return rf_weights
 
     def _fit_les(self, model, epoch, rf_hps):
@@ -234,13 +254,21 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             print(f"RFF has {sum(p.numel() for p in model.rf.parameters())} parameters")
 
         optim = torch.optim.Adam(params, cur_lr, eps=1e-8)
-        avg_losses = defaultdict(list)
+        avg_squared_errors = defaultdict(list)
+        units = {
+            ENERGY_TARGET_KEY: "meV/atom",
+            FORCES_TARGET_KEY: "meV/Ang",
+            STRESS_TARGET_KEY: "meV/Ang^3",
+        }
         for inner_it in (pb := tqdm.tqdm(range(self.num_inner_iterations), desc="LES")):
             try:
                 data, targets = next(inner_data)
             except StopIteration:
                 inner_data = iter(self.train_dataloader)
                 data, targets = next(inner_data)
+
+            data = data.to(device=self.device)
+            targets = targets.to(device=self.device)
 
             # 1. compute predictions of the joint model
             preds = model.predict(
@@ -259,10 +287,14 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     raise RuntimeError(f"Target does not contain any values for {tt}.")
                 # TODO: This is only correct for batch-size=1
                 normalized_weight = target_weights[tt] / weights_norm_factor
-                losses[tt] = normalized_weight * torch.mean(
-                    torch.square(preds[tt] - tgt)
-                )
-                avg_losses[tt].append(losses[tt].item())
+                error = preds[tt] - tgt
+                losses[tt] = normalized_weight * torch.mean(torch.square(error))
+
+                # Report unweighted RMSEs in meV-based units. Energy errors are
+                # normalized per atom, consistently with the evaluation metrics.
+                if tt == ENERGY_TARGET_KEY:
+                    error = error / data.natoms
+                avg_squared_errors[tt].append(torch.mean(torch.square(error)).item())
             loss = cast(torch.Tensor, sum(losses.values()))
 
             # 3. Optimize LES parameters
@@ -270,15 +302,22 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             loss.backward()
             optim.step()
 
-            # Limited loss reporting
-            loss_str = f"[{epoch}/{inner_it}] LES loss " + ", ".join(
-                [f"{k}={np.mean(v):.2e}" for k, v in avg_losses.items()]
+            # Limited metric reporting
+            metric_str = ", ".join(
+                f"{target}_RMSE={np.sqrt(np.mean(values)) * 1000:.2f} "
+                f"{units[target]}"
+                for target, values in avg_squared_errors.items()
             )
+            loss_str = f"[{epoch}/{inner_it}] LES {metric_str}"
             pb.set_description(loss_str)
 
         # Evaluate on training and validation data
         self._print_eval(
-            rf_hps, model, weights=None, epoch=epoch, after_what="LES training"
+            rf_hps,
+            model,
+            weights=None,
+            epoch=epoch,
+            step="joint" if self.mode == "joint" else "les",
         )
 
     @no_jit()
@@ -296,6 +335,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         """
         self.patch_e3nn()
 
+        self.training_history = []
         model = model.to(self.device)
         model.train()
         self.on_fit_start(model)
@@ -492,6 +532,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         for i, (data, targets) in enumerate(progress_bar):
             assert isinstance(data, Configuration)
             data = data.to(device=self.device)
+            targets = targets.to(device=self.device)
             assert data.natoms.numel() == 1, "Batched training is not supported"
 
             target_fmaps = model.grad_feature_map(data, self.training_targets)
