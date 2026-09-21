@@ -135,8 +135,28 @@ class FrankenPotential(torch.nn.Module):
         rf_weight_id: int | None = None,
         backbone_path_or_id: str | None = None,
     ):
+        """Load a checkpoint, automatically selecting LES when its state is present."""
         ckpt = torch.load(path, map_location=map_location, weights_only=False)
+        if cls is FrankenPotential and "les" in ckpt:
+            # Import lazily: LESFrankenPotential inherits from this class.
+            from franken.rf.les_model import LESFrankenPotential
 
+            cls = LESFrankenPotential
+        return cls._from_checkpoint(
+            ckpt,
+            map_location=map_location,
+            rf_weight_id=rf_weight_id,
+            backbone_path_or_id=backbone_path_or_id,
+        )
+
+    @classmethod
+    def _from_checkpoint(
+        cls,
+        ckpt,
+        map_location=None,
+        rf_weight_id: int | None = None,
+        backbone_path_or_id: str | None = None,
+    ):
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
         if backbone_path_or_id is not None:

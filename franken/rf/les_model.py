@@ -78,15 +78,13 @@ class LESFrankenPotential(FrankenPotential):
         torch.save(ckpt, path)
 
     @classmethod
-    def load(
+    def _from_checkpoint(
         cls,
-        path,
+        ckpt,
         map_location=None,
         rf_weight_id: int | None = None,
         backbone_path_or_id: str | None = None,
     ):
-        ckpt = torch.load(path, map_location=map_location, weights_only=False)
-
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
         les_cfg = LESConfig.from_ckpt(ckpt["les"]["config"])

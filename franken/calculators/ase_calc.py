@@ -29,7 +29,7 @@ class FrankenCalculator(Calculator):
 
     def __init__(
         self,
-        franken_ckpt: Union[FrankenPotential, str, Path],
+        franken_ckpt: Union[torch.nn.Module, str, Path],
         device=None,
         rf_weight_id: int | None = None,
         gnn_config: BackboneConfig | None = None,
@@ -39,6 +39,7 @@ class FrankenCalculator(Calculator):
 
         Args:
             franken_ckpt : Path to the franken model.
+                Standard and LES checkpoints are detected automatically.
                 This class accepts pre-loaded models, as well as jitted models (with `torch.jit`).
             device : PyTorch device specification for where the model should reside
                 (e.g. "cuda:0" for GPU placement or "cpu" for CPU placement).
@@ -50,7 +51,7 @@ class FrankenCalculator(Calculator):
                 In those cases passing the correct `gnn_config` is needed.
         """
         super().__init__(**calc_kwargs)
-        self.franken: FrankenPotential
+        self.franken: torch.nn.Module
         if isinstance(franken_ckpt, torch.nn.Module):
             self.franken = franken_ckpt
             if device is not None:
@@ -62,7 +63,7 @@ class FrankenCalculator(Calculator):
             except RuntimeError as e:
                 if "PytorchStreamReader" not in str(e):
                     raise
-                self.franken = FrankenPotential.load(  # type: ignore
+                self.franken = FrankenPotential.load(
                     franken_ckpt,
                     map_location=device,
                     rf_weight_id=rf_weight_id,
