@@ -1,13 +1,16 @@
+"""Fit and evaluate short- and long-range Franken models on CC dimers.
 
+This is the full-batch Adam version of ``main-mgb.py``.  LES optimization uses
+the public ``LESTrainingConfig`` API: each Adam epoch accumulates the gradient
+over every training configuration before performing one parameter update.
+"""
 
-from collections import defaultdict
 from dataclasses import dataclass
-import datetime
+from datetime import datetime
+from itertools import groupby
 import json
-import os
-import pathlib
+from pathlib import Path
 import re
-import tempfile
 from typing import Literal
 
 import ase
@@ -15,325 +18,231 @@ from ase.io import read, write
 from matplotlib import pyplot as plt
 import numpy as np
 
-import franken
 import franken.autotune
-from franken.config import AutotuneConfig, BackboneConfig, DatasetConfig, LESConfig, MaceBackboneConfig, MultiscaleGaussianRFConfig, RFConfig, SolverConfig
-import franken.data
 import franken.data.base
+from franken.config import (
+    AutotuneConfig,
+    BackboneConfig,
+    DatasetConfig,
+    LESConfig,
+    LESTrainingConfig,
+    MaceBackboneConfig,
+    MultiscaleGaussianRFConfig,
+    RFConfig,
+    SolverConfig,
+)
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
+from plot_training_history import plot_training_history
 
 
-# Download the data from here:
-# https://archive.materialscloud.org/records/405an-d8183
-monomers = read("../../franken/datasets/dimers/bio_dimers_monomers.xyz", index=":")
-dimers = read("../../franken/datasets/dimers/bio_dimers.xyz", index=":")
+State = Literal["CC", "CP", "PP"]
+ENERGY = franken.data.base.ENERGY_TARGET_KEY
+FORCES = franken.data.base.FORCES_TARGET_KEY
+SCRIPT_DIR = Path(__file__).parent
+DATA_PATH = SCRIPT_DIR.parent.parent / "franken/datasets/dimers/bio_dimers.xyz"
 
 
 @dataclass
 class DimersDataset:
-    label: Literal["CC"] | Literal["CP"] | Literal["PP"]
+    label: State
     id: int
-    monomerA: ase.Atoms
-    monomerB: ase.Atoms
-    energyA: float
-    energyB: float
+    energy_a: float
+    energy_b: float
     data: list[ase.Atoms]
     distances: list[float]
 
-    def get_train_set(self) -> list[ase.Atoms]:
-        return self.data[:10]
-
-    def get_test_set(self) -> list[ase.Atoms]:
-        return self.data[10:]
-    
-
-def get_single_dataset(allowed_states: set[Literal["CC"] | Literal["CP"] | Literal["PP"]], dimers: list[ase.Atoms]):
-    c_data = []
-    c_id = -1
-    for dimer in dimers:
-        label = dimer.info.get("label")
-        if label not in allowed_states:
-            continue
-
-        dimer_id = int(dimer.info.get("dimer_id"))
-        if dimer_id != c_id and c_id != -1:
-            dataset = DimersDataset(
-                label=label,
-                id=c_id,
-                monomerA=monoA,
-                monomerB=monoB,
-                energyA=energyA,
-                energyB=energyB,
-                data=c_data,
-                distances=[d.info.get("distance") for d in c_data]
-            )
-            yield dataset
-            c_data = []
-            c_id = dimer_id
-        if c_id == -1:
-            c_id = dimer_id
-
-        monoA = dimer[:dimer.info.get("indexB")]
-        monoB = dimer[dimer.info.get("indexB"):]
-        energyA = dimer.info.get("energyA")
-        energyB = dimer.info.get("energyB")
-        c_data.append(dimer)
-        # print(f"Parsing dimer #{len(c_data):2} with ID={dimer_id:4} ({label}). "
-        #       f"{monoA.get_chemical_formula()}({dimer.info.get('chargeA')}) "
-        #       f"{monoB.get_chemical_formula()}({dimer.info.get('chargeB')})")
+    def split(self) -> tuple[list[ase.Atoms], list[ase.Atoms]]:
+        """Use short-distance structures for training and distant ones for validation."""
+        return self.data[:10], self.data[10:]
 
 
-def autotune_franken(
-    dset: DimersDataset, 
-    solver: SolverConfig,
-    bbone: BackboneConfig,
-    rfs: RFConfig,
-):
-    # Write dset to a temporary folder
-    with tempfile.TemporaryDirectory() as tmpdir:
-        train_dset = dset.get_train_set()
-        test_dset = dset.get_test_set()
-        train_path = os.path.join(tmpdir, "train.xyz")
-        test_path = os.path.join(tmpdir, "test.xyz")
-        write(train_path, train_dset)
-        write(test_path, test_dset)
-
-        dset_cfg = DatasetConfig(
-            name=f"dimer_{dset.id}", train_path=train_path, val_path=test_path
+def get_datasets(allowed_states: set[State], dimers: list[ase.Atoms]):
+    """Yield one dataset for each contiguous dimer-id group in the source file."""
+    selected = (dimer for dimer in dimers if dimer.info["label"] in allowed_states)
+    for dimer_id, group in groupby(
+        selected, key=lambda dimer: int(dimer.info["dimer_id"])
+    ):
+        data = list(group)
+        first = data[0]
+        yield DimersDataset(
+            label=first.info["label"],
+            id=dimer_id,
+            energy_a=first.info["energyA"],
+            energy_b=first.info["energyB"],
+            data=data,
+            distances=[dimer.info["distance"] for dimer in data],
         )
-        cfg = AutotuneConfig(
-            dataset=dset_cfg,
-            solver=solver,
-            backbone=bbone,
-            rfs=rfs,
-            les=None,
-            eval_splits=["val"],
-            run_dir=f"./franken_outputs/dimer_{dset.id}/",
-        )
-        run_dir = franken.autotune.autotune(cfg)
-        assert isinstance(run_dir, pathlib.Path)
-        return run_dir / "best_ckpt.pt"
-        # model = FrankenPotential.load(path=run_dir / "best_ckpt.pt")
-        # train_dset = FrankenAtomsDataset(
-        #     data_path=train_path,
-        #     split="train",
-        #     gnn_config=bbone,
-        # )
-        # test_dset = FrankenAtomsDataset(
-        #     data_path=test_path,
-        #     split="test",
-        #     gnn_config=bbone,
-        # )
-        # for data, tgt in test_dset:
-        #     pred = model.predict(
-        #         targets=[franken.data.base.ENERGY_TARGET_KEY, franken.data.base.FORCES_TARGET_KEY],
-        #         data=data,
-        #     )
-        
-def train_franken_les(
-    dset: DimersDataset, 
-    solver: SolverConfig,
-    bbone: BackboneConfig,
-    rfs: RFConfig,
-):
-    les_cfg = LESConfig(
-        hidden_dim=(64, 32),
-        les_output_scale=1.0,
-        add_linear_nn=False,
+
+
+def dataset_config(dset: DimersDataset, name: str) -> DatasetConfig:
+    folder = SCRIPT_DIR / f"dimer_{dset.id}_dataset"
+    folder.mkdir(exist_ok=True)
+    train, validation = dset.split()
+    train_path, validation_path = folder / "train.xyz", folder / "test.xyz"
+    write(train_path, train)
+    write(validation_path, validation)
+    return DatasetConfig(
+        name=name,
+        train_path=str(train_path),
+        val_path=str(validation_path),
     )
-    # Write dset to a temporary folder
-    with tempfile.TemporaryDirectory() as tmpdir:
-        train_dset = dset.get_train_set()
-        test_dset = dset.get_test_set()
-        train_path = os.path.join(tmpdir, "train.xyz")
-        test_path = os.path.join(tmpdir, "test.xyz")
-        write(train_path, train_dset)
-        write(test_path, test_dset)
-
-        dset_cfg = DatasetConfig(
-            name=f"dimer_{dset.id}", train_path=train_path, val_path=test_path
-        )
-        cfg = AutotuneConfig(
-            dataset=dset_cfg,
-            solver=solver,
-            backbone=bbone,
-            rfs=rfs,
-            les=les_cfg,
-            eval_splits=["val"],
-            run_dir=f"./les_outputs/dimer_{dset.id}/",
-        )
-        run_dir = franken.autotune.autotune(cfg)
-        assert isinstance(run_dir, pathlib.Path)
-        return run_dir / "best_ckpt.pt"
 
 
-def test_franken(
+def train_model(
     dset: DimersDataset,
-    model_path: pathlib.Path,
-    model_cls=FrankenPotential,
-):
-    # Write dset to a temporary folder
-    all_preds = []
-    with tempfile.TemporaryDirectory() as tmpdir:
-        train_path = os.path.join(tmpdir, "train.xyz")
-        write(train_path, dset.data)
-        dset_cfg = DatasetConfig(
-            name=f"dimer_{dset.id}", train_path=train_path
-        )
-        model = model_cls.load(model_path)
-        model.eval()
-        frk_dset = FrankenAtomsDataset(
-            data_path=train_path,
-            split="train",
-            gnn_config=model.gnn_config,
-        )
-        for i, (data, tgt) in enumerate(frk_dset):
-            preds = model.predict(
-                targets=[franken.data.base.ENERGY_TARGET_KEY, franken.data.base.FORCES_TARGET_KEY],
-                data=data,
-            )
-            all_preds.append(preds)
-    return all_preds
+    solver: SolverConfig,
+    backbone: BackboneConfig,
+    rfs: RFConfig,
+    *,
+    use_les: bool,
+    les_training: LESTrainingConfig | None = None,
+) -> Path:
+    """Run the short-range fit or the alternating RFF + LES fit."""
+    kind = "les" if use_les else "franken"
+    config = AutotuneConfig(
+        dataset=dataset_config(dset, f"dimer_{kind}_{dset.id}"),
+        solver=solver,
+        backbone=backbone,
+        rfs=rfs,
+        les=(
+            LESConfig(hidden_dim=(64, 32), les_output_scale=1.0, dl=3)
+            if use_les
+            else None
+        ),
+        les_training=les_training or LESTrainingConfig(),
+        best_model_selection=["energy_MAE", "forces_MAE"],
+        eval_splits=["val"],
+        run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
+    )
+    run_dir = franken.autotune.autotune(config)
+    assert isinstance(run_dir, Path)
+    if use_les:
+        plot_training_history(run_dir / "training_history.json")
+    return run_dir / "best_ckpt.pt"
 
 
-def get_newest_rundir(dir: pathlib.Path) -> pathlib.Path:
-    """
-    Find the newest run directory based on timestamp in the folder name.
-    
-    Folder format: run_DDMMYY_HHMMSS_randomstring
-    Example: run_260723_214650_abc20294
-    Args:
-        dir: Path object pointing to the directory containing run folders
-    Returns:
-        Path to the newest run directory, or None if no matching folders found
-    """
-    if not dir.exists() or not dir.is_dir():
-        raise ValueError(dir)
-    
-    pattern = re.compile(r'^run_(\d{2})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})_[a-zA-Z0-9]+$')
-    valid_dirs = []
-    for item in dir.iterdir():
-        if not item.is_dir():
-            continue
-        match = pattern.match(item.name)
-        if not match:
-            continue
-        try:
-            day, month, year, hour, minute, second = match.groups()
-            timestamp = datetime.datetime.strptime(
-                f"{day}{month}{year}_{hour}{minute}{second}",
-                "%d%m%y_%H%M%S"
-            )
-            valid_dirs.append((timestamp, item))
-        except ValueError:
-            continue
-    if not valid_dirs:
-        return None
-    # Sort by timestamp descending and return the newest
-    valid_dirs.sort(key=lambda x: x[0], reverse=True)
-    return valid_dirs[0][1]
+def newest_run(folder: Path) -> Path:
+    """Return the most recent autotune run directory in *folder*."""
+    pattern = re.compile(r"run_(\d{6}_\d{6})_[A-Za-z0-9]+$")
+    runs = []
+    for path in folder.iterdir():
+        match = pattern.fullmatch(path.name)
+        if path.is_dir() and match:
+            runs.append((datetime.strptime(match[1], "%y%m%d_%H%M%S"), path))
+    if not runs:
+        raise FileNotFoundError(f"No run directories found in {folder}")
+    return max(runs, key=lambda run: run[0])[1]
+
+
+def predict(dset: DimersDataset, checkpoint: Path):
+    """Predict energy and forces for every separation in a dimer scan."""
+    eval_path = SCRIPT_DIR / f"dimer_{dset.id}_dataset/all.xyz"
+    write(eval_path, dset.data)
+    # The new loader detects regular and LES checkpoints automatically.
+    model = FrankenPotential.load(checkpoint)
+    model.eval()
+    dataset = FrankenAtomsDataset(
+        data_path=eval_path,
+        split="train",
+        gnn_config=model.gnn_config,
+    )
+    return [model.predict(targets=[ENERGY, FORCES], data=data) for data, _ in dataset]
+
+
+def evaluate_and_plot(dset: DimersDataset, *, use_les: bool) -> None:
+    kind, title = ("les", "LES Franken") if use_les else ("franken", "Standard Franken")
+    run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
+    with (run / "best.json").open() as file:
+        metrics = json.load(file)["metrics"]["validation"]
+    print(f"{title}.")
+    print(f"\tEnergy RMSE: {metrics['energy_RMSE']:.1f}")
+    print(f"\tForces RMSE: {metrics['forces_RMSE']:.1f}")
+
+    prediction = predict(dset, run / "best_ckpt.pt")
+    monomer_energy = dset.energy_a + dset.energy_b
+    reference = [atoms.get_potential_energy() - monomer_energy for atoms in dset.data]
+    predicted = [result[ENERGY].item() - monomer_energy for result in prediction]
+
+    fig, ax = plt.subplots()
+    for values, color, label, marker in (
+        (reference, "b", "True", "o"),
+        (predicted, "b", title, "x"),
+    ):
+        train_style = (
+            {"edgecolors": color, "c": "none"} if marker == "o" else {"c": color}
+        )
+        ax.scatter(
+            dset.distances[:10],
+            values[:10],
+            s=100,
+            marker=marker,
+            label=f"{label} train",
+            **train_style,
+        )
+        test_style = {"edgecolors": "r", "c": "none"} if marker == "o" else {"c": "r"}
+        ax.scatter(
+            dset.distances[10:],
+            values[10:],
+            s=100,
+            marker=marker,
+            label=f"{label} test",
+            **test_style,
+        )
+    ax.set(xlabel="Distance (A)", ylabel="Energy (eV)")
+    ax.legend(loc="best")
+    fig.savefig(SCRIPT_DIR / f"{'LR' if use_les else 'SR'}_binding_energy.png")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
-    datasets = list(get_single_dataset({"CC"}, dimers))
+    # Download from https://archive.materialscloud.org/records/405an-d8183
+    datasets = list(get_datasets({"CC"}, read(DATA_PATH, index=":")))
     print(f"Loaded {len(datasets)} datasets")
-    bb_cfg = MaceBackboneConfig("mace_mp/small")
-    rf_cfg = MultiscaleGaussianRFConfig(
-        num_random_features=2048, 
+
+    backbone = MaceBackboneConfig("mace_mp/small")
+    rfs = MultiscaleGaussianRFConfig(
+        num_random_features=2048,
         length_scale_low=4,
         length_scale_high=20,
-        length_scale_num=6
+        length_scale_num=6,
+    )
+    full_batch_adam = LESTrainingConfig(
+        optimizer="adam",
+        num_cycles=50,
+        epochs_per_cycle=50,
+        batch_size=None,
+        learning_rate=1e-4,
+        restore_best=True,
     )
 
-    if False:  # train standard franken (autotune)
-        slv_cfg = SolverConfig(
-            l2_penalty=np.logspace(-11, -6, 6).tolist(),
-            force_weight=np.logspace(-1, 4, 6).tolist(),
+    # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
+    for dset in datasets[:1]:
+        train_model(
+            dset,
+            SolverConfig(
+                l2_penalty=np.logspace(-11, -6, 6).tolist(),
+                force_weight=np.logspace(-2, 3, 6).tolist(),
+            ),
+            backbone,
+            rfs,
+            use_les=False,
         )
-        for dataset in datasets:
-            autotune_franken(
-                dset=dataset,
-                solver=slv_cfg,
-                bbone=bb_cfg,
-                rfs=rf_cfg,
-            )
-    if False:  # examine trained models
-        energy_rmse, forces_rmse = [], []
-        binding_energies = {}
-        for d, dataset in enumerate(datasets):
-            franken_dir = get_newest_rundir(
-                pathlib.Path(f"franken_outputs/dimer_{dataset.id}")
-            )
-            with open(franken_dir / "best.json", "r") as fh:
-                best_log = json.load(fh)
-            energy_rmse.append(best_log["metrics"]["validation"]["energy_RMSE"])
-            forces_rmse.append(best_log["metrics"]["validation"]["forces_RMSE"])
-            # test model on all the data for distance plot
-            preds = test_franken(dataset, franken_dir / "best_ckpt.pt")
-            # Calculate binding energy
-            binding_energies[dataset.id] = defaultdict(list)
-            for i in range(len(dataset.data)):
-                true_binding_energy = dataset.data[i].get_potential_energy() - dataset.energyA - dataset.energyB
-                pred_binding_energy = preds[i][franken.data.base.ENERGY_TARGET_KEY].item() - dataset.energyA - dataset.energyB
-                binding_energies[dataset.id]["true"].append(true_binding_energy)
-                binding_energies[dataset.id]["pred"].append(pred_binding_energy)
-                binding_energies[dataset.id]["dist"].append(dataset.distances[i])
-            if d >= 0:
-                break
-        mean_energy_rmse = np.mean(energy_rmse)
-        mean_forces_rmse = np.mean(forces_rmse)
-        print(f"Standard Franken.")
-        print(f"\tAverage Energy RMSE: {mean_energy_rmse:.1f}")
-        print(f"\tAverage Forces RMSE: {mean_forces_rmse:.1f}")
-        fig, ax = plt.subplots()
-        for d, b_energy in enumerate(binding_energies.values()):
-            ax.scatter(b_energy["dist"][:10], b_energy["true"][:10], 
-                    s=100, edgecolors='b', marker='o', c="none", label="True train" if d == 0 else None)
-            ax.scatter(b_energy["dist"][:10], b_energy["pred"][:10], 
-                    s=100, c='b', marker='x', label="Franken train" if d == 0 else None)
-            ax.scatter(b_energy["dist"][10:], b_energy["true"][10:], 
-                    s=100, edgecolors='r', marker='o', c="none", label="True test" if d == 0 else None)
-            ax.scatter(b_energy["dist"][10:], b_energy["pred"][10:], 
-                    s=100, c='r', marker='x', label="Franken test" if d == 0 else None)
-        ax.set_xlabel("Distance (A)")
-        ax.set_ylabel("Energy (eV)")
-        ax.legend(loc="best")
-        plt.show()
-    if True:  # train LES franken
-        for dataset in datasets:
-            franken_dir = get_newest_rundir(
-                pathlib.Path(f"franken_outputs/dimer_{dataset.id}")
-            )
-            with open(franken_dir / "best.json", "r") as fh:
-                best_log = json.load(fh)
-            slv_cfg = SolverConfig(
-                l2_penalty=best_log["hyperparameters"]["solver"]["l2_penalty"],
-                energy_weight=1,
-                force_weight=best_log["hyperparameters"]["solver"]["forces_weight"],
-            )
-            train_franken_les(
-                dset=dataset,
-                solver=slv_cfg,
-                bbone=bb_cfg,
-                rfs=rf_cfg,
-            )
-            # Only do the first dimer to start!
-            break
+        evaluate_and_plot(dset, use_les=False)
 
-
-
-# Lattice="30.0 0.0 0.0 0.0 30.0 0.0 0.0 0.0 30.0" 
-# Properties=
-# species:S:1:pos:R:3:forces:R:3 
-# dimer_id=0 
-# label=CC 
-# energy=-13964.1459944979 
-# chargeA=1 
-# energyA=-7741.80993019298 
-# chargeB=-1 
-# energyB=-6221.39955938734 
-# indexB=16 
-# distance=7.096956324842526 
-# distance_initial=6.630174209406314 
-# pbc="T T T"
+        sr_run = newest_run(SCRIPT_DIR / f"franken_outputs/dimer_{dset.id}")
+        with (sr_run / "best.json").open() as file:
+            best_solver = json.load(file)["hyperparameters"]["solver"]
+        train_model(
+            dset,
+            SolverConfig(
+                l2_penalty=best_solver["l2_penalty"],
+                energy_weight=best_solver["energy_weight"],
+                force_weight=best_solver["forces_weight"],
+            ),
+            backbone,
+            rfs,
+            use_les=True,
+            les_training=full_batch_adam,
+        )
+        evaluate_and_plot(dset, use_les=True)
