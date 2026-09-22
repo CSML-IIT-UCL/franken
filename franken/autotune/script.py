@@ -231,6 +231,9 @@ def run_autotune(
     # default best model selection: MAE for all training targets.
     if best_model_selection is None or len(best_model_selection) == 0:
         best_model_selection = [f"{tgt}_MAE" for tgt in trainer.training_targets]
+    if isinstance(trainer, RandomFeaturesEwaldsTrainer):
+        trainer.best_model_selection = best_model_selection
+        trainer.val_dataloader = loaders.get("val")
 
     current_best = BestTrial(None, None)  # type: ignore
     rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
@@ -439,8 +442,17 @@ def autotune(cfg: AutotuneConfig):
             log_dir=run_dir,
             device=device,
             metrics=cfg.metrics,
+            **(
+                {
+                    "training_config": cfg.les_training,
+                    "best_model_selection": cfg.best_model_selection,
+                    "seed": cfg.seed,
+                }
+                if cfg.les is not None
+                else {}
+            ),
         )
-        trainer.val_dataloader = loaders["val"]
+        trainer.val_dataloader = loaders.get("val")
 
         run_autotune(
             gnn_cfg=cfg.backbone,
