@@ -8,12 +8,11 @@ pip install franken
 The basic installation comes bare-bones without any GNN backbone installed. You can install franken with a specific backbone directly, by running one of the following commands
 ```bash
 pip install franken[cuda,mace]
-pip install franken[cuda,sevenn]
 pip install franken[cuda,pet]
 ```
 In more detail:
  - the `cuda` qualifier installs dependencies which are only relevant on GPU-enabled environments and can be omitted.
- - the three supported backbones are [MACE](https://github.com/ACEsuit/mace), [UPET](https://github.com/lab-cosmo/upet/tree/main), and [SevenNet](https://github.com/MDIL-SNU/SevenNet). They are explained in more detail below.
+ - the supported backbones are [MACE](https://github.com/ACEsuit/mace) and [UPET](https://github.com/lab-cosmo/upet/tree/main). They are explained in more detail below.
 
 
 ```{warning}
@@ -42,8 +41,3 @@ In addition to MACE-MP0 trained on the materials project dataset, Franken also s
 
 Franken supports [UPET](https://github.com/lab-cosmo/upet/tree/main) models through the Metatomic/Metatrain ecosystem.
 To use PET models as a backbone for `franken`, install the required dependencies with `pip install franken[cuda,pet]` or follow the instructions on [metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation.
-
-### SevenNet
-
-Franken also supports the [SevenNet model](https://arxiv.org/abs/2402.03789) by Park et al. as implemented in the [`sevennet`](https://github.com/MDIL-SNU/SevenNet) library.
-We have only tested the SevenNet-0 model trained on the materials project dataset, but support for other models should be possible (open an issue if you encounter any problem).
