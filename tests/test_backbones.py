@@ -25,7 +25,6 @@ def has_module(name):
 
 
 HAS_MACE = has_module("mace")
-HAS_SEVENN = has_module("sevenn")
 HAS_UPET = (
     has_module("metatomic.torch")
     and has_module("metatrain.pet")
@@ -42,14 +41,11 @@ for name in REGISTRY.keys():
         continue
     if (
         (kind == "mace" and not HAS_MACE)
-        or (kind == "sevenn" and not HAS_SEVENN)
         or (kind == "pet" and not HAS_UPET)
     ):
         marks.append(pytest.mark.skip(reason=f"{kind} not installed"))
     elif kind == "mace":
         marks.append(pytest.mark.xfail(Version(e3nn.__version__) >= Version("0.5.5"), reason="Known incompatibility", strict=True))
-    elif kind == "sevenn":
-        marks.append(pytest.mark.xfail(Version(e3nn.__version__) < Version("0.5.0"), reason="Known incompatibility", strict=True))
     models.append(pytest.param(name, marks=marks))
 
 

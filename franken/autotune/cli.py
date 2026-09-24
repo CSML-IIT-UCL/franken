@@ -10,7 +10,6 @@ from franken.config import (
     AutotuneConfig,
     MaceBackboneConfig,
     PETBackboneConfig,
-    SevennBackboneConfig,
     GaussianRFConfig,
     MultiscaleGaussianRFConfig,
     SolverConfig,
@@ -407,32 +406,6 @@ def get_arg_groups():
                 arguments=[
                     Argument.from_dataclass(
                         PETBackboneConfig, "path_or_id", "path-or-id"
-                    ),
-                ],
-            ),
-            MutuallyExclusiveArgumentGroup(
-                "sevenn",
-                title="SevenNet backbone",
-                desc="Configure the MACE backbone. Specify ``--backbone=sevenn`` to enable.",
-                data_class=SevennBackboneConfig,
-                arguments=[
-                    Argument.from_dataclass(
-                        SevennBackboneConfig, "path_or_id", "path-or-id"
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig, "interaction_block", "interaction-block"
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig,
-                        "extract_after_act",
-                        "extract-after-act",
-                        "extract-before-act",
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig,
-                        "append_layers",
-                        "append-layers",
-                        "last-layer-only",
                     ),
                 ],
             ),

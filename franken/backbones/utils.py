@@ -216,15 +216,6 @@ def load_checkpoint(gnn_config: BackboneConfig) -> AtomisticModelWrapper:
             map_location="cpu",
             **gnn_config_dict,
         )
-    elif backbone_family == "sevenn":
-        try:
-            from franken.backbones.wrappers.sevenn import FrankenSevenn
-        except ImportError as import_err:
-            logger.error(err_msg, exc_info=import_err)
-            raise
-        model = FrankenSevenn.load_from_checkpoint(
-            ckpt_path, gnn_backbone_id=gnn_backbone_id, **gnn_config_dict
-        )
     elif backbone_family == "pet":
         try:
             from franken.backbones.wrappers.pet_wrap import PETModelWrapper
