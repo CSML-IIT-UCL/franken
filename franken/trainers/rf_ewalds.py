@@ -152,7 +152,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return hp_summary
 
     def _print_eval(
-        self, rf_hps, model, weights, epoch, step: Literal["rff", "les", "joint"]
+        self, rf_hps, model, weights, epoch: int, step: Literal["rff", "les", "joint"]
     ):
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
         for split, loader in (
@@ -208,7 +208,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         # used by LogCollection.get_best_model across trials.
         score = sum(abs(value) for value in values)
         if self.best_stage is not None and score >= self.best_stage["score"]:
+            print(f"Cycle {cycle} is worse than the best cycle!")
             return
+        print(f"Cycle {cycle} is the best cycle!")
         self.best_stage = {
             "cycle": cycle,
             "step": step,
@@ -263,6 +265,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     def _backward_batch(self, model, indices, target_weights):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
+        # TODO: Parallelize across GPUs
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
         for index in indices:
             data, targets = self.train_dataloader.dataset[index]
@@ -292,8 +295,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     def _fit_les(self, model, epoch, rf_hps):
         cfg = self.training_config
         n_samples = len(self.train_dataloader.dataset)
-        if n_samples == 0:
-            raise ValueError("LES requires a nonempty training dataset")
+        # Normalize weights
         weights = {
             target: rf_hps[f"{target}_weight"] for target in self.training_targets
         }
@@ -322,18 +324,20 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 for group in optim.param_groups:
                     group["lr"] = lr
                 batch_size = cfg.batch_size or n_samples
-                for _ in tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs"):
+                for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
                     indices = (
                         torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
                         if batch_size < n_samples
                         else list(range(n_samples))
                     )
+                    tot_loss = 0
                     for start in range(0, n_samples, batch_size):
                         optim.zero_grad(set_to_none=True)
-                        self._backward_batch(
+                        tot_loss += self._backward_batch(
                             model, indices[start : start + batch_size], target_weights
                         )
                         optim.step()
+                    pb.set_description(f"Loss={tot_loss:.4e}")
             else:
                 # RFF refits change this objective: do not reuse curvature history.
                 optim = torch.optim.LBFGS(
@@ -395,8 +399,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         _, rf_hps = next(params_grid(self.solver_hps))
 
         covs, coeffs, normalization = None, None, None
-        if self.mode != "joint":
-            # Joint doesn't need covariance!
+        if self.mode != "joint":  # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
             t_cov = perf_counter() - t_cov
