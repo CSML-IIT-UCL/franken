@@ -292,7 +292,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     raise RuntimeError(
                         f"Target {index} does not contain any values for {tgt_name}."
                     )
-                tgt_per_atom = tgt / data.natoms
+                tgt_per_atom = (
+                    tgt / data.natoms
+                )  # normalize targets for consistency with RFF training
                 loss = target_weights[tgt_name] * torch.mean(
                     torch.square(predictions[tgt_name] - tgt_per_atom)
                 )

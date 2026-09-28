@@ -139,9 +139,8 @@ class LESFrankenPotential(FrankenPotential):
 
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
-        rff_energies = natoms[None, :] * rff_energies
         les_energies = self.les(gnn_descriptors, atom_pos, data)
-        energies = rff_energies + les_energies
+        energies = natoms[None, :] * (rff_energies + les_energies)
 
         return energies.sum(1), energies
 
@@ -152,7 +151,8 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self.les(gnn_descriptors, atom_pos, data)
+        natoms = data.natoms.to(dtype=atom_pos.dtype).view(-1)  # [N]
+        les_energies = natoms[None, :] * self.les(gnn_descriptors, atom_pos, data)
         return les_energies, les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
