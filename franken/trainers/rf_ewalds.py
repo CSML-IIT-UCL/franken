@@ -297,7 +297,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     torch.square(predictions[tgt_name] - tgt_per_atom)
                 )
                 loss = loss / len(indices)  # normalize gradient by the batch size
-                per_tgt_losses[tgt_name] += loss / len(indices)
+                per_tgt_losses[tgt_name] += loss
+                per_index_loss += loss
             per_index_loss.backward()
         return {k: v.item() for k, v in per_tgt_losses.items()}
 
