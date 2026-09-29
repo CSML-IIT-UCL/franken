@@ -274,12 +274,12 @@ class LESTrainingConfig:
     """Adam learning rate."""
     lr_decay: float = 1.0
     """Multiply the learning rate by this factor after each alternating cycle."""
-    lbfgs_max_iter: int = 20
+    lbfgs_max_iter: int = 50
     """Maximum L-BFGS iterations per LES stage (each can evaluate multiple closures)."""
     lbfgs_learning_rate: float = 1.0
-    lbfgs_history_size: int = 20
-    lbfgs_tolerance_grad: float = 1e-10
-    lbfgs_tolerance_change: float = 1e-13
+    lbfgs_history_size: int = 50
+    lbfgs_tolerance_grad: float = 1e-7
+    lbfgs_tolerance_change: float = 1e-9
     restore_best: bool = True
     """Restore the best combined model across both stages, using validation if available."""
 

@@ -262,7 +262,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         rf_weights = rf_weights.unsqueeze(0)
         return rf_weights
 
-    def _backward_batch(self, model, indices, target_weights):
+    def _backward_batch(self, model, indices, target_weights, do_bwd=True):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         per_tgt_losses = {
             tgt_name: torch.zeros((), device=self.device, dtype=self.buffer_dt)
@@ -277,7 +277,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             predictions = model.predict(
                 targets=self.training_targets,
                 data=data,
-                is_training=True,
+                is_training=do_bwd,
                 add_energy_shift=False,
             )
             per_index_loss = torch.zeros((), device=self.device, dtype=self.buffer_dt)
@@ -294,7 +294,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 loss = loss / len(indices)  # normalize gradient by the batch size
                 per_tgt_losses[tgt_name] += loss.detach()
                 per_index_loss += loss
-            per_index_loss.backward()
+            if do_bwd:
+                per_index_loss.backward()
         return {k: v.item() for k, v in per_tgt_losses.items()}
 
     def _fit_les(self, model, epoch, rf_hps):
@@ -368,7 +369,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     batch_loss = self._backward_batch(model, indices, target_weights)
                     return sum(batch_loss.values())
 
-                optim.step(closure)
+                for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
+                    optim.step(closure)
+                    with torch.no_grad():
+                        # special iterate just to get loss values
+                        batch_loss = self._backward_batch(
+                            model, indices, target_weights, do_bwd=False
+                        )
+                        desc = ""
+                        for k, v in batch_loss.items():
+                            desc += f"{k}={v:.3e} "
+                        pb.set_description(desc)
+
         finally:
             for p, requires_grad in previous_flags:
                 p.requires_grad_(requires_grad)
