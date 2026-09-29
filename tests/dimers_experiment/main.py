@@ -33,7 +33,7 @@ from franken.config import (
 )
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-from plot_training_history import plot_training_history
+#from plot_training_history import plot_training_history
 
 
 State = Literal["CC", "CP", "PP"]
@@ -95,6 +95,7 @@ def train_model(
     backbone: BackboneConfig,
     rfs: RFConfig,
     *,
+    targets,
     use_les: bool,
     les_training: LESTrainingConfig | None = None,
 ) -> Path:
@@ -102,6 +103,7 @@ def train_model(
     kind = "les" if use_les else "franken"
     config = AutotuneConfig(
         dataset=dataset_config(dset, f"dimer_{kind}_{dset.id}"),
+        train_targets=targets,
         solver=solver,
         backbone=backbone,
         rfs=rfs,
@@ -111,14 +113,14 @@ def train_model(
             else None
         ),
         les_training=les_training or LESTrainingConfig(),
-        best_model_selection=["energy_MAE", "forces_MAE"],
+        best_model_selection=[f"{t}_RMSE" for t in targets],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
     )
     run_dir = franken.autotune.autotune(config)
     assert isinstance(run_dir, Path)
-    if use_les:
-        plot_training_history(run_dir / "training_history.json")
+    #if use_les:
+    #    plot_training_history(run_dir / "training_history.json")
     return run_dir / "best_ckpt.pt"
 
 
@@ -156,8 +158,8 @@ def evaluate_and_plot(dset: DimersDataset, *, use_les: bool) -> None:
     with (run / "best.json").open() as file:
         metrics = json.load(file)["metrics"]["validation"]
     print(f"{title}.")
-    print(f"\tEnergy RMSE: {metrics['energy_RMSE']:.1f}")
-    print(f"\tForces RMSE: {metrics['forces_RMSE']:.1f}")
+    for m_name, m_val in metrics.items():
+        print(f"\t{m_name}: {m_val:.2f}")
 
     prediction = predict(dset, run / "best_ckpt.pt")
     monomer_energy = dset.energy_a + dset.energy_b
@@ -199,6 +201,8 @@ if __name__ == "__main__":
     # Download from https://archive.materialscloud.org/records/405an-d8183
     datasets = list(get_datasets({"CC"}, read(DATA_PATH, index=":")))
     print(f"Loaded {len(datasets)} datasets")
+    targets = [ENERGY, FORCES]
+    train_franken = False
 
     backbone = MaceBackboneConfig("mace_mp/small")
     rfs = MultiscaleGaussianRFConfig(
@@ -212,23 +216,25 @@ if __name__ == "__main__":
         num_cycles=50,
         epochs_per_cycle=50,
         batch_size=None,
-        learning_rate=1e-4,
+        learning_rate=1e-3,
         restore_best=True,
     )
 
     # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
     for dset in datasets[:1]:
-        train_model(
-            dset,
-            SolverConfig(
-                l2_penalty=np.logspace(-11, -6, 6).tolist(),
-                force_weight=np.logspace(-2, 3, 6).tolist(),
-            ),
-            backbone,
-            rfs,
-            use_les=False,
-        )
-        evaluate_and_plot(dset, use_les=False)
+        if train_franken:
+            train_model(
+                dset,
+                SolverConfig(
+                    l2_penalty=np.logspace(-11, -6, 6).tolist(),
+                    force_weight=np.logspace(-2, 3, 6).tolist(),
+                ),
+                backbone,
+                rfs,
+                use_les=False,
+                targets=targets,
+            )
+            evaluate_and_plot(dset, use_les=False)
 
         sr_run = newest_run(SCRIPT_DIR / f"franken_outputs/dimer_{dset.id}")
         with (sr_run / "best.json").open() as file:
@@ -236,13 +242,14 @@ if __name__ == "__main__":
         train_model(
             dset,
             SolverConfig(
-                l2_penalty=best_solver["l2_penalty"],
-                energy_weight=best_solver["energy_weight"],
-                force_weight=best_solver["forces_weight"],
+                l2_penalty=1e-6,#best_solver["l2_penalty"],
+                energy_weight=1.0,#best_solver["energy_weight"],
+                force_weight=10.0,#best_solver["forces_weight"],
             ),
             backbone,
             rfs,
             use_les=True,
             les_training=full_batch_adam,
+            targets=targets,
         )
         evaluate_and_plot(dset, use_les=True)

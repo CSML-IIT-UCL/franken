@@ -5,6 +5,7 @@ import os
 from typing import Literal, Mapping, Optional, Union
 
 import torch
+from les import Les
 
 from franken.config import BackboneConfig, LESConfig, RFConfig
 from franken.data import Configuration
@@ -36,9 +37,13 @@ class LESFrankenPotential(FrankenPotential):
             atomic_energies=atomic_energies,
         )
         self.les_config = les_config
-        self.les = initialize_les(
-            les_config=les_config, feature_dim=self.gnn.feature_dim()
-        )
+        #self.les = initialize_les(les_config, feature_dim=self.gnn.feature_dim())
+        self.les = Les(les_arguments={
+            "is_periodic": True, # TODO: fix?
+            "N_max": 20,
+            "use_atomwise": True,  # use the LES MLP (only need to pass in descriptors)
+            "self.output_scaling_factor": 0.1,
+        })
 
     @property
     @torch.jit.unused
@@ -140,7 +145,14 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        les_energies = self.les(gnn_descriptors, atom_pos, data)
+        #les_energies = self.les(gnn_descriptors, atom_pos, data)
+        cell = data.cell
+        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
+        les_energies = self.les(
+            positions=atom_pos,
+            cell=cell,
+            desc=gnn_descriptors,
+        )["E_lr"]
         energies = rff_energies + les_energies
 
         return energies.sum(1), energies
@@ -152,7 +164,14 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self.les(gnn_descriptors, atom_pos, data)
+        #les_energies = self.les(gnn_descriptors, atom_pos, data)
+        cell = data.cell
+        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
+        les_energies = self.les(
+            positions=atom_pos,
+            cell=cell,
+            desc=gnn_descriptors,
+        )["E_lr"]
         return les_energies, les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
