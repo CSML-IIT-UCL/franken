@@ -78,10 +78,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.mode: Literal["alternating", "joint"] = "alternating"
         self.solver: Literal["cg", "direct"] = "direct"
         self.cg_num_iter: int = 10
         self.training_config = training_config or LESTrainingConfig()
+        self.mode: Literal["alternating", "variable_projection", "joint"] = (
+            self.training_config.mode
+        )
         self.best_model_selection = best_model_selection or [
             f"{target}_MAE" for target in self.training_targets
         ]
@@ -91,6 +93,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.best_stage: dict | None = None
         self._best_state = None
         self._les_optimizer = None
+        self._loss_normalization: dict[str, Tensor] | None = None
+        self._projection_factor: Tensor | None = None
+        self.fmaps: dict[TargetType, list[Tensor]] = {}
         self._shuffle_rng = torch.Generator().manual_seed(seed)
 
     def create_log_entry(self, rf_hps, model):
@@ -272,19 +277,54 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 raise ValueError("LES accumulation expects individual configurations")
             # Zero-weight targets are still evaluated for reporting, but need not
             # create costly force/stress derivative graphs during optimization.
-            predictions = model.predict(
-                targets=list(target_weights),
-                data=data,
-                is_training=True,
-                add_energy_shift=False,
-            )
-            loss = sum(
-                weight
-                * (predictions[target] - targets[target].to(self.buffer_dt))
-                .square()
-                .mean()
-                for target, weight in target_weights.items()
-            ) / len(indices)
+            if self.mode == "variable_projection" or (
+                self.fmaps and self.mode != "joint"
+            ):
+                # RFF is fixed in this derivative. Use the same linear maps as
+                # its solve, in solver precision. Differentiating the combined
+                # energy instead rounds the RFF force back to descriptor dtype,
+                # which can spoil a projected line search through cancellation.
+                fmaps = (
+                    {target: self.fmaps[target][index] for target in target_weights}
+                    if self.fmaps
+                    else model.grad_feature_map(data, list(target_weights))
+                )
+                les_predictions = model.predict_les(
+                    data, list(target_weights), is_training=True
+                )
+                predictions = {}
+                for target in target_weights:
+                    short_range = (
+                        model.rf.weights.detach().to(self.buffer_dt)
+                        @ fmaps[target].to(self.buffer_dt)
+                    ) * data.natoms
+                    predictions[target] = short_range.reshape_as(
+                        les_predictions[target]
+                    ) + les_predictions[target].to(self.buffer_dt)
+            else:
+                predictions = model.predict(
+                    targets=list(target_weights),
+                    data=data,
+                    is_training=True,
+                    add_energy_shift=False,
+                )
+            # Match the RFF normal equations: all feature maps and targets
+            # represent the observable divided by N, and vector components
+            # are summed (not averaged). Covariance normalization must also
+            # be shared by the two alternating subproblems.
+            loss = total.new_zeros(())
+            for target, weight in target_weights.items():
+                residual = (
+                    predictions[target].to(self.buffer_dt)
+                    - targets[target].to(self.buffer_dt)
+                ) / data.natoms.to(self.buffer_dt)
+                squared_error = residual.square().sum()
+                if self._loss_normalization is not None:
+                    squared_error = (
+                        squared_error / self._loss_normalization[target].squeeze()
+                    )
+                loss = loss + weight * squared_error
+            loss = loss / len(indices)
             loss.backward()
             total += loss.detach()
         return total
@@ -348,10 +388,25 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 indices = list(range(n_samples))
 
                 def closure():
+                    if self.mode == "variable_projection":
+                        self._refit_projected_rff(model, rf_hps)
                     optim.zero_grad(set_to_none=True)
-                    return self._backward_batch(model, indices, target_weights)
+                    loss = self._backward_batch(model, indices, target_weights)
+                    if self.mode == "variable_projection":
+                        # Envelope theorem: no derivative through the exact RFF
+                        # minimizer is needed. Its ridge cost is still needed by
+                        # the line search, since it changes between trial points.
+                        loss = loss + (
+                            rf_hps["l2_penalty"]
+                            * model.rf.weights.detach().square().sum()
+                            / n_samples
+                        )
+                    return loss
 
                 optim.step(closure)
+                if self.mode == "variable_projection":
+                    # The last closure may have evaluated a rejected trial.
+                    self._refit_projected_rff(model, rf_hps)
         finally:
             for p, requires_grad in previous_flags:
                 p.requires_grad_(requires_grad)
@@ -363,6 +418,32 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             epoch=epoch,
             step="joint" if self.mode == "joint" else "les",
         )
+
+    @torch.no_grad()
+    def _prepare_projection(self, covs, rf_hps):
+        """Factor the fixed regularized RFF matrix once for all LES trial points."""
+        total_weight = sum(rf_hps[f"{t}_weight"] for t in self.training_targets)
+        matrix = sum(
+            (rf_hps[f"{t}_weight"] / total_weight) * covs[t]
+            for t in self.training_targets
+        )
+        matrix.diagonal().add_(rf_hps["l2_penalty"])
+        self._projection_factor = torch.linalg.cholesky(matrix)
+
+    @torch.no_grad()
+    def _refit_projected_rff(self, model, rf_hps):
+        if self._projection_factor is None:
+            raise RuntimeError("Variable projection requires prepared RFF covariances")
+        coeffs = self.residual_coeffs(
+            model, self.train_dataloader, self._loss_normalization
+        )
+        total_weight = sum(rf_hps[f"{t}_weight"] for t in self.training_targets)
+        rhs = sum(
+            (rf_hps[f"{t}_weight"] / total_weight) * coeffs[t]
+            for t in self.training_targets
+        )
+        solution = torch.cholesky_solve(rhs[:, None], self._projection_factor).T
+        model.rf.weights.copy_(solution)
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -387,6 +468,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.best_stage = None
         self._best_state = None
         self._les_optimizer = None
+        self._loss_normalization = None
+        self._projection_factor = None
         self._shuffle_rng = torch.Generator().manual_seed(self.seed)
         model = model.to(self.device)
         model.train()
@@ -399,29 +482,20 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
+            self._loss_normalization = normalization
+            if self.mode == "variable_projection":
+                self._prepare_projection(covs, rf_hps)
             t_cov = perf_counter() - t_cov
 
         for outer_it in range(self.training_config.num_cycles):
-            # 1. Train RFF on full targets (original coefficients)
-            #    or on residual coefficients depending on the iteration
-            if self.mode == "alternating":
+            # 1. Fit the residual of the current LES head, including its
+            # nonzero random initialization in the first cycle.
+            if self.mode in {"alternating", "variable_projection"}:
                 assert covs is not None
                 assert coeffs is not None
-                if outer_it == 0:
-                    # 1st iteration has no valid LES residual: train against full target
-                    rf_weights = self._fit_rff(
-                        model,
-                        covs,
-                        normalization,
-                        rf_hps,
-                        epoch=outer_it,
-                        direct_coeffs=coeffs,
-                    )
-                else:
-                    # From 2nd iteration, train against y - y_les
-                    rf_weights = self._fit_rff(
-                        model, covs, normalization, rf_hps, epoch=outer_it
-                    )
+                rf_weights = self._fit_rff(
+                    model, covs, normalization, rf_hps, epoch=outer_it #, direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
+                )
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(rf_hps, model, rf_weights, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
@@ -436,6 +510,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             model.les.load_state_dict(self._best_state["les"])
         # Optimizer moments correspond to the last stage, not the restored model.
         self._les_optimizer = None
+        self._projection_factor = None
         self._best_state = None
 
         # Logging
@@ -544,7 +619,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             les_preds = model.predict_les(
                 data, self.training_targets, is_training=False
             )
-            target_fmaps = model.grad_feature_map(data, self.training_targets)
+            target_fmaps = (
+                {t: self.fmaps[t][i] for t in self.training_targets}
+                if self.fmaps
+                else model.grad_feature_map(data, self.training_targets)
+            )
             for tgt_name in self.training_targets:
                 try:
                     tgt = targets[tgt_name] - les_preds[tgt_name]
@@ -578,6 +657,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     ):
         n_samples = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
+        self.fmaps = {t: [] for t in self.training_targets} if self.save_fmaps else {}
 
         covs = {
             t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
@@ -598,6 +678,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             assert data.natoms.numel() == 1, "Batched training is not supported"
 
             target_fmaps = model.grad_feature_map(data, self.training_targets)
+            if self.save_fmaps and i == 0:
+                self.warn_save_fmaps(list(target_fmaps.values()), len(dataloader))
             for tgt_name in self.training_targets:
                 try:
                     tgt = targets[tgt_name]
@@ -607,6 +689,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
+                if self.save_fmaps:
+                    self.fmaps[tgt_name].append(fmap)
                 if is_scalar_target(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
                     coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())

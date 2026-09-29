@@ -513,6 +513,7 @@ def get_arg_groups():
             Argument.from_dataclass(LESConfig, "hidden_dim", "les-hidden-dim"),
             Argument.from_dataclass(LESConfig, "dl", "les-dl"),
             Argument.from_dataclass(LESConfig, "sigma", "les-sigma"),
+            Argument.from_dataclass(LESConfig, "activation", "les-activation"),
         ],
     )
     return {

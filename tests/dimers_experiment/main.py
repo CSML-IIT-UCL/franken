@@ -1,8 +1,7 @@
 """Fit and evaluate short- and long-range Franken models on CC dimers.
 
-This is the full-batch Adam version of ``main-mgb.py``.  LES optimization uses
-the public ``LESTrainingConfig`` API: each Adam epoch accumulates the gradient
-over every training configuration before performing one parameter update.
+LES optimization uses a smooth charge head and full-batch L-BFGS with variable
+projection: the short-range RFF solution is updated at every LES trial point.
 """
 
 from dataclasses import dataclass
@@ -106,14 +105,18 @@ def train_model(
         backbone=backbone,
         rfs=rfs,
         les=(
-            LESConfig(hidden_dim=(64, 32), les_output_scale=1.0, dl=3)
+            LESConfig(hidden_dim=(64, 32), les_output_scale=1.0, dl=3, activation="silu")
             if use_les
             else None
         ),
-        les_training=les_training or LESTrainingConfig(),
+        les_training=None if les_training is None else les_training,
         best_model_selection=["energy_MAE", "forces_MAE"],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
+        # Match the explicit weights used by train_les_fresh.py. Spectral
+        # normalization changes the relative energy/force weighting.
+        rf_normalization=None,
+        save_fmaps=use_les,
     )
     run_dir = franken.autotune.autotune(config)
     assert isinstance(run_dir, Path)
@@ -207,12 +210,22 @@ if __name__ == "__main__":
         length_scale_high=20,
         length_scale_num=6,
     )
-    full_batch_adam = LESTrainingConfig(
-        optimizer="adam",
+    # full_batch_adam = LESTrainingConfig(
+    #     optimizer="adam",
+    #     num_cycles=50,
+    #     epochs_per_cycle=20,
+    #     batch_size=None,
+    #     learning_rate=1e-4,
+    #     restore_best=True,
+    # )
+
+    les_training = LESTrainingConfig(
+        optimizer="lbfgs",
+        mode="variable_projection",
         num_cycles=50,
-        epochs_per_cycle=50,
+        epochs_per_cycle=20,
         batch_size=None,
-        learning_rate=1e-4,
+        lbfgs_learning_rate=1.0,
         restore_best=True,
     )
 
@@ -222,7 +235,7 @@ if __name__ == "__main__":
             dset,
             SolverConfig(
                 l2_penalty=np.logspace(-11, -6, 6).tolist(),
-                force_weight=np.logspace(-2, 3, 6).tolist(),
+                force_weight=1e-2, #np.logspace(-2, 3, 6).tolist(),
             ),
             backbone,
             rfs,
@@ -243,6 +256,6 @@ if __name__ == "__main__":
             backbone,
             rfs,
             use_les=True,
-            les_training=full_batch_adam,
+            les_training=les_training,
         )
         evaluate_and_plot(dset, use_les=True)

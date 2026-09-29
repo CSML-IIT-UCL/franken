@@ -252,8 +252,9 @@ class LESConfig:
     hidden_dim: tuple[int, ...] = (32, 16)
     dl: float = 1.5
     sigma: float = 1.0
-    les_output_scale: float = 0.1
+    les_output_scale: float = 1.0
     add_linear_nn: bool = True
+    activation: Literal["relu", "silu"] = "silu" # Charge-head activation.
 
     def to_ckpt(self):
         return dataclasses.asdict(self)
@@ -286,10 +287,16 @@ class LESTrainingConfig:
     lbfgs_tolerance_change: float = 1e-13
     restore_best: bool = True
     """Restore the best combined model across both stages, using validation if available."""
+    mode: Literal["alternating", "variable_projection"] = "variable_projection"
+    """Variable projection refits RFF at every L-BFGS trial point."""
 
     def __post_init__(self):
         if self.optimizer not in {"adam", "lbfgs"}:
             raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
+        if self.mode not in {"alternating", "variable_projection"}:
+            raise ValueError("LES mode must be 'alternating' or 'variable_projection'")
+        if self.mode == "variable_projection" and self.optimizer != "lbfgs":
+            raise ValueError("Variable projection requires optimizer='lbfgs'")
         for name in (
             "num_cycles",
             "epochs_per_cycle",

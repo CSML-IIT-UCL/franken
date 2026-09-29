@@ -67,14 +67,16 @@ def atoms():
     return ase.Atoms("H2", positions=[[0.1, 0.2, 0.3], [1.2, 0.4, 0.5]], cell=[8] * 3)
 
 
-def make_model(model_cls):
+def make_model(model_cls, activation="relu"):
     kwargs = dict(
         gnn_config=MaceBackboneConfig("mace_mp/small"),
         rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
         atomic_energies={1: -1.0},
     )
     if model_cls is LESFrankenPotential:
-        kwargs["les_config"] = LESConfig(hidden_dim=(4, 2), les_output_scale=1.0)
+        kwargs["les_config"] = LESConfig(
+            hidden_dim=(4, 2), les_output_scale=1.0, activation=activation
+        )
     model = model_cls(**kwargs)
     with torch.no_grad():
         model.rf.weights.fill_(0.1)
@@ -110,8 +112,9 @@ def test_auto_load_and_calculator_roundtrip(toy_backbone, atoms, tmp_path, model
     np.testing.assert_allclose(atoms.get_forces(), expected_forces)
 
 
-def test_explicit_les_loader_still_works(toy_backbone, tmp_path):
-    model = make_model(LESFrankenPotential)
+@pytest.mark.parametrize("activation", ["relu", "silu"])
+def test_explicit_les_loader_still_works(toy_backbone, tmp_path, activation):
+    model = make_model(LESFrankenPotential, activation=activation)
     path = tmp_path / "les.pt"
     model.save(path)
     loaded = LESFrankenPotential.load(path, map_location="cpu")
