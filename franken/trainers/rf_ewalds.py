@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from collections import defaultdict
 import hashlib
 import json
 import logging
@@ -133,13 +134,13 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             return None, None
 
         energy_error, energy_metric = _get_first_available_metric(
-            ["energy_MAE", "energy_RMSE"],
+            ["energy_RMSE", "energy_MAE"],
         )
         forces_error, forces_metric = _get_first_available_metric(
-            ["forces_MAE", "forces_RMSE"],
+            ["forces_RMSE", "forces_MAE"],
         )
         stress_error, stress_metric = _get_first_available_metric(
-            ["stress_MAE", "stress_RMSE"],
+            ["stress_RMSE", "stress_MAE"],
         )
         if energy_error is None:
             energy_error = float("nan")
@@ -263,37 +264,45 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     def _backward_batch(self, model, indices, target_weights):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
-        total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
+        per_tgt_losses = {
+            tgt_name: torch.zeros((), device=self.device, dtype=self.buffer_dt)
+            for tgt_name in self.training_targets
+        }
         for index in indices:
             data, targets = self.train_dataloader.dataset[index]
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
             if data.natoms.numel() != 1:
                 raise ValueError("LES accumulation expects individual configurations")
-            # Zero-weight targets are still evaluated for reporting, but need not
-            # create costly force/stress derivative graphs during optimization.
             predictions = model.predict(
-                targets=list(target_weights),
+                targets=self.training_targets,
                 data=data,
                 is_training=True,
                 add_energy_shift=False,
             )
-            loss = sum(
-                weight
-                * (predictions[target] - targets[target].to(self.buffer_dt))
-                .square()
-                .mean()
-                for target, weight in target_weights.items()
-            ) / len(indices)
-            loss.backward()
-            total += loss.detach()
-        return total
+            per_index_loss = torch.zeros((), device=self.device, dtype=self.buffer_dt)
+            for tgt_name in self.training_targets:
+                try:
+                    tgt = targets[tgt_name]
+                except KeyError:
+                    raise RuntimeError(
+                        f"Target {index} does not contain any values for {tgt_name}."
+                    )
+                loss = target_weights[tgt_name] * torch.mean(
+                    (predictions[tgt_name] - tgt) ** 2
+                )
+                loss = loss / len(indices)  # normalize gradient by the batch size
+                per_tgt_losses[tgt_name] += loss.detach()
+                per_index_loss += loss
+            per_index_loss.backward()
+        return {k: v.item() for k, v in per_tgt_losses.items()}
 
     def _fit_les(self, model, epoch, rf_hps):
         cfg = self.training_config
         n_samples = len(self.train_dataloader.dataset)
         if n_samples == 0:
             raise ValueError("LES requires a nonempty training dataset")
+        # Compute relative weights
         weights = {
             target: rf_hps[f"{target}_weight"] for target in self.training_targets
         }
@@ -314,44 +323,32 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         for p, _ in previous_flags:
             p.requires_grad_(id(p) in trainable_ids)
         try:
-            if cfg.optimizer == "adam":
-                lr = cfg.learning_rate * cfg.lr_decay**epoch
-                if self._les_optimizer is None:
-                    self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
-                optim = self._les_optimizer
-                for group in optim.param_groups:
-                    group["lr"] = lr
-                batch_size = cfg.batch_size or n_samples
-                for _ in tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs"):
-                    indices = (
-                        torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
-                        if batch_size < n_samples
-                        else list(range(n_samples))
-                    )
-                    for start in range(0, n_samples, batch_size):
-                        optim.zero_grad(set_to_none=True)
-                        self._backward_batch(
-                            model, indices[start : start + batch_size], target_weights
-                        )
-                        optim.step()
-            else:
-                # RFF refits change this objective: do not reuse curvature history.
-                optim = torch.optim.LBFGS(
-                    params,
-                    lr=cfg.lbfgs_learning_rate * cfg.lr_decay**epoch,
-                    max_iter=cfg.lbfgs_max_iter,
-                    history_size=cfg.lbfgs_history_size,
-                    tolerance_grad=cfg.lbfgs_tolerance_grad,
-                    tolerance_change=cfg.lbfgs_tolerance_change,
-                    line_search_fn="strong_wolfe",
+            lr = cfg.learning_rate * cfg.lr_decay**epoch
+            if self._les_optimizer is None:
+                self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
+            optim = self._les_optimizer
+            for group in optim.param_groups:
+                group["lr"] = lr
+            batch_size = cfg.batch_size or n_samples
+            for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
+                indices = (
+                    torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
+                    if batch_size < n_samples
+                    else list(range(n_samples))
                 )
-                indices = list(range(n_samples))
-
-                def closure():
+                tot_loss = defaultdict(float)
+                for start in range(0, n_samples, batch_size):
                     optim.zero_grad(set_to_none=True)
-                    return self._backward_batch(model, indices, target_weights)
-
-                optim.step(closure)
+                    batch_loss = self._backward_batch(
+                        model, indices[start : start + batch_size], target_weights
+                    )
+                    for k, v in batch_loss.items():
+                        tot_loss[k] += v
+                    optim.step()
+                desc = ""
+                for k, v in tot_loss.items():
+                    desc += f"{k}={v:.3e} "
+                pb.set_description(desc)
         finally:
             for p, requires_grad in previous_flags:
                 p.requires_grad_(requires_grad)
@@ -418,6 +415,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         direct_coeffs=coeffs,
                     )
                 else:
+                    #pass
                     # From 2nd iteration, train against y - y_les
                     rf_weights = self._fit_rff(
                         model, covs, normalization, rf_hps, epoch=outer_it
