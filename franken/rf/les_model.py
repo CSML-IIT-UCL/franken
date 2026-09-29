@@ -10,7 +10,6 @@ from les import Les
 from franken.config import BackboneConfig, LESConfig, RFConfig
 from franken.data import Configuration
 import franken.data.base
-from franken.les.les_head import initialize_les
 from franken.rf.model import FrankenPotential
 from franken.utils.derivatives import forces_bwdad, forces_stress_bwdad
 
@@ -37,13 +36,23 @@ class LESFrankenPotential(FrankenPotential):
             atomic_energies=atomic_energies,
         )
         self.les_config = les_config
-        #self.les = initialize_les(les_config, feature_dim=self.gnn.feature_dim())
-        self.les = Les(les_arguments={
-            "is_periodic": True, # TODO: fix?
-            "N_max": 20,
-            "use_atomwise": True,  # use the LES MLP (only need to pass in descriptors)
-            "self.output_scaling_factor": 0.1,
-        })
+        # See the LES documentation for more details about the arguments:
+        # https://les.readthedocs.io/en/latest/library.html
+        self.les = Les(
+            les_arguments={
+                "is_periodic": LESConfig.is_periodic,
+                "N_max": LESConfig.N_max,
+                "use_atomwise": True,  # use the LES MLP
+                "output_scaling_factor": 0.1,
+            }
+        )
+        # Initialize the LES MLP immediately to avoid annoying downstream issues.
+        # relies on default dtype and device.
+        self.les(
+            positions=torch.randn(5, 3),
+            cell=torch.randn(1, 3, 3),
+            desc=torch.randn(5, self.gnn.feature_dim()),
+        )
 
     @property
     @torch.jit.unused
@@ -128,6 +137,18 @@ class LESFrankenPotential(FrankenPotential):
         else:
             return model
 
+    def _get_les_energy(
+        self, atom_pos: torch.Tensor, desc: torch.Tensor, data: Configuration
+    ) -> torch.Tensor:
+        cell = data.cell
+        assert cell is not None
+        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
+        return self.les(
+            positions=atom_pos,
+            cell=cell,
+            desc=desc,
+        )["E_lr"]
+
     def _energy_aux(
         self,
         atom_pos: torch.Tensor,
@@ -145,14 +166,7 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        #les_energies = self.les(gnn_descriptors, atom_pos, data)
-        cell = data.cell
-        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
-        les_energies = self.les(
-            positions=atom_pos,
-            cell=cell,
-            desc=gnn_descriptors,
-        )["E_lr"]
+        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
         energies = rff_energies + les_energies
 
         return energies.sum(1), energies
@@ -164,14 +178,7 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        #les_energies = self.les(gnn_descriptors, atom_pos, data)
-        cell = data.cell
-        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
-        les_energies = self.les(
-            positions=atom_pos,
-            cell=cell,
-            desc=gnn_descriptors,
-        )["E_lr"]
+        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
         return les_energies, les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]

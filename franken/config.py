@@ -248,12 +248,8 @@ class PETBackboneConfig(BackboneConfig):
 # TODO: Document LES/Ewalds parameters and add them here.
 @dataclass
 class LESConfig:
-    n_layers: int = 3
-    hidden_dim: tuple[int, ...] = (32, 16)
-    dl: float = 1.5
-    sigma: float = 1.0
-    les_output_scale: float = 0.1
-    add_linear_nn: bool = True
+    N_max: float = 10
+    is_periodic: bool = True
 
     def to_ckpt(self):
         return dataclasses.asdict(self)
@@ -496,5 +492,5 @@ class AutotuneConfig:
     )
     """Which data labels to train Franken with."""
 
-    les_training: LESTrainingConfig = field(default_factory=LESTrainingConfig)
+    les_training: LESTrainingConfig | None = field(default_factory=LESTrainingConfig)
     """Training schedule and optimizer for LES-enabled models."""

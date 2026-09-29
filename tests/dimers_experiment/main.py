@@ -96,10 +96,11 @@ def train_model(
     rfs: RFConfig,
     *,
     targets,
-    use_les: bool,
+    les_config: LESConfig | None = None,
     les_training: LESTrainingConfig | None = None,
 ) -> Path:
     """Run the short-range fit or the alternating RFF + LES fit."""
+    use_les = les_config is not None and les_training is not None
     kind = "les" if use_les else "franken"
     config = AutotuneConfig(
         dataset=dataset_config(dset, f"dimer_{kind}_{dset.id}"),
@@ -107,12 +108,8 @@ def train_model(
         solver=solver,
         backbone=backbone,
         rfs=rfs,
-        les=(
-            LESConfig(hidden_dim=(64, 32), les_output_scale=1.0, dl=3)
-            if use_les
-            else None
-        ),
-        les_training=les_training or LESTrainingConfig(),
+        les=les_config,
+        les_training=les_training,
         best_model_selection=[f"{t}_RMSE" for t in targets],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
@@ -211,6 +208,10 @@ if __name__ == "__main__":
         length_scale_high=20,
         length_scale_num=6,
     )
+    les_cfg = LESConfig(
+        N_max=20,
+        is_periodic=True,
+    )
     full_batch_adam = LESTrainingConfig(
         optimizer="adam",
         num_cycles=50,
@@ -231,7 +232,6 @@ if __name__ == "__main__":
                 ),
                 backbone,
                 rfs,
-                use_les=False,
                 targets=targets,
             )
             evaluate_and_plot(dset, use_les=False)
@@ -248,7 +248,7 @@ if __name__ == "__main__":
             ),
             backbone,
             rfs,
-            use_les=True,
+            les_config=les_cfg,
             les_training=full_batch_adam,
             targets=targets,
         )

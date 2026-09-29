@@ -323,32 +323,52 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         for p, _ in previous_flags:
             p.requires_grad_(id(p) in trainable_ids)
         try:
-            lr = cfg.learning_rate * cfg.lr_decay**epoch
-            if self._les_optimizer is None:
-                self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
-            optim = self._les_optimizer
-            for group in optim.param_groups:
-                group["lr"] = lr
-            batch_size = cfg.batch_size or n_samples
-            for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
-                indices = (
-                    torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
-                    if batch_size < n_samples
-                    else list(range(n_samples))
-                )
-                tot_loss = defaultdict(float)
-                for start in range(0, n_samples, batch_size):
-                    optim.zero_grad(set_to_none=True)
-                    batch_loss = self._backward_batch(
-                        model, indices[start : start + batch_size], target_weights
+            if cfg.optimizer == "adam":
+                lr = cfg.learning_rate * cfg.lr_decay**epoch
+                if self._les_optimizer is None:
+                    self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
+                optim = self._les_optimizer
+                for group in optim.param_groups:
+                    group["lr"] = lr
+                batch_size = cfg.batch_size or n_samples
+                for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
+                    indices = (
+                        torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
+                        if batch_size < n_samples
+                        else list(range(n_samples))
                     )
-                    for k, v in batch_loss.items():
-                        tot_loss[k] += v
-                    optim.step()
-                desc = ""
-                for k, v in tot_loss.items():
-                    desc += f"{k}={v:.3e} "
-                pb.set_description(desc)
+                    tot_loss = defaultdict(float)
+                    for start in range(0, n_samples, batch_size):
+                        optim.zero_grad()
+                        batch_loss = self._backward_batch(
+                            model, indices[start : start + batch_size], target_weights
+                        )
+                        for k, v in batch_loss.items():
+                            tot_loss[k] += v
+                        optim.step()
+                    desc = ""
+                    for k, v in tot_loss.items():
+                        desc += f"{k}={v:.3e} "
+                    pb.set_description(desc)
+            else:
+                # RFF refits change this objective: do not reuse curvature history.
+                optim = torch.optim.LBFGS(
+                    params,
+                    lr=cfg.lbfgs_learning_rate * cfg.lr_decay**epoch,
+                    max_iter=cfg.lbfgs_max_iter,
+                    history_size=cfg.lbfgs_history_size,
+                    tolerance_grad=cfg.lbfgs_tolerance_grad,
+                    tolerance_change=cfg.lbfgs_tolerance_change,
+                    line_search_fn="strong_wolfe",
+                )
+                indices = list(range(n_samples))
+
+                def closure():
+                    optim.zero_grad()
+                    batch_loss = self._backward_batch(model, indices, target_weights)
+                    return sum(batch_loss.values())
+
+                optim.step(closure)
         finally:
             for p, requires_grad in previous_flags:
                 p.requires_grad_(requires_grad)
@@ -415,7 +435,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         direct_coeffs=coeffs,
                     )
                 else:
-                    #pass
+                    # pass
                     # From 2nd iteration, train against y - y_les
                     rf_weights = self._fit_rff(
                         model, covs, normalization, rf_hps, epoch=outer_it
