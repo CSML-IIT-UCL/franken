@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -34,10 +35,11 @@ class LESHead(nn.Module):
         sigma=1.0,
         les_output_scale: float = 0.1,
         add_linear_nn: bool = True,
+        activation: Literal["relu", "silu"] = "relu",
     ):
         super().__init__()
         self.les_output_scale = les_output_scale
-
+        
         # Build the MLP
         if isinstance(hidden_dim, int):
             hidden_dim = (hidden_dim,)
@@ -54,7 +56,7 @@ class LESHead(nn.Module):
         for i in range(n_layers - 1):
             layers.append(nn.Linear(n_neurons[i], n_neurons[i + 1]))
             layers.append(nn.LayerNorm((n_neurons[i + 1],)))
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.SiLU() if activation == "silu" else nn.ReLU(inplace=True))
 
         layers.append(nn.Linear(n_neurons[-2], n_neurons[-1]))
         self.outnet = nn.Sequential(*layers)

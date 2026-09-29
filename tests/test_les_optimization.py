@@ -9,6 +9,7 @@ import torch
 from franken.autotune.cli import parse_cli
 from franken.config import LESTrainingConfig
 from franken.data.base import Configuration, Target
+from franken.les.les_head import LESHead
 from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
 
@@ -63,6 +64,123 @@ def make_trainer(config, n=5):
 HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
 
 
+@pytest.mark.parametrize("save_fmaps", [False, True])
+def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
+    """The force must use A_F @ w, not a rounded backward pass through RFF."""
+
+    class CancellationModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.rf = torch.nn.Module()
+            self.rf.weights = torch.nn.Parameter(
+                torch.tensor([[1e8, -1e8 + 1]], dtype=torch.float64)
+            )
+            self.les = torch.nn.Linear(1, 1, bias=False)
+            torch.nn.init.zeros_(self.les.weight)
+
+        def grad_feature_map(self, data, targets):
+            return {"forces": -torch.ones(2, 3)}
+
+        def predict_les(self, data, targets, is_training=False):
+            data.atom_pos.requires_grad_(True)
+            energy = self.les.weight.sum() * data.atom_pos.sum()
+            force = -torch.autograd.grad(
+                energy, data.atom_pos, create_graph=is_training
+            )[0]
+            return {"forces": force.unsqueeze(0)}
+
+        def predict(self, targets, data, is_training=False, **kwargs):
+            data.atom_pos.requires_grad_(True)
+            features = torch.stack([data.atom_pos.sum(), data.atom_pos.sum()])
+            energy = (self.rf.weights @ features.double()).sum()
+            energy = energy + self.les.weight.sum() * data.atom_pos.sum()
+            force = -torch.autograd.grad(
+                energy, data.atom_pos, create_graph=is_training
+            )[0]
+            return {"forces": force.unsqueeze(0)}
+
+    data = Configuration(torch.ones(1, 3), torch.tensor([1]), torch.tensor([1]))
+    dataset = [(data, Target(energy=torch.zeros(1), forces=torch.zeros(1, 3)))]
+    trainer = RandomFeaturesEwaldsTrainer(
+        SimpleNamespace(dataset=dataset),
+        ["forces"],
+        1e-6,
+        {"forces": 1.0},
+        device="cpu",
+        dtype=torch.float64,
+        save_fmaps=save_fmaps,
+        training_config=LESTrainingConfig(
+            optimizer="lbfgs", mode="variable_projection"
+        ),
+    )
+    model = CancellationModel()
+    # The double coefficients differ by one, but their float32 adjoints cancel
+    # to zero before reaching the positions in the combined-energy path.
+    torch.testing.assert_close(
+        model.predict(["forces"], data)["forces"], torch.zeros(1, 1, 3)
+    )
+    if save_fmaps:
+        trainer.fmaps = {"forces": [-torch.ones(2, 3, dtype=torch.float64)]}
+    loss = trainer._backward_batch(model, [0], {"forces": 1.0})
+    torch.testing.assert_close(loss, torch.tensor(3.0, dtype=torch.float64))
+    torch.testing.assert_close(model.les.weight.grad, torch.tensor([[6.0]]))
+    assert model.rf.weights.grad is None
+
+
+@pytest.mark.parametrize("periodic", [False, True])
+@pytest.mark.parametrize("activation", ["relu", "silu"])
+def test_les_force_and_parameter_derivatives(periodic, activation):
+    head = LESHead(
+        input_dim=3, hidden_dim=(4, 2), les_output_scale=1.0, activation=activation
+    ).double()
+    positions = torch.tensor([[0.2, 0.3, 0.1], [1.4, 0.8, 0.5]], dtype=torch.float64)
+    data = Configuration(
+        positions,
+        torch.tensor([1, 1]),
+        torch.tensor([2]),
+        cell=torch.eye(3, dtype=torch.float64) * (6 if periodic else 0),
+    )
+
+    def energy(pos):
+        # Position-dependent charges exercise both the explicit Coulomb force
+        # and the derivative propagated through atomic descriptors.
+        return head(pos.square(), pos, data).sum()
+
+    pos = positions.clone().requires_grad_()
+    force = -torch.autograd.grad(energy(pos), pos, create_graph=True)[0]
+    direction = torch.randn_like(pos)
+    direction /= direction.norm()
+    eps = 1e-6
+    finite_difference = (
+        energy(pos + eps * direction) - energy(pos - eps * direction)
+    ) / (2 * eps)
+    torch.testing.assert_close(
+        finite_difference, -(force * direction).sum(), atol=1e-8, rtol=1e-5
+    )
+
+    loss = energy(pos).square() + 0.2 * (force - 0.1).square().sum()
+    parameter = head.linear_nn.weight
+    gradient = torch.autograd.grad(loss, parameter)[0]
+    direction = torch.randn_like(parameter)
+    direction /= direction.norm()
+    initial = parameter.detach().clone()
+    values = []
+    for sign in (1, -1):
+        with torch.no_grad():
+            parameter.copy_(initial + sign * eps * direction)
+        e = energy(pos)
+        f = -torch.autograd.grad(e, pos)[0]
+        values.append(e.detach().square() + 0.2 * (f - 0.1).square().sum())
+    with torch.no_grad():
+        parameter.copy_(initial)
+    torch.testing.assert_close(
+        (values[0] - values[1]) / (2 * eps),
+        (gradient * direction).sum(),
+        atol=1e-8,
+        rtol=1e-5,
+    )
+
+
 def test_accumulated_gradient_matches_full_mean_and_partial_batch():
     trainer = make_trainer(LESTrainingConfig())
     model = ToyModel()
@@ -83,10 +201,213 @@ def test_accumulated_gradient_with_energy_and_force_losses():
         model, list(range(5)), {"energy": 0.25, "forces": 0.75}
     )
     x = torch.arange(1, 6, dtype=torch.float64)
-    torch.testing.assert_close(loss, 0.25 * (2 * x).square().mean() + 0.75)
+    torch.testing.assert_close(loss, 0.25 * (2 * x).square().mean() + 3 * 0.75)
     torch.testing.assert_close(
-        model.les.weight.grad.squeeze(), -x.square().mean() - 1.5
+        model.les.weight.grad.squeeze(), -x.square().mean() - 4.5
     )
+
+
+class PolynomialModel(torch.nn.Module):
+    """Conservative linear energy with interchangeable short/long-range heads."""
+
+    def __init__(self):
+        super().__init__()
+        self.rf = torch.nn.Module()
+        self.rf.total_random_features = 3
+        self.rf.weights = torch.nn.Parameter(torch.zeros(1, 3, dtype=torch.float64))
+        self.les = torch.nn.Linear(3, 1, bias=False).double()
+
+    def grad_feature_map(self, data, targets):
+        x = data.atom_pos[:, 0]
+        energy = torch.stack((torch.ones_like(x), x.square() / 2, x**3 / 3))
+        forces = torch.zeros(3, x.numel(), 3, dtype=x.dtype)
+        forces[1, :, 0] = -x
+        forces[2, :, 0] = -x.square()
+        return {
+            "energy": energy.mean(1, keepdim=True),
+            "forces": forces.flatten(1) / data.natoms,
+        }
+
+    def _predict_weights(self, data, weights):
+        fmaps = self.grad_feature_map(data, ["energy", "forces"])
+        return {
+            "energy": data.natoms * (weights @ fmaps["energy"]),
+            "forces": (data.natoms * (weights @ fmaps["forces"])).reshape(1, -1, 3),
+        }
+
+    def predict(self, targets, data, **kwargs):
+        return self._predict_weights(data, self.rf.weights + self.les.weight)
+
+    def predict_les(self, data, targets, **kwargs):
+        return self._predict_weights(data, self.les.weight)
+
+
+@pytest.mark.parametrize("normalization", [None, "leading_eig"])
+def test_les_gradient_matches_rff_normal_equations(normalization):
+    # Different atom counts catch per-structure normalization errors; multiple
+    # force components catch a sum-versus-mean mismatch hidden by energy-only tests.
+    dataset = []
+    for n in (2, 4, 7):
+        positions = torch.zeros(n, 3, dtype=torch.float64)
+        positions[:, 0] = torch.linspace(0.2, 1.7, n)
+        data = Configuration(
+            positions, torch.ones(n, dtype=torch.long), torch.tensor([n])
+        )
+        target = Target(
+            torch.tensor([0.7 * n], dtype=torch.float64),
+            torch.randn(n, 3, dtype=torch.float64),
+        )
+        dataset.append((data, target))
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=None, collate_fn=lambda x: x
+    )
+    trainer = RandomFeaturesEwaldsTrainer(
+        loader,
+        ["energy", "forces"],
+        0.03,
+        {"energy": 1.0, "forces": 0.2},
+        random_features_normalization=normalization,
+        device="cpu",
+        dtype=torch.float64,
+    )
+    model = PolynomialModel()
+    covs, _, norms = trainer.covariances(model, loader)
+    trainer._loss_normalization = norms
+    coeffs = trainer.residual_coeffs(model, loader, norms)
+    weights = {"energy": 1 / 1.2, "forces": 0.2 / 1.2}
+    with torch.no_grad():
+        model.rf.weights.normal_()
+    trainer._backward_batch(model, list(range(len(dataset))), weights)
+    expected = sum(
+        weights[t] * (covs[t] @ model.rf.weights.detach().flatten() - coeffs[t])
+        for t in weights
+    ) * (2 / len(dataset))
+    torch.testing.assert_close(model.les.weight.grad.flatten(), expected)
+
+    # The actual closed-form residual solve must be a stationary point of the
+    # same data loss plus its ridge penalty. The toy heads use identical linear
+    # features, so the LES gradient also gives the data gradient w.r.t. RFF.
+    solution = trainer.solve(
+        covs, coeffs, l2_penalty=0.03, energy_weight=1.0, forces_weight=0.2
+    )
+    with torch.no_grad():
+        model.rf.weights.copy_(solution.reshape(1, -1))
+    model.zero_grad()
+    trainer._backward_batch(model, list(range(len(dataset))), weights)
+    torch.testing.assert_close(
+        model.les.weight.grad.flatten() + 2 * 0.03 * solution / len(dataset),
+        torch.zeros_like(solution),
+        atol=1e-12,
+        rtol=0,
+    )
+
+
+@pytest.mark.parametrize("normalization", [None, "leading_eig"])
+@pytest.mark.parametrize("save_fmaps", [False, True])
+def test_variable_projection_gradient_and_accepted_state(normalization, save_fmaps):
+    dataset = []
+    for n in (2, 3, 5):
+        data = Configuration(
+            torch.randn(n, 3, dtype=torch.float64),
+            torch.ones(n, dtype=torch.long),
+            torch.tensor([n]),
+        )
+        dataset.append(
+            (
+                data,
+                Target(
+                    torch.randn(1, dtype=torch.float64),
+                    torch.randn(n, 3, dtype=torch.float64),
+                ),
+            )
+        )
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=None, collate_fn=lambda x: x
+    )
+    trainer = RandomFeaturesEwaldsTrainer(
+        loader,
+        ["energy", "forces"],
+        0.1,
+        {"energy": 1.0, "forces": 0.2},
+        device="cpu",
+        dtype=torch.float64,
+        random_features_normalization=normalization,
+        save_fmaps=save_fmaps,
+        training_config=LESTrainingConfig(
+            optimizer="lbfgs", mode="variable_projection"
+        ),
+    )
+    model = PolynomialModel()
+    trainer._print_eval = Mock()
+    hps = {"energy_weight": 1.0, "forces_weight": 0.2, "l2_penalty": 0.1}
+    weights = {"energy": 1 / 1.2, "forces": 0.2 / 1.2}
+    covs, _, norms = trainer.covariances(model, loader)
+    trainer._loss_normalization = norms
+    trainer._prepare_projection(covs, hps)
+
+    # Independent differentiable elimination of the linear block. Compare the
+    # envelope gradient AND the line-search value, including the changing ridge.
+    xs, ys = [], []
+    for data, target in dataset:
+        for key, fmap in model.grad_feature_map(data, list(weights)).items():
+            scale = weights[key] ** 0.5
+            if norms is not None:
+                scale = scale / norms[key].sqrt()
+            xs.append(scale * fmap.T)
+            ys.append(scale * target[key].flatten() / data.natoms)
+    x, y = torch.cat(xs), torch.cat(ys)
+    theta = model.les.weight.flatten()
+    w = torch.linalg.solve(
+        x.T @ x + 0.1 * torch.eye(3, dtype=x.dtype), x.T @ (y - x @ theta)
+    )
+    expected_loss = (
+        (x @ (w + theta) - y).square().sum() + 0.1 * w.square().sum()
+    ) / len(dataset)
+    expected_gradient = torch.autograd.grad(expected_loss, model.les.weight)[0]
+    accepted_theta = model.les.weight.detach().clone()
+
+    def step(closure):
+        torch.testing.assert_close(closure(), expected_loss.detach())
+        torch.testing.assert_close(model.les.weight.grad, expected_gradient)
+        # Simulate a final rejected trial followed by the optimizer restoring
+        # its accepted LES parameters. RFF must also be restored to that point.
+        with torch.no_grad():
+            model.les.weight.add_(0.5)
+        closure()
+        with torch.no_grad():
+            model.les.weight.copy_(accepted_theta)
+
+    with patch("torch.optim.LBFGS") as optimizer:
+        optimizer.return_value.step.side_effect = step
+        optimizer.return_value.zero_grad.side_effect = model.zero_grad
+        trainer._fit_les(model, 0, hps)
+    torch.testing.assert_close(model.rf.weights.flatten(), w.detach())
+
+    trainer.on_fit_start = Mock()
+    trainer.create_log_entry = Mock(side_effect=lambda *a: LogEntry("toy", 0, 0, 0))
+    trainer.training_config.num_cycles = 2
+    trainer.training_config.restore_best = False
+    objectives = []
+
+    def record(*args, **kwargs):
+        combined = (model.rf.weights + model.les.weight).flatten()
+        objectives.append(
+            (
+                (x @ combined - y).square().sum()
+                + 0.1 * model.rf.weights.square().sum()
+            ).item()
+        )
+
+    trainer._print_eval = record
+    with patch.object(
+        trainer, "_prepare_projection", wraps=trainer._prepare_projection
+    ) as prepare:
+        trainer.fit(model)
+    assert prepare.call_count == 1
+    assert len(objectives) == 4
+    assert all(b <= a + 1e-10 for a, b in zip(objectives, objectives[1:]))
+    assert objectives[-1] < objectives[0]
+    assert trainer._projection_factor is None
 
 
 @pytest.mark.parametrize("batch_size,steps", [(None, 2), (2, 6)])
@@ -140,6 +461,8 @@ def test_lbfgs_reduces_loss_uses_fixed_dataset_and_resets_history():
     "kwargs",
     [
         {"optimizer": "bad"},
+        {"mode": "bad"},
+        {"mode": "variable_projection", "optimizer": "adam"},
         {"batch_size": 0},
         {"batch_size": -1},
         {"optimizer": "lbfgs", "batch_size": 2},
@@ -185,6 +508,10 @@ def test_fit_restores_both_components_from_best_rff_stage(tmp_path, restore_best
     trainer._print_eval = record
     trainer._fit_les = update_les
     _, weights = trainer.fit(model)
+    # Even cycle zero must fit y - LES(initial), rather than the full target.
+    assert all(
+        "direct_coeffs" not in call.kwargs for call in trainer._fit_rff.call_args_list
+    )
     assert model.rf.weights.item() == 3.0
     assert weights.item() == 3.0
     assert model.les.weight.item() == (10.0 if restore_best else 20.0)
@@ -239,3 +566,16 @@ def test_cli_training_options():
     defaults = parse_cli(args).les_training
     assert defaults.batch_size is None
     assert defaults.restore_best is True
+    projected = parse_cli(
+        args
+        + [
+            "--les-optimizer",
+            "lbfgs",
+            "--les-mode",
+            "variable_projection",
+            "--les-activation",
+            "silu",
+        ]
+    )
+    assert projected.les_training.mode == "variable_projection"
+    assert projected.les.activation == "silu"
