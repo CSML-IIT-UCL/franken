@@ -353,7 +353,7 @@ class AutotuneConfig:
     """Configure a dataset for training Franken.
 
     If `--dataset.name` corresponds to one of the datasets used in the Franken paper (e.g. "water", "PtH2O", "TM23/Ag", etc.) there is no need to specify train, test or validation paths: the code will take care of downloading and preprocessing the data automatically.
-    Instead, to use a custom dataset please specify at a minimum the training path, and ideally also the validation path (which is used to determine the best model during a hyperparameter search).
+    Explicit train, test, and validation paths override the corresponding registered dataset split. To use a custom dataset please specify at a minimum the training path, and ideally also the validation path (which is used to determine the best model during a hyperparameter search).
     """
 
     solver: SolverConfig

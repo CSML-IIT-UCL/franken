@@ -313,22 +313,38 @@ def get_dataset_paths(
     test_path: str | None,
     dataset_name: str | None,
 ) -> tuple[Path, Path | None, Path | None]:
+    """Resolve explicit dataset paths and registered dataset defaults.
+
+    Explicit paths take precedence over paths supplied by ``dataset_name``. This
+    permits using a registered dataset for unspecified splits while training on
+    a custom file.
+    """
     try:
         if dataset_name is None:
             raise KeyError
-        out_train_path = DATASET_REGISTRY.get_path(
-            dataset_name, "train", CacheDir.get()
+        out_train_path = (
+            Path(train_path)
+            if train_path is not None
+            else DATASET_REGISTRY.get_path(dataset_name, "train", CacheDir.get())
         )
-        out_val_path = None
-        if DATASET_REGISTRY.is_valid_split(dataset_name, "val"):
-            out_val_path = DATASET_REGISTRY.get_path(
-                dataset_name, "val", CacheDir.get()
+        out_val_path = (
+            Path(val_path)
+            if val_path is not None
+            else (
+                DATASET_REGISTRY.get_path(dataset_name, "val", CacheDir.get())
+                if DATASET_REGISTRY.is_valid_split(dataset_name, "val")
+                else None
             )
-        out_test_path = None
-        if DATASET_REGISTRY.is_valid_split(dataset_name, "test"):
-            out_test_path = DATASET_REGISTRY.get_path(
-                dataset_name, "test", CacheDir.get()
+        )
+        out_test_path = (
+            Path(test_path)
+            if test_path is not None
+            else (
+                DATASET_REGISTRY.get_path(dataset_name, "test", CacheDir.get())
+                if DATASET_REGISTRY.is_valid_split(dataset_name, "test")
+                else None
             )
+        )
         if out_val_path is not None and out_test_path is not None:
             out_test_path = (
                 None  # TODO: This is not very good, check with our datasets!
