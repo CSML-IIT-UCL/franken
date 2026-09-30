@@ -131,12 +131,6 @@
     "implemented": true,
     "kind": "mace"
   },
-    "SevenNet0/11July2024": {
-    "remote": "https://github.com/MDIL-SNU/SevenNet/raw/refs/heads/main/sevenn/pretrained_potentials/SevenNet_0__11Jul2024/checkpoint_sevennet_0.pth",
-    "local": "sevennet/SevenNet_0__11July2024/checkpoint_sevennet_0.pth",
-    "kind": "sevenn",
-    "implemented": true
-  },
   "PET_MAD/xs_1.5": {
     "remote": "https://huggingface.co/lab-cosmo/upet/resolve/main/models/pet-mad-xs-v1.5.0.ckpt?download=true",
     "local": "pet/mad_1.5_xs",
