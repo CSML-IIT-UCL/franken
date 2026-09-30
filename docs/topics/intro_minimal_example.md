@@ -18,6 +18,20 @@ franken.autotune \
     --ms-gaussian.length-scale-low 1  --ms-gaussian.length-scale-high 32 \
 ```
 
+### Choosing a registered dataset or a custom training file
+
+Use `--dataset-name` to select a registered dataset and its default data splits. You can override its training split by also passing `--train-path`:
+
+```bash
+franken.autotune \
+    --dataset-name water \
+    --train-path ./training_subset.xyz \
+    --backbone=mace --mace.path-or-id "mace_mp/small" \
+    --rf=gaussian --gaussian.num-rf 4096 --gaussian.length-scale 20
+```
+
+Here, Franken reads the training structures from `training_subset.xyz`. If the registered dataset has a validation split, Franken uses it unless you also provide `--val-path`. If `--train-path` is omitted, the registered training split is used. `--max-train-samples` limits how many structures are taken from the selected training file; it does not choose which file is loaded. For a fully custom dataset, use `--train-path` (and optionally `--val-path`) without `--dataset-name`.
+
 This will create a folder `run_DATE_TIME_...` containing:
 * `best_ckpt.pt`  -->  model checkpoint
 * `best.json`  -->  train/val/test metrics for the best model
