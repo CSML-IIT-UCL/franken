@@ -6,12 +6,12 @@
 
 This interface enables to use Franken models in [torch-sim](https://github.com/TorchSim/torch-sim).
 
-### What is supported
+## What is supported
 - Outputs: `energy`, `forces`
 - Batched evaluation
 - Stress/virials: not supported in this interface
 
-### Installation
+## Installation
 
  - The Python interface can be installed together with franken via `pip install franken[torch-sim]`.
  - torch-sim does not publish packages on conda-forge - installation must be with pip via `pip install torch-sim-atomistic`.

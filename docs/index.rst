@@ -3,57 +3,49 @@
 Franken: A Method for Efficient and Accurate Molecular Dynamics
 ================================================================
 
-:tt:`franken` is a novel method which uses Random Fourier Features to transfer the representation learned from a pre-trained atomistic model to new system in extremely efficient way. The method is described in the publication: `Fast and Fourier features for transfer learning of interatomic potentials, npj Computational Materials (2025) <https://doi.org/10.1038/s41524-025-01779-z>`_. 
+:tt:`franken` is a transfer learning method which leverages the representation learned from a pre-trained atomistic model and adapts it to new systems in extremely efficient way using scalable kernel techniques (Random Fourier Features). 
+The method is described in the publication: `Fast and Fourier features for transfer learning of interatomic potentials, npj Computational Materials (2025) <https://doi.org/10.1038/s41524-025-01779-z>`_. 
 
-Franken's Three-Step Process
-----------------------------
+Franken's ingredients
+---------------------
 
 :tt:`franken` operates through a three-step pipeline:
 
 #. **Feature Extraction:** The initial step involves representing the chemical environment of each atom within a
-   molecular configuration using features extracted from a pre-trained GNN foundation model.
-   This leverages the inherent knowledge captured by these pre-trained models.
-   Specifically, :tt:`franken` utilizes features derived from models such as the `MACE-MP0 <https://arxiv.org/abs/2401.00096>`_ model.
+   molecular configuration using features extracted from a pre-trained graph neural network (GNN) model such as the general purpose `MACE-MP0 <https://arxiv.org/abs/2401.00096>`_ or a custom one.
 
-#. **Random Features Enhancement:** In this stage, :tt:`franken` introduces non-linearity into the model by transforming the
-   extracted GNN features using Random Features (RF) maps. These RF maps offer a computationally efficient alternative
-   to traditional kernel methods by approximating kernel functions, including the widely used Gaussian kernel,
-   utilizing randomly sampled parameters.
+#. **Random Features:** In this stage, :tt:`franken` introduces non-linearity into the model by transforming the
+   extracted GNN features using Random Features (RF) maps, which offer a computationally efficient alternative
+   to traditional kernel methods.
 
-#. **Energy and Force Prediction:** The final step involves predicting atomic energies and forces by employing a readout mechanism.
-   This mechanism leverages a learnable vector of coefficients in conjunction with the transformed features obtained from the preceding step.
-   This design takes advantage of the efficient optimization characteristics of RF models.
+#. **Energy and Force Prediction:** The final step involves predicting atomic energies and forces with a simple linear regression in the RF space, making the optimization process deterministic and efficient (minutes instead of hours or days).
 
 .. figure:: _static/diagram_part1.png
    :class: rounded-image
-   :width: 75%
+   :width: 95%
    :align: center
 
-   The three-step pipeline at the heart of :tt:`franken`.
+The three-step pipeline at the heart of :tt:`franken`.
 
 Advantages of Franken
 ---------------------
 
-:tt:`franken` presents several distinct advantages that position it as a valuable asset in the realm of molecular dynamics simulations:
-
-- **Closed-Form Optimization:** :tt:`franken` offers the significant advantage of determining the globally optimal model
+- **Training efficiency:** :tt:`franken` detemines the globally optimal model
   parameters through a closed-form solution. This eliminates the reliance on iterative gradient descent, leading to
   substantial reductions in training time and ensuring efficient optimization.
 
-- **High Sample Efficiency:** One of :tt:`franken`'s hallmarks is its exceptional data efficiency.
-  The method achieves accurate results even with a limited number of training samples,
-  as evidenced by experiments on the TM23 dataset. Notably, :tt:`franken` attained a validation error
-  of 9 meV/ using only 128 samples with 1024 random features, underscoring its ability to extract
-  valuable information from relatively small datasets.
+- **Data efficiency:** By leveraging the information learned by a pre-trained model, :tt:`franken` achieves accurate results already with tens/hundreds of training samples.
 
-    .. figure:: _static/TM23Cu_sample_complexity.png
-        :class: rounded-image
-        :width: 75%
-        :align: center
+- **Easy training:** :tt:`franken` is designed to be user-friendly, requiring only a few lines of code to train a model::
 
-   Sample complexity of :tt:`franken` on the :tt:`Cu` data from the `TM23 Dataset <https://www.nature.com/articles/s41524-024-01264-z>`_. (MACE-MP0 Backbone)
+   franken.autotune \
+   --train-path train.xyz --val-path val.xyz \
+   --backbone=mace --mace.path-or-id "mace_mh/0" \
+   --rf=ms-gaussian --ms-gaussian.num-rf 4096
 
-- **Parallelization Capabilities:**  :tt:`franken`'s training algorithm inherently lends itself to parallelization, allowing it to be scaled across multiple GPUs, thereby significantly accelerating training. This scalability becomes crucial when addressing the computational burden posed by simulations of increasingly intricate molecular systems.
+
+See the :doc:`training tutorial <notebooks/training>` for a complete, executable
+workflow.
 
 
 .. toctree::
@@ -64,36 +56,30 @@ Advantages of Franken
    Introduction <self>
 
    topics/intro_installation.md
-   topics/intro_minimal_example.md
 
 .. toctree::
    :maxdepth: 2
    :caption: Training:
    :hidden:
 
+   Training tutorial <notebooks/training>
    topics/training_backbones.md
+   topics/training_random_features.md
    topics/training_metrics.md
    topics/training_multigpu.md
+   topics/training_stress.md
 
 .. toctree::
    :maxdepth: 2
-   :caption: Interfaces:
+   :caption: Deploy:
    :hidden:
 
    topics/interface_overview.md
    topics/interface_ase.md
+   Tutorial: MD with ASE <notebooks/molecular_dynamics>
    topics/interface_mace_lammps.md
    topics/interface_metatomic.md
    topics/interface_torchsim.md
-
-.. toctree::
-    :maxdepth: 2
-    :caption: Tutorials:
-    :hidden:
-
-    notebooks/getting_started
-    notebooks/autotune
-    notebooks/molecular_dynamics
 
 
 .. toctree::
