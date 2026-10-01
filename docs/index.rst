@@ -25,7 +25,7 @@ Franken's ingredients
    :width: 95%
    :align: center
 
-The three-step pipeline at the heart of :tt:`franken`.
+   The three-step pipeline at the heart of :tt:`franken`.
 
 Advantages of Franken
 ---------------------

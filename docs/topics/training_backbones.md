@@ -46,13 +46,13 @@ PET_OMat/xl_1.0
 --------------------------------------------------------------------------------
 ```
 
-When requested for the first time, the model will be downloaded into the franken cache directory (by default: $HOME/.franken)  
+When requested for the first time, the model will be downloaded into the franken cache directory (by default: `$HOME/.franken`)  
 
 Notes:
 * For general applications, we recommend starting with the 
 `mace_mh/0` model (or the more expressive - but more expensive - variant `mace_mh/1`).
 
-It is best to choose a backbone whose pretraining domain contains chemical
+* It is best to choose a backbone whose pretraining domain contains chemical
 environments and elements similar to the target system. As a general guideline, the
 model families cover the following domains:
 
@@ -80,5 +80,6 @@ mace_config = MaceBackboneConfig(path_or_id="/path/to/mace.model")
 pet_config = PETBackboneConfig(path_or_id="/path/to/pet.ckpt")
 ```
 
-The corresponding CLI forms are `--backbone=mace --mace.path-or-id /path/to/mace.model`
-and `--backbone=pet --pet.path-or-id /path/to/pet.ckpt`.
+The corresponding CLI forms are 
+- `--backbone=mace --mace.path-or-id /path/to/mace.model`
+- `--backbone=pet --pet.path-or-id /path/to/pet.ckpt`
