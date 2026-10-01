@@ -100,7 +100,7 @@ templates_path = ["_templates"]
 # html_favicon = '_static/favicon.ico'
 # Configure syntax highlighting for Awesome Sphinx Theme
 pygments_style = "default"
-pygments_style_dark = "material"
+pygments_dark_style = "material"
 html_title = "franken"
 # Additional theme configuration
 html_theme_options = {
