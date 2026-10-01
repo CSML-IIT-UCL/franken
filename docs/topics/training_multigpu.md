@@ -12,7 +12,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 franken.autotune \
 If you see a `FileNotFoundError`, call the script via its absolute path, for example:
 `ENV_PATH/bin/franken.autotune`.
 
-Below is an example Slurm script (for Leonardo HPC):
+Below is an example Slurm script (for [Leonardo HPC](https://leonardo-supercomputer.cineca.eu/hpc-system/)):
 
 ```bash 
 #!/bin/bash
