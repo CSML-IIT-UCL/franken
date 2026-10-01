@@ -15,7 +15,7 @@ from franken.trainers.log_utils import LogCollection
 from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig
 from franken.calculators.ase_calc import FrankenCalculator
 from franken.autotune.cli import parse_cli
-from franken.autotune.script import init_loaders, run_autotune
+from franken.autotune.script import get_dataset_paths, init_loaders, run_autotune
 from franken.data import FrankenAtomsDataset
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
 from franken.rf.model import FrankenPotential
@@ -117,3 +117,19 @@ def test_parse_cli_supports_stress_weight_and_metrics():
     assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
     assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
     assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
+
+
+@patch("franken.autotune.script.DATASET_REGISTRY")
+def test_explicit_dataset_paths_override_registered_dataset_paths(registry):
+    registry.is_valid_split.return_value = False
+    train_path, val_path, test_path = get_dataset_paths(
+        train_path="/tmp/custom-train.xyz",
+        val_path="/tmp/custom-val.xyz",
+        test_path=None,
+        dataset_name="water",
+    )
+
+    assert train_path == Path("/tmp/custom-train.xyz")
+    assert val_path == Path("/tmp/custom-val.xyz")
+    assert test_path is None
+    registry.get_path.assert_not_called()

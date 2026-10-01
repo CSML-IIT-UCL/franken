@@ -154,10 +154,10 @@ class HPSearchConfig:
 @dataclass
 class DatasetConfig:
     name: str | None = None
-    """Dataset name. Can be either one of the predefined datasets, or a custom one."""
+    """Name of a predefined dataset. If --train-path is also set, it takes precedence for training data."""
 
     train_path: str | None = None
-    """Path to the training dataset. This should be readable with `ase`, e.g. xyz files work."""
+    """Path to the ASE-readable training dataset. Takes precedence over the registered training split when --dataset-name is set."""
 
     test_path: str | None = None
     """Path to the test dataset. When doing hyperparameter tuning this
@@ -353,7 +353,7 @@ class AutotuneConfig:
     """Configure a dataset for training Franken.
 
     If `--dataset.name` corresponds to one of the datasets used in the Franken paper (e.g. "water", "PtH2O", "TM23/Ag", etc.) there is no need to specify train, test or validation paths: the code will take care of downloading and preprocessing the data automatically.
-    Instead, to use a custom dataset please specify at a minimum the training path, and ideally also the validation path (which is used to determine the best model during a hyperparameter search).
+    Explicit train and validation paths override the corresponding registered dataset split. To use a custom dataset please specify at a minimum the training path, and ideally also the validation path (which is used to determine the best model during a hyperparameter search).
     """
 
     solver: SolverConfig
