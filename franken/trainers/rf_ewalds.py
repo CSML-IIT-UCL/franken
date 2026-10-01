@@ -1,5 +1,4 @@
 from dataclasses import asdict
-from collections import defaultdict
 import hashlib
 import json
 import logging
@@ -13,7 +12,7 @@ import torch.utils.data
 from torch import Tensor
 import tqdm
 
-from franken.config import LESTrainingConfig
+from franken.config import LESConfig
 from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
@@ -31,7 +30,6 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
-from franken.utils.linalg.cgsolve import conjugate_gradient
 from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import no_jit, params_grid, throughput
 
@@ -48,6 +46,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         training_targets: list[TargetType],
         l2_penalty: float | list[float],
         target_weight: Mapping[TargetType, float | list[float]],
+        training_config: LESConfig,
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -55,9 +54,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
-        training_config: LESTrainingConfig | None = None,
         best_model_selection: list[str] | None = None,
-        seed: int = 1337,
     ):
         super().__init__(
             train_dataloader,
@@ -80,19 +77,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
         self.mode: Literal["alternating", "joint"] = "alternating"
-        self.solver: Literal["cg", "direct"] = "direct"
-        self.cg_num_iter: int = 10
-        self.training_config = training_config or LESTrainingConfig()
+        self.training_config = training_config
         self.best_model_selection = best_model_selection or [
             f"{target}_MAE" for target in self.training_targets
         ]
-        self.seed = seed
         self.val_dataloader = None
         self.training_history: list[dict] = []
-        self.best_stage: dict | None = None
-        self._best_state = None
-        self._les_optimizer = None
-        self._shuffle_rng = torch.Generator().manual_seed(seed)
 
     def create_log_entry(self, rf_hps, model):
         model_hash = hashlib.md5(str(model.hyperparameters).encode())
@@ -179,8 +169,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 )
 
         if dist_utils.get_rank() == 0:
-            if self.training_config.restore_best:
-                self._remember_best(model, weights, logc[0], epoch + 1, step)
             self.training_history.append(
                 {
                     "cycle": epoch + 1,
@@ -197,42 +185,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 temp_path.replace(history_path)
             print()
 
-    def _remember_best(self, model, weights, log, cycle, step):
-        split = DataSplit.VAL if self.val_dataloader is not None else DataSplit.TRAIN
-        values = [log.get_metric(name, split) for name in self.best_model_selection]
-        if not all(math.isfinite(value) for value in values):
-            logger.warning(
-                "Skipping non-finite model-selection metrics at cycle %s", cycle
-            )
-            return
-        # For nonnegative error metrics this is the same minimum-L1 selection
-        # used by LogCollection.get_best_model across trials.
-        score = sum(abs(value) for value in values)
-        if self.best_stage is not None and score >= self.best_stage["score"]:
-            return
-        self.best_stage = {
-            "cycle": cycle,
-            "step": step,
-            "split": split.name.lower(),
-            "score": score,
-            "metrics": dict(zip(self.best_model_selection, values)),
-        }
-        self._best_state = {
-            "rf_weights": (model.rf.weights if weights is None else weights)
-            .detach()
-            .cpu()
-            .clone(),
-            "les": {
-                key: value.detach().cpu().clone()
-                for key, value in model.les.state_dict().items()
-            },
-        }
-        if self.log_dir is not None:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
-            (self.log_dir / "best_stage.json").write_text(
-                json.dumps(self.best_stage, indent=2)
-            )
-
     def _fit_rff(
         self,
         model: LESFrankenPotential,
@@ -248,14 +200,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
-        # old weights are used as starting point for optimization
-        old_rf_weights = model.rf.weights.squeeze(0)
         rf_weights = self.solve(
             covs=covs,
-            coeffs=coeffs,
-            x0=old_rf_weights,
-            cg_maxiter=self.cg_num_iter,
-            cg_tol=1e-6,
+            coeffs=coeffs,  # type: ignore
             **rf_hps,
         )
         # weights from [n_rf] to [1, n_rf]
@@ -300,7 +247,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     def _fit_les(self, model, epoch, rf_hps):
         cfg = self.training_config
-        n_samples = len(self.train_dataloader.dataset)
+        n_samples = len(self.train_dataloader.dataset)  # type: ignore
         if n_samples == 0:
             raise ValueError("LES requires a nonempty training dataset")
         # Compute relative weights
@@ -324,62 +271,34 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         for p, _ in previous_flags:
             p.requires_grad_(id(p) in trainable_ids)
         try:
-            if cfg.optimizer == "adam":
-                lr = cfg.learning_rate * cfg.lr_decay**epoch
-                if self._les_optimizer is None:
-                    self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
-                optim = self._les_optimizer
-                for group in optim.param_groups:
-                    group["lr"] = lr
-                batch_size = cfg.batch_size or n_samples
-                for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
-                    indices = (
-                        torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
-                        if batch_size < n_samples
-                        else list(range(n_samples))
+            # RFF refits change this objective: do not reuse curvature history.
+            optim = torch.optim.LBFGS(
+                params,
+                lr=cfg.lbfgs_lr * cfg.lr_decay**epoch,
+                max_iter=cfg.lbfgs_max_iter,
+                history_size=cfg.lbfgs_history_size,
+                tolerance_grad=cfg.lbfgs_tolerance_grad,
+                tolerance_change=cfg.lbfgs_tolerance_change,
+                line_search_fn="strong_wolfe",
+            )
+            indices = list(range(n_samples))
+
+            def closure():
+                optim.zero_grad()
+                batch_loss = self._backward_batch(model, indices, target_weights)
+                return sum(batch_loss.values())
+
+            for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
+                optim.step(closure)
+                with torch.no_grad():
+                    # special iterate just to get loss values
+                    batch_loss = self._backward_batch(
+                        model, indices, target_weights, do_bwd=False
                     )
-                    tot_loss = defaultdict(float)
-                    for start in range(0, n_samples, batch_size):
-                        optim.zero_grad()
-                        batch_loss = self._backward_batch(
-                            model, indices[start : start + batch_size], target_weights
-                        )
-                        for k, v in batch_loss.items():
-                            tot_loss[k] += v
-                        optim.step()
                     desc = ""
-                    for k, v in tot_loss.items():
+                    for k, v in batch_loss.items():
                         desc += f"{k}={v:.3e} "
                     pb.set_description(desc)
-            else:
-                # RFF refits change this objective: do not reuse curvature history.
-                optim = torch.optim.LBFGS(
-                    params,
-                    lr=cfg.lbfgs_learning_rate * cfg.lr_decay**epoch,
-                    max_iter=cfg.lbfgs_max_iter,
-                    history_size=cfg.lbfgs_history_size,
-                    tolerance_grad=cfg.lbfgs_tolerance_grad,
-                    tolerance_change=cfg.lbfgs_tolerance_change,
-                    line_search_fn="strong_wolfe",
-                )
-                indices = list(range(n_samples))
-
-                def closure():
-                    optim.zero_grad()
-                    batch_loss = self._backward_batch(model, indices, target_weights)
-                    return sum(batch_loss.values())
-
-                for _ in (pb := tqdm.trange(cfg.epochs_per_cycle, desc="LES epochs")):
-                    optim.step(closure)
-                    with torch.no_grad():
-                        # special iterate just to get loss values
-                        batch_loss = self._backward_batch(
-                            model, indices, target_weights, do_bwd=False
-                        )
-                        desc = ""
-                        for k, v in batch_loss.items():
-                            desc += f"{k}={v:.3e} "
-                        pb.set_description(desc)
 
         finally:
             for p, requires_grad in previous_flags:
@@ -413,10 +332,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 "LES optimization currently supports one process only"
             )
         self.training_history = []
-        self.best_stage = None
-        self._best_state = None
-        self._les_optimizer = None
-        self._shuffle_rng = torch.Generator().manual_seed(self.seed)
         model = model.to(self.device)
         model.train()
         self.on_fit_start(model)
@@ -440,17 +355,17 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     # 1st iteration has no valid LES residual: train against full target
                     rf_weights = self._fit_rff(
                         model,
-                        covs,
+                        covs,  # type: ignore
                         normalization,
                         rf_hps,
                         epoch=outer_it,
-                        direct_coeffs=coeffs,
+                        direct_coeffs=coeffs,  # type: ignore
                     )
                 else:
                     # pass
                     # From 2nd iteration, train against y - y_les
                     rf_weights = self._fit_rff(
-                        model, covs, normalization, rf_hps, epoch=outer_it
+                        model, covs, normalization, rf_hps, epoch=outer_it  # type: ignore
                     )
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(rf_hps, model, rf_weights, outer_it, step="rff")
@@ -486,7 +401,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
         metric_objects: list[BaseMetric] = self.get_metrics()
 
-        split_name = dataloader.dataset.split
+        split_name = dataloader.dataset.split  # type: ignore
         try:
             split = DataSplit[split_name.upper()]
         except KeyError:
@@ -508,7 +423,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             else:
                 forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
             predictions = model.predict(
-                targets=self.training_targets,
+                targets=self.training_targets,  # type: ignore
                 data=data,
                 weights=all_weights,
                 differential_mode=forces_mode,
@@ -520,7 +435,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                     )
             for metric in metric_objects:
-                metric.update(Target.from_types(predictions), targets, data)
+                metric.update(Target.from_types(predictions), targets, data)  # type: ignore
 
         num_models = (
             all_weights.shape[0]
@@ -572,7 +487,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             targets: Target = targets.to(device=self.device)
 
             les_preds = model.predict_les(
-                data, self.training_targets, is_training=False
+                data, self.training_targets, is_training=False  # type: ignore
             )
             target_fmaps = model.grad_feature_map(data, self.training_targets)
             for tgt_name in self.training_targets:
@@ -668,9 +583,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
-        x0: Tensor | None = None,
-        cg_maxiter: int = 50,
-        cg_tol: float = 1e-4,
         **weights,
     ) -> Tensor:
         target_weight = {}
@@ -687,10 +599,4 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        if self.solver == "cg":
-            solve_cov.diagonal().add_(l2_penalty)
-            return conjugate_gradient(
-                A=solve_cov, b=solve_coeff, x0=x0, max_iter=cg_maxiter, tol=cg_tol
-            )
-        else:
-            return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+        return psd_ridge(solve_cov, solve_coeff, l2_penalty)

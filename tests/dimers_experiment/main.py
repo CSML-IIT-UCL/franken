@@ -1,10 +1,3 @@
-"""Fit and evaluate short- and long-range Franken models on CC dimers.
-
-This is the full-batch Adam version of ``main-mgb.py``.  LES optimization uses
-the public ``LESTrainingConfig`` API: each Adam epoch accumulates the gradient
-over every training configuration before performing one parameter update.
-"""
-
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import groupby
@@ -25,7 +18,6 @@ from franken.config import (
     BackboneConfig,
     DatasetConfig,
     LESConfig,
-    LESTrainingConfig,
     MaceBackboneConfig,
     MultiscaleGaussianRFConfig,
     RFConfig,
@@ -33,7 +25,6 @@ from franken.config import (
 )
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-#from plot_training_history import plot_training_history
 
 
 State = Literal["CC", "CP", "PP"]
@@ -97,10 +88,9 @@ def train_model(
     *,
     targets,
     les_config: LESConfig | None = None,
-    les_training: LESTrainingConfig | None = None,
 ) -> Path:
     """Run the short-range fit or the alternating RFF + LES fit."""
-    use_les = les_config is not None and les_training is not None
+    use_les = les_config is not None
     kind = "les" if use_les else "franken"
     config = AutotuneConfig(
         dataset=dataset_config(dset, f"dimer_{kind}_{dset.id}"),
@@ -109,7 +99,6 @@ def train_model(
         backbone=backbone,
         rfs=rfs,
         les=les_config,
-        les_training=les_training,
         best_model_selection=[f"{t}_RMSE" for t in targets],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
@@ -211,14 +200,12 @@ if __name__ == "__main__":
     les_cfg = LESConfig(
         N_max=20,
         is_periodic=True,
-    )
-    full_batch_adam = LESTrainingConfig(
-        optimizer="adam",
-        num_cycles=50,
-        epochs_per_cycle=50,
-        batch_size=None,
-        learning_rate=1e-3,
-        restore_best=True,
+        num_cycles=20,
+        epochs_per_cycle=1,
+        lbfgs_max_iter=30,
+        lbfgs_lr=1,
+        lbfgs_history_size=30,
+        lr_decay=0.9,
     )
 
     # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
@@ -249,7 +236,6 @@ if __name__ == "__main__":
             backbone,
             rfs,
             les_config=les_cfg,
-            les_training=full_batch_adam,
             targets=targets,
         )
         evaluate_and_plot(dset, use_les=True)

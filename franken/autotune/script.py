@@ -444,9 +444,8 @@ def autotune(cfg: AutotuneConfig):
             metrics=cfg.metrics,
             **(
                 {
-                    "training_config": cfg.les_training,
+                    "training_config": cfg.les,
                     "best_model_selection": cfg.best_model_selection,
-                    "seed": cfg.seed,
                 }
                 if cfg.les is not None
                 else {}
