@@ -45,24 +45,3 @@ Each backbone seems to have mutually incompatible requirements, particularly wit
 To minimize incompatibilities, we suggest that the users who wishes to use multiple backbones create independent python environments for each.
 In particular, the `mace-torch` package requires an old version of `e3nn` (0.4.4) which may conflict with other backbones. If you encounter errors with model loading, simply upgrade `e3nn` by running `pip install -U e3nn`.
 ```
-
-## Supported pre-trained models
-### MACE
-We support several models which use the [MACE architecture](https://github.com/ACEsuit/mace):
- - The [`MACE-MP0`](https://arxiv.org/abs/2401.00096) models trained on the materials project data by Batatia et al. Additional informations on the pre-training of `MACE-MP0` are available on its [HuggingFace model card](https://huggingface.co/cyrusyc/mace-universal).
- - The MACE-OFF ([paper](https://github.com/ACEsuit/mace-off) and [github](https://github.com/ACEsuit/mace-off)) models which are pretrained on organic molecules.
- - The Egret ([github](https://github.com/rowansci/egret-public)) family of models (`Egret-1`, `Egret-1e`, `Egret-1t`), also tuned for organic molecules.
-
-To use any MACE model as a backbone for `franken` just `pip`-install `mace-torch` in `franken`'s environment
-```bash
-pip install mace-torch
-```
-or directly install franken with mace support (`pip install franken[cuda,mace]`).
-
-In addition to MACE-MP0 trained on the materials project dataset, Franken also supports the [`MACE-OFF` models](https://arxiv.org/abs/2312.15211) for organic chemistry.
-
-
-### PET
-
-Franken supports [UPET](https://github.com/lab-cosmo/upet/tree/main) models through the Metatomic/Metatrain ecosystem.
-To use PET models as a backbone for `franken`, install the required dependencies with `pip install franken[cuda,pet]` or follow the instructions on [metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation.
