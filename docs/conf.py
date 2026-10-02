@@ -99,8 +99,8 @@ templates_path = ["_templates"]
 # Favicon configuration
 # html_favicon = '_static/favicon.ico'
 # Configure syntax highlighting for Awesome Sphinx Theme
-pygments_style = "default"
-pygments_style_dark = "material"
+pygments_style = "sphinx"
+pygments_dark_style = "monokai"
 html_title = "franken"
 # Additional theme configuration
 html_theme_options = {

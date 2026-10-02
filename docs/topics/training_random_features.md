@@ -1,6 +1,6 @@
 # Random Features
 
-Random Fourier features (RFs) provide a finite-dimensional approximation to a kernel. 
+Random Fourier features (RFs) provide a finite-dimensional approximation to a **kernel**. 
 For backbone descriptors $h$ and $h'$, Franken constructs a map
 $\phi$ such that
 
@@ -10,18 +10,18 @@ $$
 
 The model is therefore linear in the RF coefficients while retaining the nonlinear
 similarity measure of a kernel method. The number of RFs controls how accurately the
-finite feature map approximates the kernel and determines the number of fitted
+finite **feature map** approximates the kernel and determines the number of fitted
 coefficients.
 
 ## How to choose RFs?
 
-Increasing the number of RFs improves the kernel approximation and can increase the
+Increasing the **number of RFs** improves the kernel approximation and can increase the
 accuracy of the resulting potential, at the cost of additional memory and computation.
 As illustrated below, a larger RF representation can attain a lower error, but requires
 more training structures before the training and validation errors converge. In other
 words, model capacity and sample complexity increase together.
 
-The RF count should therefore be selected according to the training-set size. Small
+The RF count should therefore be selected according to the **training-set size**. Small
 datasets containing only tens of structures generally require fewer RFs, whereas larger
 datasets can support more expressive models without compromising generalization.
 
@@ -41,7 +41,7 @@ corresponding configuration option.
 
 ## Multiscale approach
 
-For a Gaussian kernel, the length scale $\sigma$ controls locality in the normalized
+For a Gaussian kernel, the **length scale $\sigma$** controls locality in the normalized
 backbone-feature space and therefore strongly affects the RF representation. A grid
 search over $\sigma$ is comparatively expensive because changing it requires
 recomputing the random features and their derivatives.
