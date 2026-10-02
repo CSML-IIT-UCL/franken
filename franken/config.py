@@ -295,10 +295,10 @@ class MultiscaleGaussianRFConfig(RFConfig):
     length_scale_low: float = 4
     """Bottom of the range for the length-scale. Should be positive."""
 
-    length_scale_high: float = 20
+    length_scale_high: float = 32
     """Top of the range for the length-scale. Should be positive."""
 
-    length_scale_num: int = 6
+    length_scale_num: int = 5
     """Number of different length-scales to include within the specified range."""
 
     use_offset: bool = True
@@ -319,12 +319,12 @@ class SolverConfig:
     """Controls the weight of the energy loss term. Weights are normalized to sum to 1."""
 
     force_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=7, scale="log")
     )
     """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
 
     stress_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=7, scale="log")
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
