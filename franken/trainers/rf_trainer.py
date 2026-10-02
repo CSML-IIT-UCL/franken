@@ -422,7 +422,6 @@ class RandomFeaturesTrainer(BaseTrainer):
         solve_cov, solve_coeff = None, None
         for tt in self.training_targets:
             normalized_weight = target_weight[tt] / weights_norm_factor
-            print(f"{tt=} {normalized_weight=}")
             if solve_cov is None or solve_coeff is None:
                 solve_cov = covs[tt] * normalized_weight
                 solve_coeff = coeffs[tt] * normalized_weight
