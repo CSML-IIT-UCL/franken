@@ -61,7 +61,7 @@ class LESFrankenPotential(FrankenPotential):
     def hyperparameters(self):
         hps = super().hyperparameters
         hps["les"] = self.les_config.to_ckpt()
-        hps["is_periodic"] = self.is_periodic
+        hps["les"]["is_periodic"] = self.is_periodic
         return hps
 
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
