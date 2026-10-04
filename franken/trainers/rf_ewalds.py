@@ -4,7 +4,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Sequence
 
 import torch
 import torch.utils.data
@@ -15,9 +15,11 @@ from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.data.base import (
+    TARGET_UNITS,
     Configuration,
     Target,
     TargetType,
+    all_target_keys,
     is_scalar_target,
 )
 from franken.rf.model import FrankenPotential
@@ -120,12 +122,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return local_log
 
     def eval_summary(
-        self, log: LogEntry, epoch: int, split: DataSplit, title=""
+        self, log: LogEntry, cycle: int, splits: Sequence[DataSplit], title=""
     ) -> str:
-        hp_summary = f"[Epoch {epoch:3}] {title} {split.name}"
-
         def _get_first_available_metric(
             candidates: list[str],
+            split: DataSplit,
         ) -> tuple[float, str] | tuple[None, None]:
             for name in candidates:
                 try:
@@ -134,47 +135,33 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     pass
             return None, None
 
-        energy_error, energy_metric = _get_first_available_metric(
-            ["energy_RMSE", "energy_MAE"],
-        )
-        forces_error, forces_metric = _get_first_available_metric(
-            ["forces_RMSE", "forces_MAE"],
-        )
-        stress_error, stress_metric = _get_first_available_metric(
-            ["stress_RMSE", "stress_MAE"],
-        )
-        if energy_error is None:
-            energy_error = float("nan")
-        hp_summary += f" ({energy_metric} {energy_error:.2f} meV/atom)"
-        if forces_error is None:
-            forces_error = float("nan")
-        hp_summary += f" ({forces_metric} {forces_error:.2f} meV/Ang)"
-        if stress_error is not None:
-            hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
+        hp_summary = f"[Cycle {cycle:3}] {title}. "
+        for split in splits:
+            split_summary = ""
+            for tgt in all_target_keys():
+                error, metric = _get_first_available_metric(
+                    [f"{tgt}_RMSE", f"{tgt}_MAE"], split
+                )
+                if error is not None:
+                    split_summary += f"{metric} {error:.2f} {TARGET_UNITS[tgt]}, "
+            if len(split_summary) > 0:
+                hp_summary += f"{split}: {split_summary[:-2]} - "
         return hp_summary
 
     def _print_eval(self, model, epoch, step: Literal["rff", "les", "joint"]):
         logc = LogCollection([self.create_log_entry(model)])
-        for split, loader in (
-            (DataSplit.TRAIN, self.train_dataloader),
-            (DataSplit.VAL, self.val_dataloader),
-        ):
+        for loader in (self.train_dataloader, self.val_dataloader):
             if loader is None:
                 continue
-            self.evaluate(
-                model,
-                loader,
-                log_collection=logc,
-                all_weights=None,
+            self.evaluate(model, loader, log_collection=logc, all_weights=None)
+        if dist_utils.get_rank() == 0:
+            summary = self.eval_summary(
+                log=logc[0],
+                cycle=epoch,
+                splits=[DataSplit.TRAIN, DataSplit.VAL],
+                title=f"after {step.upper()}",
             )
-            if dist_utils.get_rank() == 0:
-                summary = self.eval_summary(
-                    log=logc[0],
-                    epoch=epoch,
-                    split=split,
-                    title=f"after {step.upper()} training",
-                )
-                print(summary)
+            logger.info(summary)
 
         if dist_utils.get_rank() == 0:
             self.training_history.append(
@@ -191,7 +178,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 temp_path = history_path.with_suffix(".json.tmp")
                 temp_path.write_text(json.dumps(self.training_history, indent=2))
                 temp_path.replace(history_path)
-            print()
 
     def _get_relative_weights(
         self, hps: Mapping[TargetType, float]

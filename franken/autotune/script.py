@@ -6,7 +6,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing_extensions import Self, TypeVarTuple, Unpack
+from typing_extensions import TypeVarTuple, Unpack
 from typing import Any, Iterator, NamedTuple, cast
 from uuid import uuid4
 
@@ -34,9 +34,9 @@ from franken.rf.les_model import LESFrankenPotential
 from franken.trainers import (
     LowMemRandomFeaturesTrainer,
     RandomFeaturesTrainer,
+    RandomFeaturesEwaldsTrainer,
 )
 from franken.trainers.log_utils import DataSplit, LogEntry
-from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset
@@ -193,7 +193,9 @@ def hps_from_config(cfg: DataclassInstance):
 Ts = TypeVarTuple("Ts")
 
 
-def create_outer_hpsearch_grid(cfg: tuple[Unpack[Ts]]) -> Iterator[tuple[int, tuple[Unpack[Ts]]]]:
+def create_outer_hpsearch_grid(
+    cfg: tuple[Unpack[Ts]],
+) -> Iterator[tuple[int, tuple[Unpack[Ts]]]]:
     """Expand one or more dataclass configs into a grid of concrete configs.
 
     Thin wrapper over :func:`franken.utils.misc.params_grid` which handles unrolling compact
@@ -260,9 +262,9 @@ def run_autotune(
     current_best = BestTrial(None, None)  # type: ignore
 
     if is_les is not None:
-        param_grid = list(create_outer_hpsearch_grid(
-            (auto_cfg.rfs, auto_cfg.les, auto_cfg.solver)
-        ))
+        param_grid = list(
+            create_outer_hpsearch_grid((auto_cfg.rfs, auto_cfg.les, auto_cfg.solver))
+        )
     else:
         param_grid = list(create_outer_hpsearch_grid((auto_cfg.rfs,)))
     print(
