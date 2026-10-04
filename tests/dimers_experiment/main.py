@@ -201,11 +201,10 @@ if __name__ == "__main__":
         N_max=20,
         is_periodic=True,
         num_cycles=20,
-        epochs_per_cycle=1,
         lbfgs_max_iter=30,
         lbfgs_lr=1,
         lbfgs_history_size=30,
-        lr_decay=0.9,
+        lbfgs_lr_decay=0.9,
     )
 
     # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
@@ -215,7 +214,7 @@ if __name__ == "__main__":
                 dset,
                 SolverConfig(
                     l2_penalty=np.logspace(-11, -6, 6).tolist(),
-                    force_weight=np.logspace(-2, 3, 6).tolist(),
+                    forces_weight=np.logspace(-2, 3, 6).tolist(),
                 ),
                 backbone,
                 rfs,
@@ -231,7 +230,7 @@ if __name__ == "__main__":
             SolverConfig(
                 l2_penalty=1e-6,#best_solver["l2_penalty"],
                 energy_weight=1.0,#best_solver["energy_weight"],
-                force_weight=10.0,#best_solver["forces_weight"],
+                forces_weight=10.0,#best_solver["forces_weight"],
             ),
             backbone,
             rfs,

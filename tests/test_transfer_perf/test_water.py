@@ -57,7 +57,7 @@ def train_eval_franken(
     )
     solver_cfg = SolverConfig(
         l2_penalty=HPSearchConfig(start=-12, stop=-5, num=8, scale='log'),  # equivalent of numpy.logspace
-        force_weight=HPSearchConfig(start=0.01, stop=0.99, num=5, scale='linear'),  # equivalent of numpy.linspace
+        forces_weight=HPSearchConfig(start=0.01, stop=0.99, num=5, scale='linear'),  # equivalent of numpy.linspace
     )
     autotune_cfg = AutotuneConfig(
         dataset=dataset_cfg,

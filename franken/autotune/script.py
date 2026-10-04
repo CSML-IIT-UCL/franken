@@ -6,8 +6,11 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import Generator, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Iterator, NamedTuple, TypeVarTuple, cast
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
 import torch.distributed
 import torch.utils.data
@@ -16,9 +19,8 @@ from franken.autotune.cli import build_parser, parse_cli
 from franken.config import (
     AutotuneConfig,
     BackboneConfig,
+    CheckpointableDataclass,
     HPSearchConfig,
-    LESConfig,
-    RFConfig,
     SolverConfig,
     asdict_with_classvar,
 )
@@ -128,11 +130,16 @@ def init_loaders(
     return dataloaders
 
 
-def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) -> str:
+def hp_summary_str(
+    trial_id: int, current_best: BestTrial, *cfgs: CheckpointableDataclass | None
+) -> str:
     hp_summary = f"Trial {trial_id + 1:>3} |"
-    for k, v in rf_params.to_ckpt().items():
-        fmt_val = format(v, ".3f" if isinstance(v, float) else "")
-        hp_summary += f" {k:^7}: {fmt_val:^7} |"
+    for cfg in cfgs:
+        if cfg is None:
+            continue
+        for k, v in cfg.to_ckpt().items():
+            fmt_val = format(v, ".3f" if isinstance(v, float) else "")
+            hp_summary += f" {k:^7}: {fmt_val:^7} |"
 
     def _get_first_available_metric(
         candidates: list[str],
@@ -171,7 +178,7 @@ def hp_summary_str(trial_id: int, current_best: BestTrial, rf_params: RFConfig) 
     return hp_summary
 
 
-def hps_from_config(cfg):
+def hps_from_config(cfg: DataclassInstance):
     hp_iterators = {}
     for field in dataclasses.fields(cfg):
         hp_def = getattr(cfg, field.name)
@@ -184,24 +191,47 @@ def hps_from_config(cfg):
     return hp_iterators
 
 
-def create_rf_hpsearch_grid(
-    cfg: RFConfig,
-) -> Generator[tuple[int, RFConfig], None, None]:
-    """Convert a random-features configuration object to a sequence of hyper-parameters.
+Ts = TypeVarTuple("Ts")
 
-    This function is a thin wrapper over :func:`franken.utils.misc.params_grid` which handles unrolling compact
+
+def create_outer_hpsearch_grid(cfg: tuple[*Ts]) -> Iterator[tuple[int, tuple[*Ts]]]:
+    """Expand one or more dataclass configs into a grid of concrete configs.
+
+    Thin wrapper over :func:`franken.utils.misc.params_grid` which handles unrolling compact
     hyperparameter specs, such as generating linearly or logarithmically spaced HP values.
 
     Args:
-        cfg: The random features configuration object
+        cfg: A configuration or a tuple of configuration data-classes. Field names must be
+            unique across all configs in the tuple.
 
     Yields:
-        A sequence of simple dictionaries going from hyperparameter name to value.
+        ``(exp_id, new_cfg)`` pairs, where ``new_cfg`` has the same structure as
+        ``cfg`` (a single dataclass or a tuple of dataclasses).
     """
-    hp_iterators = hps_from_config(cfg)
-    # Convert grid as dictionary to grid as RFConfig classes
+    cfgs: tuple[Any, ...] = cfg  # element types are opaque inside the body
+
+    hp_iterators: dict[str, Any] = {}
+    for c in cfgs:
+        hps = hps_from_config(c)
+        if overlap := hp_iterators.keys() & hps.keys():
+            raise ValueError(
+                f"Hyperparameter names shared across configs: {sorted(overlap)}"
+            )
+        hp_iterators |= hps
+
     for exp_id, grid_item in params_grid(hp_iterators):
-        yield (exp_id, type(cfg)(**grid_item))
+        new_cfgs = tuple(
+            dataclasses.replace(
+                c,
+                **{
+                    f.name: grid_item[f.name]
+                    for f in dataclasses.fields(c)
+                    if f.init and f.name in grid_item
+                },
+            )
+            for c in cfgs
+        )
+        yield exp_id, cast(tuple[*Ts], new_cfgs)
 
 
 def create_solver_hpsearch_grid(
@@ -210,66 +240,58 @@ def create_solver_hpsearch_grid(
     solver_hps = hps_from_config(cfg)
     weight_dict: dict[TargetType, list[float]] = {
         ENERGY_TARGET_KEY: solver_hps["energy_weight"],
-        FORCES_TARGET_KEY: solver_hps["force_weight"],
+        FORCES_TARGET_KEY: solver_hps["forces_weight"],
         STRESS_TARGET_KEY: solver_hps["stress_weight"],
     }
     return solver_hps["l2_penalty"], weight_dict
 
 
 def run_autotune(
-    gnn_cfg: BackboneConfig,
-    rf_cfg: RFConfig,
-    les_cfg: LESConfig | None,
+    auto_cfg: AutotuneConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
-    scale_by_species: bool,
-    jac_chunk_size: int | Literal["auto"],
-    trainer: RandomFeaturesTrainer,
-    best_model_selection: list[str] | None = None,
-    eval_splits: list[str] | None = None,
-    atomic_energies: dict[int, float] | None = None,
+    device: torch.device,
+    log_dir: Path | None,
 ):
-    # default best model selection: MAE for all training targets.
+    eval_splits = auto_cfg.eval_splits
+    is_les = auto_cfg.les is not None
+    best_model_selection = auto_cfg.best_model_selection
+
     if best_model_selection is None or len(best_model_selection) == 0:
-        best_model_selection = [f"{tgt}_MAE" for tgt in trainer.training_targets]
-    if isinstance(trainer, RandomFeaturesEwaldsTrainer):
-        trainer.best_model_selection = best_model_selection
-        trainer.val_dataloader = loaders.get("val")
-
+        best_model_selection = [f"{tgt}_MAE" for tgt in auto_cfg.train_targets]
     current_best = BestTrial(None, None)  # type: ignore
-    rf_param_grid = create_rf_hpsearch_grid(rf_cfg)
-    for trial_id, rf_params in rf_param_grid:
-        logger.debug(f"Autotune iteration with RF parameters {rf_params}")
-        assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
-        if les_cfg is None:
-            model = FrankenPotential(
-                gnn_config=gnn_cfg,
-                rf_config=rf_params,
-                scale_by_Z=scale_by_species,
-                num_species=loaders["train"].dataset.num_species,
-                atomic_energies=atomic_energies,
-                jac_chunk_size=jac_chunk_size,
-            )
-        else:
-            model = LESFrankenPotential(
-                gnn_config=gnn_cfg,
-                rf_config=rf_params,
-                les_config=les_cfg,
-                scale_by_Z=scale_by_species,
-                num_species=loaders["train"].dataset.num_species,
-                atomic_energies=atomic_energies,
-                jac_chunk_size=jac_chunk_size,
-            )
 
-        logs, weights = trainer.fit(model)
+    if is_les is not None:
+        param_grid = create_outer_hpsearch_grid(
+            (auto_cfg.rfs, auto_cfg.les, auto_cfg.solver)
+        )
+    else:
+        param_grid = create_outer_hpsearch_grid((auto_cfg.rfs,))
+    print(
+        f"Autotuning {'LES ' if is_les else ''} Franken with {len(list(param_grid))} parameters."
+    )
+    for trial_id, trial_params in param_grid:
+        logger.debug(f"Autotune iteration {trial_id} with parameters {trial_params}")
+        if is_les:
+            assert len(trial_params) == 3
+            new_cfg = dataclasses.replace(
+                auto_cfg,
+                rfs=trial_params[0],
+                les=trial_params[1],
+                solver=trial_params[2],
+            )
+            trainer = init_les_trainer(new_cfg, loaders, device, log_dir)
+            model = init_les_model(new_cfg, loaders)
+            logs, weights = trainer.fit(model)
+        else:
+            new_cfg = dataclasses.replace(auto_cfg, rfs=trial_params[0])
+            trainer = init_rf_trainer(new_cfg, loaders, device, log_dir)
+            model = init_les_model(new_cfg, loaders)
+            logs, weights = trainer.fit(model)
+
         for split_name, loader in loaders.items():
             if eval_splits is not None and split_name not in eval_splits:
                 continue
-            logs = trainer.evaluate(
-                model,
-                loader,
-                logs,
-                weights,
-            )
+            logs = trainer.evaluate(model, loader, logs, weights)
         split_for_best_model = (
             DataSplit.VALIDATION if "val" in loaders else DataSplit.TRAIN
         )
@@ -297,8 +319,7 @@ def run_autotune(
                             )
                     except KeyError:
                         pass
-
-                logger.info(hp_summary_str(trial_id, current_best, rf_params))
+                logger.info(hp_summary_str(trial_id, current_best, *trial_params))
         garbage_collection_cuda()
 
 
@@ -363,6 +384,139 @@ def get_dataset_paths(
     return out_train_path, out_val_path, out_test_path
 
 
+def init_rf_trainer(
+    cfg: AutotuneConfig,
+    loaders: dict[str, torch.utils.data.DataLoader],
+    device: torch.device,
+    log_dir: Path | None,
+):
+    solver_l2, solver_weights = create_solver_hpsearch_grid(cfg.solver)
+    trainer_cls = RandomFeaturesTrainer
+    if len(cfg.train_targets) == 2:
+        trainer_cls = LowMemRandomFeaturesTrainer
+    trainer = trainer_cls(
+        train_dataloader=loaders["train"],
+        l2_penalty=solver_l2,
+        training_targets=cfg.train_targets,
+        target_weight=solver_weights,
+        random_features_normalization=cfg.rf_normalization,
+        save_every_model=cfg.save_every_model,
+        dtype=cfg.dtype,
+        save_fmaps=cfg.save_fmaps,
+        log_dir=log_dir,
+        device=device,
+        metrics=cfg.metrics,
+    )
+    trainer.val_dataloader = loaders.get("val")
+    return trainer
+
+
+def init_les_trainer(
+    cfg: AutotuneConfig,
+    loaders: dict[str, torch.utils.data.DataLoader],
+    device: torch.device,
+    log_dir: Path | None,
+):
+    les_cfg = cfg.les
+    # type checking
+    assert les_cfg is not None
+    l2_penalty = cfg.solver.l2_penalty
+    if not isinstance(l2_penalty, float):
+        raise ValueError(
+            f"l2 penalty must be a single float for LES trainer. Found {l2_penalty}"
+        )
+    tgt_weights = cfg.solver.get_weights()
+    for wname, wval in tgt_weights:
+        if not isinstance(wval, float):
+            raise ValueError(
+                f"{wname} must be a single float for LES trainer. Found {wval}"
+            )
+    tgt_weights = cast(dict[TargetType, float], tgt_weights)
+    if not isinstance(les_cfg.num_cycles, int):
+        raise ValueError(
+            f"num_cycles must be a single int for LES trainer. Found {les_cfg.num_cycles}"
+        )
+    if not isinstance(les_cfg.lbfgs_max_iter, int):
+        raise ValueError(
+            f"lbfgs_max_iter must be a single int for LES trainer. Found {les_cfg.lbfgs_max_iter}"
+        )
+    if not isinstance(les_cfg.lbfgs_lr, int):
+        raise ValueError(
+            f"lbfgs_lr must be a single int for LES trainer. Found {les_cfg.lbfgs_lr}"
+        )
+    if not isinstance(les_cfg.lbfgs_lr_decay, int):
+        raise ValueError(
+            f"lbfgs_lr_decay must be a single int for LES trainer. Found {les_cfg.lbfgs_lr_decay}"
+        )
+    if not isinstance(les_cfg.lbfgs_history_size, int):
+        raise ValueError(
+            f"lbfgs_history_size must be a single int for LES trainer. Found {les_cfg.lbfgs_history_size}"
+        )
+    if not isinstance(les_cfg.lbfgs_tolerance_grad, int):
+        raise ValueError(
+            f"lbfgs_tolerance_grad must be a single int for LES trainer. Found {les_cfg.lbfgs_tolerance_grad}"
+        )
+    if not isinstance(les_cfg.lbfgs_tolerance_change, int):
+        raise ValueError(
+            f"lbfgs_tolerance_change must be a single int for LES trainer. Found {les_cfg.lbfgs_tolerance_change}"
+        )
+
+    trainer = RandomFeaturesEwaldsTrainer(
+        train_dataloader=loaders["train"],
+        l2_penalty=l2_penalty,
+        training_targets=cfg.train_targets,
+        target_weight=tgt_weights,
+        num_cycles=les_cfg.num_cycles,
+        lbfgs_max_iter=les_cfg.lbfgs_max_iter,
+        lbfgs_lr=les_cfg.lbfgs_lr,
+        lbfgs_lr_decay=les_cfg.lbfgs_lr_decay,
+        lbfgs_history_size=les_cfg.lbfgs_history_size,
+        lbfgs_tolerance_grad=les_cfg.lbfgs_tolerance_grad,
+        lbfgs_tolerance_change=les_cfg.lbfgs_tolerance_change,
+        random_features_normalization=cfg.rf_normalization,
+        save_every_model=cfg.save_every_model,
+        dtype=cfg.dtype,
+        save_fmaps=cfg.save_fmaps,
+        log_dir=log_dir,
+        device=device,
+        metrics=cfg.metrics,
+    )
+    trainer.val_dataloader = loaders.get("val")
+    return trainer
+
+
+def init_rf_model(
+    cfg: AutotuneConfig,
+    loaders: dict[str, torch.utils.data.DataLoader],
+):
+    assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
+    return FrankenPotential(
+        gnn_config=cfg.backbone,
+        rf_config=cfg.rfs,
+        scale_by_Z=cfg.scale_by_species,
+        num_species=loaders["train"].dataset.num_species,
+        atomic_energies=cfg.atomic_energies,
+        jac_chunk_size=cfg.jac_chunk_size,
+    )
+
+
+def init_les_model(
+    cfg: AutotuneConfig,
+    loaders: dict[str, torch.utils.data.DataLoader],
+):
+    assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
+    assert cfg.les is not None
+    return LESFrankenPotential(
+        gnn_config=cfg.backbone,
+        rf_config=cfg.rfs,
+        les_config=cfg.les,
+        scale_by_Z=cfg.scale_by_species,
+        num_species=loaders["train"].dataset.num_species,
+        atomic_energies=cfg.atomic_energies,
+        jac_chunk_size=cfg.jac_chunk_size,
+    )
+
+
 def autotune(cfg: AutotuneConfig):
     torch.manual_seed(cfg.seed)
     run_dir = Path(cfg.run_dir)
@@ -417,53 +571,15 @@ def autotune(cfg: AutotuneConfig):
             cfg.dataset.max_train_samples,
             cfg.seed,
         )
+        set_dataset_atomic_energies(loaders, cfg.atomic_energies)
         t_end = time.time()
         logger.debug(f"Initialized data-loaders in {t_end - t_start:.2f}s")
 
-        set_dataset_atomic_energies(loaders, cfg.atomic_energies)
-
-        solver_l2, solver_weights = create_solver_hpsearch_grid(cfg.solver)
-
-        trainer_cls = RandomFeaturesTrainer
-        if len(cfg.train_targets) == 2:
-            trainer_cls = LowMemRandomFeaturesTrainer
-        if cfg.les is not None:
-            trainer_cls = RandomFeaturesEwaldsTrainer
-
-        trainer = trainer_cls(
-            train_dataloader=loaders["train"],
-            l2_penalty=solver_l2,
-            training_targets=cfg.train_targets,
-            target_weight=solver_weights,
-            random_features_normalization=cfg.rf_normalization,
-            save_every_model=cfg.save_every_model,
-            dtype=cfg.dtype,
-            save_fmaps=cfg.save_fmaps,
-            log_dir=run_dir,
-            device=device,
-            metrics=cfg.metrics,
-            **(
-                {
-                    "training_config": cfg.les,
-                    "best_model_selection": cfg.best_model_selection,
-                }
-                if cfg.les is not None
-                else {}
-            ),
-        )
-        trainer.val_dataloader = loaders.get("val")
-
         run_autotune(
-            gnn_cfg=cfg.backbone,
-            rf_cfg=cfg.rfs,
-            les_cfg=cfg.les,
+            auto_cfg=cfg,
             loaders=loaders,
-            best_model_selection=cfg.best_model_selection,
-            scale_by_species=cfg.scale_by_species,
-            jac_chunk_size=cfg.jac_chunk_size,
-            trainer=trainer,
-            eval_splits=cfg.eval_splits,
-            atomic_energies=cfg.atomic_energies,
+            device=device,
+            log_dir=run_dir,
         )
     except Exception as e:
         logger.error("Error encountered in autotune. Exiting.", exc_info=e)

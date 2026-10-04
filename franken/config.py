@@ -4,9 +4,16 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import dataclasses
 import logging
-from typing import Any, ClassVar, Literal, Optional, Sequence, Union
+from typing import Any, ClassVar, Literal, Mapping, Optional, Protocol, Sequence, Union
+from typing_extensions import runtime_checkable, Self
 
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    TargetType,
+    all_target_keys,
+)
 
 logger = logging.getLogger("franken")
 
@@ -56,6 +63,23 @@ def asdict_with_classvar(obj) -> dict[str, Any]:
         )
     else:
         return deepcopy(obj)
+
+
+class DataclassInstance(Protocol):
+    """Structural type matched by any dataclass instance."""
+
+    __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
+
+
+@runtime_checkable
+class CheckpointableConfig(Protocol):
+    def to_ckpt(self) -> dict[str, Any]: ...
+
+    @classmethod
+    def from_ckpt(cls, ckpt: Mapping[str, Any]) -> Self: ...
+
+
+class CheckpointableDataclass(DataclassInstance, CheckpointableConfig, Protocol): ...
 
 
 @dataclass
@@ -246,91 +270,6 @@ class PETBackboneConfig(BackboneConfig):
 
 
 @dataclass
-class LESConfig:
-    N_max: float = 10
-    """"""
-    is_periodic: bool = True
-    """"""
-    num_cycles: int = 50
-    """Number of alternating RFF/LES cycles."""
-    epochs_per_cycle: int = 50
-    """Number of full-dataset passes for each LES cycle."""
-    lbfgs_max_iter: int = 50
-    """Maximum L-BFGS iterations per LES stage."""
-    lbfgs_lr: float = 1.0
-    lbfgs_history_size: int = 50
-    lbfgs_tolerance_grad: float = 1e-7
-    lbfgs_tolerance_change: float = 1e-9
-    lr_decay: float = 1.0
-    """Multiply the learning rate by this factor after each alternating cycle."""
-    restore_best: bool = True
-    """Restore the best combined model across both stages, using validation if available."""
-
-    def to_ckpt(self):
-        return dataclasses.asdict(self)
-
-    @staticmethod
-    def from_ckpt(ckpt):
-        return LESConfig(**ckpt)
-
-
-# @dataclass
-# class LESTrainingConfig:
-#     """Optimizer settings for alternating RFF/LES fitting (not model architecture)."""
-
-#     optimizer: Literal["adam", "lbfgs"] = "adam"
-#     num_cycles: int = 50
-#     """Number of alternating RFF/LES cycles."""
-#     epochs_per_cycle: int = 50
-#     """Adam passes through the complete training set per LES stage."""
-#     batch_size: int | None = None
-#     """Configurations per Adam update; None accumulates the full training set."""
-#     learning_rate: float = 1e-4
-#     """Adam learning rate."""
-#     lr_decay: float = 1.0
-#     """Multiply the learning rate by this factor after each alternating cycle."""
-#     lbfgs_max_iter: int = 50
-#     """Maximum L-BFGS iterations per LES stage (each can evaluate multiple closures)."""
-#     lbfgs_learning_rate: float = 1.0
-#     lbfgs_history_size: int = 50
-#     lbfgs_tolerance_grad: float = 1e-7
-#     lbfgs_tolerance_change: float = 1e-9
-#     restore_best: bool = True
-#     """Restore the best combined model across both stages, using validation if available."""
-
-#     def __post_init__(self):
-#         if self.optimizer not in {"adam", "lbfgs"}:
-#             raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
-#         for name in (
-#             "num_cycles",
-#             "epochs_per_cycle",
-#             "lbfgs_max_iter",
-#             "lbfgs_history_size",
-#         ):
-#             value = getattr(self, name)
-#             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-#                 raise ValueError(f"{name} must be a positive integer")
-#         if self.batch_size is not None and (
-#             not isinstance(self.batch_size, int)
-#             or isinstance(self.batch_size, bool)
-#             or self.batch_size < 1
-#         ):
-#             raise ValueError("batch_size must be a positive integer or None")
-#         for name in (
-#             "learning_rate",
-#             "lbfgs_learning_rate",
-#             "lr_decay",
-#             "lbfgs_tolerance_grad",
-#             "lbfgs_tolerance_change",
-#         ):
-#             value = getattr(self, name)
-#             if not 0 < value < float("inf"):
-#                 raise ValueError(f"{name} must be positive and finite")
-#         if self.optimizer == "lbfgs" and self.batch_size is not None:
-#             raise ValueError("L-BFGS requires batch_size=None (full training set)")
-
-
-@dataclass
 class RFConfig(ABC):
     rf_type: ClassVar[str]
 
@@ -395,6 +334,31 @@ class MultiscaleGaussianRFConfig(RFConfig):
 
 
 @dataclass
+class LESConfig:
+    N_max: float = 10
+    """"""
+    is_periodic: bool = True
+    """"""
+    num_cycles: HPSearchConfig | list[int] | int = 50
+    """Number of alternating RFF/LES cycles."""
+    lbfgs_max_iter: HPSearchConfig | list[int] | int = 50
+    """Maximum L-BFGS iterations per LES stage."""
+    lbfgs_lr: HPSearchConfig | list[float] | float = 1.0
+    lbfgs_history_size: HPSearchConfig | list[int] | int = 50
+    lbfgs_tolerance_grad: HPSearchConfig | list[float] | float = 1e-7
+    lbfgs_tolerance_change: HPSearchConfig | list[float] | float = 1e-9
+    lbfgs_lr_decay: HPSearchConfig | list[float] | float = 1.0
+    """Multiply the learning rate by this factor after each alternating cycle."""
+
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return LESConfig(**ckpt)
+
+
+@dataclass
 class SolverConfig:
     l2_penalty: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(start=-11, stop=-6, num=6, scale="log")
@@ -404,7 +368,7 @@ class SolverConfig:
     energy_weight: HPSearchConfig | list[float] | float = 1.0
     """Controls the weight of the energy loss term. Weights are normalized to sum to 1."""
 
-    force_weight: HPSearchConfig | list[float] | float = field(
+    forces_weight: HPSearchConfig | list[float] | float = field(
         default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
     )
     """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
@@ -413,6 +377,20 @@ class SolverConfig:
         default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
+
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return SolverConfig(**ckpt)
+
+    def get_weights(self) -> dict[TargetType, HPSearchConfig | list[float] | float]:
+        return {
+            ENERGY_TARGET_KEY: self.energy_weight,
+            FORCES_TARGET_KEY: self.forces_weight,
+            STRESS_TARGET_KEY: self.stress_weight,
+        }
 
 
 @dataclass
@@ -507,5 +485,11 @@ class AutotuneConfig:
     )
     """Which data labels to train Franken with."""
 
-    # les_training: LESTrainingConfig | None = field(default_factory=LESTrainingConfig)
-    # """Training schedule and optimizer for LES-enabled models."""
+    def __post_init__(self):
+        # 1. fix solver-config: remove target weights (e.g. stress_weight)
+        #    which are not used because not in training targets
+        for tgt_key in all_target_keys():
+            if tgt_key not in self.train_targets:
+                # set it to a single value so it doesn't interfere with the
+                # hyperparameter search procedures.
+                setattr(self.solver, f"{tgt_key}_weight", 1.0)
