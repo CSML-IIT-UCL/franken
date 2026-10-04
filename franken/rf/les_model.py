@@ -22,6 +22,7 @@ class LESFrankenPotential(FrankenPotential):
         gnn_config: BackboneConfig,
         rf_config: RFConfig,
         les_config: LESConfig,
+        is_periodic: bool,
         jac_chunk_size: Union[int, Literal["auto"]] = "auto",
         scale_by_Z: bool = True,
         num_species: int = 1,
@@ -36,11 +37,12 @@ class LESFrankenPotential(FrankenPotential):
             atomic_energies=atomic_energies,
         )
         self.les_config = les_config
+        self.is_periodic = is_periodic
         # See the LES documentation for more details about the arguments:
         # https://les.readthedocs.io/en/latest/library.html
         self.les = Les(
             les_arguments={
-                "is_periodic": LESConfig.is_periodic,
+                "is_periodic": is_periodic,
                 "N_max": LESConfig.N_max,
                 "use_atomwise": True,  # use the LES MLP
                 "output_scaling_factor": 0.1,
@@ -59,6 +61,7 @@ class LESFrankenPotential(FrankenPotential):
     def hyperparameters(self):
         hps = super().hyperparameters
         hps["les"] = self.les_config.to_ckpt()
+        hps["is_periodic"] = self.is_periodic
         return hps
 
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
@@ -72,6 +75,7 @@ class LESFrankenPotential(FrankenPotential):
             "jac_chunk_size": self.jac_chunk_size,
             "multi_weights": multi_weights,
             "num_species": self.num_species,
+            "is_periodic": self.is_periodic,
             "rf": {
                 "config": self.rf_config.to_ckpt(),
                 "state_dict": self.rf.state_dict(),
@@ -113,6 +117,7 @@ class LESFrankenPotential(FrankenPotential):
             les_config=les_cfg,
             jac_chunk_size=ckpt["jac_chunk_size"],
             num_species=ckpt["num_species"],
+            is_periodic=ckpt["is_periodic"],
             **ckpt["input_scaler"]["config"],
         )
         model.rf.load_state_dict(ckpt["rf"]["state_dict"])

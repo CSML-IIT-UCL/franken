@@ -507,6 +507,11 @@ def init_les_model(
 ):
     assert isinstance(loaders["train"].dataset, FrankenAtomsDataset)  # for typing
     assert cfg.les is not None
+    is_periodic = None
+    if all(ldr.dataset.is_all_periodic() for ldr in loaders.values()):
+        is_periodic = True
+    if all(ldr.dataset.is_all_non_periodic() for ldr in loaders.values()):
+        is_periodic = False
     return LESFrankenPotential(
         gnn_config=cfg.backbone,
         rf_config=cfg.rfs,
@@ -515,6 +520,7 @@ def init_les_model(
         num_species=loaders["train"].dataset.num_species,
         atomic_energies=cfg.atomic_energies,
         jac_chunk_size=cfg.jac_chunk_size,
+        is_periodic=is_periodic,
     )
 
 

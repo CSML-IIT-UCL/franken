@@ -336,9 +336,7 @@ class MultiscaleGaussianRFConfig(RFConfig):
 @dataclass
 class LESConfig:
     N_max: float = 10
-    """"""
-    is_periodic: bool = True
-    """"""
+    """Check LES docs"""
     num_cycles: HPSearchConfig | list[int] | int = 50
     """Number of alternating RFF/LES cycles."""
     lbfgs_max_iter: HPSearchConfig | list[int] | int = 50

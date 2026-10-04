@@ -145,8 +145,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 if error is not None:
                     split_summary += f"{metric} {error:.2f} {TARGET_UNITS[tgt]}, "
             if len(split_summary) > 0:
-                hp_summary += f"{split}: {split_summary[:-2]} - "
-        return hp_summary
+                hp_summary += f"{split.name}: {split_summary[:-2]} - "
+        return hp_summary[:-2]
 
     def _print_eval(self, model, epoch, step: Literal["rff", "les", "joint"]):
         logc = LogCollection([self.create_log_entry(model)])

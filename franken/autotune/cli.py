@@ -354,7 +354,7 @@ def get_arg_groups():
             ),
             Argument.from_dataclass(
                 SolverConfig,
-                "force_weight",
+                "forces_weight",
                 "force-weight",
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
@@ -510,11 +510,55 @@ def get_arg_groups():
         data_class=LESConfig,
         arguments=[
             Argument.from_dataclass(LESConfig, "N_max", "n-max"),
-            Argument.from_dataclass(LESConfig, "is_periodic", "les-dl"),
-            Argument.from_dataclass(LESConfig, "num_cycles", "num-cycles"),
-            Argument.from_dataclass(LESConfig, "epochs_per_cycle", "epochs-per-cycle"),
-            Argument.from_dataclass(LESConfig, "lbfgs_max_iter", "lbfgs-max-iter"),
-            Argument.from_dataclass(LESConfig, "lbfgs_lr", "lbfgs-lr"),
+            Argument.from_dataclass(
+                LESConfig,
+                "num_cycles",
+                "num-cycles",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_max_iter",
+                "lbfgs-max-iter",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_history_size",
+                "lbfgs-history-size",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_tolerance_grad",
+                "lbfgs-tolerance-grad",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_tolerance_change",
+                "lbfgs-tolerance-change",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_lr",
+                "lbfgs-lr",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_lr_decay",
+                "lbfgs-lr-decay",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
         ],
     )
     return {
@@ -523,22 +567,6 @@ def get_arg_groups():
         "backbone": bbone_groups,
         "rfs": rf_groups,
         "les": les_group,
-        # "les_training": ArgumentGroup(
-        #     "les_training",
-        #     "LES training options",
-        #     desc="Configure LES optimization and alternating cycles",
-        #     data_class=LESTrainingConfig,
-        #     arguments=[
-        #         Argument.from_dataclass(
-        #             LESTrainingConfig,
-        #             f.name,
-        #             f"les-{f.name.replace('_', '-')}",
-        #             opposite_full_name="les-no-restore-best",
-        #             default=f.default,
-        #         )
-        #         for f in dataclasses.fields(LESTrainingConfig)
-        #     ],
-        # ),
     }
 
 
