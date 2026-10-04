@@ -6,11 +6,9 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, NamedTuple, TypeVarTuple, cast
+from typing_extensions import Self, TypeVarTuple, Unpack
+from typing import Any, Iterator, NamedTuple, cast
 from uuid import uuid4
-
-if TYPE_CHECKING:
-    from _typeshed import DataclassInstance
 
 import torch.distributed
 import torch.utils.data
@@ -20,6 +18,7 @@ from franken.config import (
     AutotuneConfig,
     BackboneConfig,
     CheckpointableDataclass,
+    DataclassInstance,
     HPSearchConfig,
     SolverConfig,
     asdict_with_classvar,
@@ -194,7 +193,7 @@ def hps_from_config(cfg: DataclassInstance):
 Ts = TypeVarTuple("Ts")
 
 
-def create_outer_hpsearch_grid(cfg: tuple[*Ts]) -> Iterator[tuple[int, tuple[*Ts]]]:
+def create_outer_hpsearch_grid(cfg: tuple[Unpack[Ts]]) -> Iterator[tuple[int, tuple[Unpack[Ts]]]]:
     """Expand one or more dataclass configs into a grid of concrete configs.
 
     Thin wrapper over :func:`franken.utils.misc.params_grid` which handles unrolling compact
@@ -231,7 +230,7 @@ def create_outer_hpsearch_grid(cfg: tuple[*Ts]) -> Iterator[tuple[int, tuple[*Ts
             )
             for c in cfgs
         )
-        yield exp_id, cast(tuple[*Ts], new_cfgs)
+        yield exp_id, cast("tuple[Unpack[Ts]]", new_cfgs)
 
 
 def create_solver_hpsearch_grid(
@@ -261,13 +260,13 @@ def run_autotune(
     current_best = BestTrial(None, None)  # type: ignore
 
     if is_les is not None:
-        param_grid = create_outer_hpsearch_grid(
+        param_grid = list(create_outer_hpsearch_grid(
             (auto_cfg.rfs, auto_cfg.les, auto_cfg.solver)
-        )
+        ))
     else:
-        param_grid = create_outer_hpsearch_grid((auto_cfg.rfs,))
+        param_grid = list(create_outer_hpsearch_grid((auto_cfg.rfs,)))
     print(
-        f"Autotuning {'LES ' if is_les else ''} Franken with {len(list(param_grid))} parameters."
+        f"Autotuning {'LES ' if is_les else ''} Franken with {len(param_grid)} parameters."
     )
     for trial_id, trial_params in param_grid:
         logger.debug(f"Autotune iteration {trial_id} with parameters {trial_params}")
@@ -426,7 +425,7 @@ def init_les_trainer(
             f"l2 penalty must be a single float for LES trainer. Found {l2_penalty}"
         )
     tgt_weights = cfg.solver.get_weights()
-    for wname, wval in tgt_weights:
+    for wname, wval in tgt_weights.items():
         if not isinstance(wval, float):
             raise ValueError(
                 f"{wname} must be a single float for LES trainer. Found {wval}"
@@ -440,25 +439,25 @@ def init_les_trainer(
         raise ValueError(
             f"lbfgs_max_iter must be a single int for LES trainer. Found {les_cfg.lbfgs_max_iter}"
         )
-    if not isinstance(les_cfg.lbfgs_lr, int):
+    if not isinstance(les_cfg.lbfgs_lr, (int, float)):
         raise ValueError(
-            f"lbfgs_lr must be a single int for LES trainer. Found {les_cfg.lbfgs_lr}"
+            f"lbfgs_lr must be a single float for LES trainer. Found {les_cfg.lbfgs_lr}"
         )
-    if not isinstance(les_cfg.lbfgs_lr_decay, int):
+    if not isinstance(les_cfg.lbfgs_lr_decay, (int, float)):
         raise ValueError(
-            f"lbfgs_lr_decay must be a single int for LES trainer. Found {les_cfg.lbfgs_lr_decay}"
+            f"lbfgs_lr_decay must be a single float for LES trainer. Found {les_cfg.lbfgs_lr_decay}"
         )
     if not isinstance(les_cfg.lbfgs_history_size, int):
         raise ValueError(
             f"lbfgs_history_size must be a single int for LES trainer. Found {les_cfg.lbfgs_history_size}"
         )
-    if not isinstance(les_cfg.lbfgs_tolerance_grad, int):
+    if not isinstance(les_cfg.lbfgs_tolerance_grad, (int, float)):
         raise ValueError(
-            f"lbfgs_tolerance_grad must be a single int for LES trainer. Found {les_cfg.lbfgs_tolerance_grad}"
+            f"lbfgs_tolerance_grad must be a single float for LES trainer. Found {les_cfg.lbfgs_tolerance_grad}"
         )
-    if not isinstance(les_cfg.lbfgs_tolerance_change, int):
+    if not isinstance(les_cfg.lbfgs_tolerance_change, (int, float)):
         raise ValueError(
-            f"lbfgs_tolerance_change must be a single int for LES trainer. Found {les_cfg.lbfgs_tolerance_change}"
+            f"lbfgs_tolerance_change must be a single float for LES trainer. Found {les_cfg.lbfgs_tolerance_change}"
         )
 
     trainer = RandomFeaturesEwaldsTrainer(

@@ -203,7 +203,7 @@ if __name__ == "__main__":
         num_cycles=20,
         lbfgs_max_iter=30,
         lbfgs_lr=1,
-        lbfgs_history_size=30,
+        lbfgs_history_size=[10, 20, 30],
         lbfgs_lr_decay=0.9,
     )
 
