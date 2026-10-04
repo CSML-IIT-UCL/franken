@@ -336,17 +336,21 @@ class MultiscaleGaussianRFConfig(RFConfig):
 @dataclass
 class LESConfig:
     N_max: float = 10
-    """Check LES docs"""
+    """Extent of the integer k-grid per direction. Keep N_max * 2 above the cell's longest side. Periodic only. Check [LES documentation](https://les.readthedocs.io/en/latest/library.html#choosing-n-max) for more details."""
     num_cycles: HPSearchConfig | list[int] | int = 50
     """Number of alternating RFF/LES cycles."""
     lbfgs_max_iter: HPSearchConfig | list[int] | int = 50
     """Maximum L-BFGS iterations per LES stage."""
     lbfgs_lr: HPSearchConfig | list[float] | float = 1.0
+    """Starting learning-rate choice for L-BFGS line-search."""
     lbfgs_history_size: HPSearchConfig | list[int] | int = 50
+    """L-BFGS history size. See [PyTorch documentation](https://docs.pytorch.org/docs/2.14/generated/torch.optim.LBFGS.html) for more details."""
     lbfgs_tolerance_grad: HPSearchConfig | list[float] | float = 1e-7
+    """Termination tolerance on gradients for L-BFGS. See [PyTorch documentation](https://docs.pytorch.org/docs/2.14/generated/torch.optim.LBFGS.html) for more details."""
     lbfgs_tolerance_change: HPSearchConfig | list[float] | float = 1e-9
+    """Termination tolerance on iterate change for L-BFGS. See [PyTorch documentation](https://docs.pytorch.org/docs/2.14/generated/torch.optim.LBFGS.html) for more details."""
     lbfgs_lr_decay: HPSearchConfig | list[float] | float = 1.0
-    """Multiply the learning rate by this factor after each alternating cycle."""
+    """Multiply the starting LES learning rate by this factor after each alternating cycle."""
 
     def to_ckpt(self):
         return dataclasses.asdict(self)
