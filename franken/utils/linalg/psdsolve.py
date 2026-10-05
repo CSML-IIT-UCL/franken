@@ -1,5 +1,3 @@
-import warnings
-
 import torch
 
 try:
@@ -9,40 +7,6 @@ except ImportError:
     cupy = None
     cusolver = None
     cublas = None
-
-
-def psd_ridge(cov: torch.Tensor, rhs: torch.Tensor, penalty: float) -> torch.Tensor:
-    """Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
-
-    Multiple right-hand sides are supported. Instead of providing the data
-    matrix (commonly :math:`X` in ridge-regression notation), and labels (commonly :math:`y`),
-    we are given directly :math:`\text{cov} = X^T X` and :math:`\text{rhs} = X^T y`.
-    Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
-
-    To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
-    may also be overwritten (depending on its memory layout).
-
-    Args:
-        cov (Tensor): covariance of the linear system
-        rhs (Tensor): right hand side (one or more) of the linear system
-        penalty (float): Tikhonov l2 penalty
-
-    Returns:
-        solution (Tensor): the ridge regression coefficients
-    """
-    if cupy is not None and cov.device.type == "cuda":
-        return _lowmem_psd_ridge(cov, rhs, penalty)
-    else:
-        # NOTE: this should be a warnings.warn NOT logger.warning - otherwise
-        # it gets printed a lot of times and is just annoying. We could add
-        # https://docs.python.org/library/logging.html#logging.captureWarnings
-        # to the logger to capture warnings automatically.
-        if cov.device.type == "cuda":
-            warnings.warn(
-                "low-memory solver cannot be used because `cupy` is not available. "
-                "Install `cupy` if you encounter memory problems."
-            )
-        return _naive_psd_ridge(cov, rhs, penalty)
 
 
 def _naive_psd_ridge(

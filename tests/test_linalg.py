@@ -10,6 +10,8 @@ try:
 except ImportError:
     cupy_available = False
 
+from franken.trainers.base import BaseTrainer
+from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
 from franken.utils.linalg.cov import (
     _lowmemcov_rank1_update,
     _lowmemcov_rankk_update,
@@ -21,7 +23,6 @@ from franken.utils.linalg.cov import (
 from franken.utils.linalg.psdsolve import (
     _lowmem_psd_ridge,
     _naive_psd_ridge,
-    psd_ridge
 )
 from franken.utils.linalg.tri import (
     _trilerp_cpu,
@@ -299,32 +300,47 @@ class TestPSDSolvers:
     @FAIL_NO_CUPY_MARK
     def test_dispatcher_cuda(self):
         with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT
+            "franken.trainers.rf_lowmem", _lowmem_psd_ridge=DEFAULT
         ) as mocks:
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
-            psd_ridge(A, B, 1e-5)
+            LowMemRandomFeaturesTrainer.psd_solve(
+                object.__new__(LowMemRandomFeaturesTrainer), A, B, 1e-5
+            )
             mocks['_lowmem_psd_ridge'].assert_called_once()
 
     @SKIP_NO_CUDA
     def test_dispatcher_cuda_nocupy(self):
         with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT, cupy=None
-        ) as mocks:
+            "franken.trainers.rf_lowmem", _lowmem_psd_ridge=DEFAULT, cupy=None
+        ) as mocks, patch("franken.trainers.base._naive_psd_ridge") as naive:
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
             with pytest.warns(UserWarning, match="`cupy` is not available"):
-                psd_ridge(A, B, 1e-5)
-            mocks['_naive_psd_ridge'].assert_called_once()
+                LowMemRandomFeaturesTrainer.psd_solve(
+                    object.__new__(LowMemRandomFeaturesTrainer), A, B, 1e-5
+                )
+            naive.assert_called_once_with(A, B, 1e-5)
+            mocks["_lowmem_psd_ridge"].assert_not_called()
 
     def test_dispatcher_cpu(self):
-        with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT
-        ) as mocks:
+        with patch("franken.trainers.rf_lowmem._lowmem_psd_ridge") as lowmem:
             A = self.A("cpu", torch.float32)
             B = self.B("cpu", torch.float32)
-            psd_ridge(A, B, 1e-5)
-            mocks['_naive_psd_ridge'].assert_called_once()
+            expected = self.expected(A, B, 1e-5)
+            trainer = object.__new__(LowMemRandomFeaturesTrainer)
+            result = trainer.psd_solve(A, B, 1e-5)
+            torch.testing.assert_close(result, expected)
+            lowmem.assert_not_called()
+
+    @pytest.mark.parametrize("device", DEVICES)
+    def test_base_dispatcher(self, device):
+        with patch("franken.trainers.base._naive_psd_ridge") as naive:
+            A = self.A(device, torch.float32)
+            B = self.B(device, torch.float32)
+            result = BaseTrainer.psd_solve(None, A, B, 1e-5)
+            naive.assert_called_once_with(A, B, 1e-5)
+            assert result is naive.return_value
 
 
 @pytest.mark.parametrize("device", DEVICES)

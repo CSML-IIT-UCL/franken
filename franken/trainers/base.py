@@ -16,6 +16,7 @@ from franken.trainers.log_utils import (
     LogEntry,
     dtypeJSONEncoder,
 )
+from franken.utils.linalg.psdsolve import _naive_psd_ridge
 from franken.utils.misc import are_dicts_equal
 
 logger = logging.getLogger("franken")
@@ -51,6 +52,29 @@ class BaseTrainer(abc.ABC):
             )
         self.buffer_dt = dtype
         self.device = torch.device(device)
+
+    def psd_solve(
+        self, cov: torch.Tensor, rhs: torch.Tensor, penalty: float
+    ) -> torch.Tensor:
+        """Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
+
+        Multiple right-hand sides are supported. Instead of providing the data
+        matrix (commonly :math:`X` in ridge-regression notation), and labels (commonly :math:`y`),
+        we are given directly :math:`\text{cov} = X^T X` and :math:`\text{rhs} = X^T y`.
+        Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
+
+        To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
+        may also be overwritten (depending on its memory layout).
+
+        Args:
+            cov (Tensor): covariance of the linear system
+            rhs (Tensor): right hand side (one or more) of the linear system
+            penalty (float): Tikhonov l2 penalty
+
+        Returns:
+            solution (Tensor): the ridge regression coefficients
+        """
+        return _naive_psd_ridge(cov, rhs, penalty)
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:

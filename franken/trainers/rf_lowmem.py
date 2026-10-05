@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 from typing import Literal, Mapping
 
@@ -15,7 +16,7 @@ from franken.utils.linalg.cov import (
     rank1_update,
     rankk_update,
 )
-from franken.utils.linalg.psdsolve import psd_ridge
+from franken.utils.linalg.psdsolve import _lowmem_psd_ridge, cupy
 from franken.utils.linalg.tri import triangular_lerp
 from franken.utils.misc import no_jit, throughput
 
@@ -64,6 +65,19 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             save_fmaps=save_fmaps,
             metrics=metrics,
         )
+
+    def psd_solve(
+        self, cov: torch.Tensor, rhs: torch.Tensor, penalty: float
+    ) -> torch.Tensor:
+        """Solve ridge regression with the low-memory CUDA solver when available."""
+        if cupy is not None and cov.device.type == "cuda":
+            return _lowmem_psd_ridge(cov, rhs, penalty)
+        if cov.device.type == "cuda":
+            warnings.warn(
+                "low-memory solver cannot be used because `cupy` is not available. "
+                "Install `cupy` if you encounter memory problems."
+            )
+        return super().psd_solve(cov, rhs, penalty)
 
     @no_jit()
     @torch.no_grad()
@@ -201,4 +215,4 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         )
         lerped_cov.diagonal().copy_(lerped_diag)
         rhs = torch.lerp(coeff_upper, coeff_lower, weight_lower)
-        return psd_ridge(lerped_cov, rhs, l2_penalty)
+        return self.psd_solve(lerped_cov, rhs, l2_penalty)

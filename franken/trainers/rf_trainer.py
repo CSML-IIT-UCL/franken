@@ -22,7 +22,6 @@ from franken.trainers.log_utils import (
     LogEntry,
 )
 from franken.utils.linalg.cov import normalize_leading_eig
-from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import ensure_list, no_jit, params_grid, throughput
 from franken.metrics import metric_registry
 
@@ -430,7 +429,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+        return self.psd_solve(solve_cov, solve_coeff, l2_penalty)
 
 
 def process_tgt_weights(
