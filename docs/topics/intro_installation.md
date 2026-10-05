@@ -3,14 +3,18 @@
 
 > ⚠️ **Important:** `franken` requires **PyTorch** to be installed in your environment *before* you proceed. Running the installation commands below without PyTorch will result in a build or installation error. If you haven't installed it yet, please follow the [Official PyTorch Installation Guide](https://pytorch.org/get-started/locally/#linux-pip) to set up the correct version for your specific hardware (CPU or GPU).
 
-### 1. Standard Installation (Bare-bones)
-The basic installation comes without any GNN backbone installed. You can install it by running:
+The basic installation comes without any GNN backbone installed:
 ```bash
 pip install franken
 ```
 
-### 2. Installation with GNN Backbones (Recommended for GPUs)
-If you wish to use GPUs and need specific backbones, you can install `franken` directly with the required extras:
+To enable CUDA support (highly-recommended):
+```bash
+pip install franken[cuda]
+```
+
+The currently supported backbones are [MACE](https://github.com/ACEsuit/mace) and [UPET](https://github.com/lab-cosmo/upet/tree/main). If you don't have them, you can use install them along with `franken` with the required extras:
+
 ```bash
 # Install with MACE backbone
 pip install franken[cuda,mace]
@@ -19,14 +23,15 @@ pip install franken[cuda,mace]
 pip install franken[cuda,pet]
 ```
 
-### 3. Example Environment Setup (Conda)
-If you are setting up a clean GPU environment from scratch, here is a recommended configuration pipeline using Conda and CuPy:
+**Example Environment Setup (Conda)**
+If you are setting up a clean GPU environment from scratch, you can also install it with conda:
+
 ```bash
 # 1. Prepare environment utilities
 conda install pip setuptools wheel 
 
-# 2. Install PyTorch with CUDA 12.1 (adjust according to your system)
-conda install pytorch pytorch-cuda=12.1 -c pytorch -c nvidia 
+# 2. Install PyTorch with CUDA 12.6 (adjust according to your system)
+conda install pytorch pytorch-cuda=12.6 -c pytorch -c nvidia 
 
 # 3. Install CuPy (required for GPU/CUDA backbones)
 conda install -c conda-forge cupy    
@@ -35,9 +40,19 @@ conda install -c conda-forge cupy
 pip install franken[cuda,mace]
 ```
 
-In more detail:
- - the `cuda` qualifier installs dependencies which are only relevant on GPU-enabled environments and can be omitted.
- - the supported backbones are [MACE](https://github.com/ACEsuit/mace) and [UPET](https://github.com/lab-cosmo/upet/tree/main). They are explained in more detail below.
+### Supported pre-trained models
+
+#### MACE
+To use a MACE model as a backbone for `franken` just `pip`-install `mace-torch` in `franken`'s environment
+```bash
+pip install mace-torch
+```
+further details can be found in the [MACE documentation](https://mace-docs.readthedocs.io/en/latest/guide/installation.html).
+
+#### PET
+
+The [UPET](https://github.com/lab-cosmo/upet/tree/main) models are available through the Metatomic/Metatrain ecosystem.
+To use PET models as a backbone for `franken`, you can follow the instructions on [metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation, or just install them with franken with `pip install franken[cuda,pet]`.
 
 
 ```{warning}

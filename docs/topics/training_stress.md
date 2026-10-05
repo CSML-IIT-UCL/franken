@@ -21,15 +21,7 @@ cfg = AutotuneConfig(
 )
 ```
 
-The equivalent CLI options are:
-
-```bash
-franken.autotune \
-    ... \
-    --train-targets energy forces stress \
-    --stress-weight 1.0 \
-    --metrics energy_MAE forces_MAE stress_MAE
-```
+The equivalent CLI option is `--train-targets energy forces stress`. 
 
 Notes:
 
