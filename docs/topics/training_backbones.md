@@ -39,9 +39,6 @@ PET_OMat/m_1.0
 PET_OMat/l_1.0
 PET_OMat/xl_1.0
 
-* SEVENN
-SevenNet0/11July2024
---------------------------------------------------------------------------------
 ```
 
 Models can also be directly downloaded by copying the backbone-ID from the command above into the `download` command
