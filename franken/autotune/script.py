@@ -137,7 +137,7 @@ def hp_summary_str(
         if cfg is None:
             continue
         for k, v in cfg.to_ckpt().items():
-            fmt_val = format(v, ".3f" if isinstance(v, float) else "")
+            fmt_val = format(v, ".2e" if isinstance(v, float) else "")
             hp_summary += f" {k:^7}: {fmt_val:^7} |"
 
     def _get_first_available_metric(

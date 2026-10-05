@@ -326,6 +326,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     rf_weights = self._fit_rff(
                         model, covs, normalization  # type: ignore
                     )
+                if torch.any(torch.isnan(rf_weights)):
+                    logger.warning(
+                        f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
+                    )
+                    break
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(model, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
