@@ -467,6 +467,7 @@ def init_les_trainer(
         l2_penalty=l2_penalty,
         training_targets=cfg.train_targets,
         target_weight=tgt_weights,
+        mode=les_cfg.mode,
         num_cycles=les_cfg.num_cycles,
         lbfgs_max_iter=les_cfg.lbfgs_max_iter,
         lbfgs_lr=les_cfg.lbfgs_lr,
