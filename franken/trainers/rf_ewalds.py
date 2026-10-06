@@ -489,6 +489,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     rf_hps,
                     epoch=outer_it,  # , direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
                 )
+                if torch.any(torch.isnan(rf_weights)):
+                    logger.warning(
+                        f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
+                    )
+                    break
+
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(rf_hps, model, rf_weights, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
