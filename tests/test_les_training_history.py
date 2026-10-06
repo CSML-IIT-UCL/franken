@@ -10,7 +10,7 @@ import torch
 
 from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
-from franken.config import LESTrainingConfig
+from franken.config import LESConfig
 
 
 class TestLESTrainingHistory(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestLESTrainingHistory(unittest.TestCase):
         trainer = object.__new__(RandomFeaturesEwaldsTrainer)
         trainer.log_dir = log_dir
         trainer.training_history = []
-        trainer.training_config = LESTrainingConfig(restore_best=False)
+        trainer.les_config = LESConfig(restore_best=False)
         trainer.train_dataloader = Mock(name="train_loader")
         trainer.val_dataloader = Mock(name="validation_loader")
         trainer.create_log_entry = Mock(

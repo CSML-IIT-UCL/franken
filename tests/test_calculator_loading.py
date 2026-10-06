@@ -74,6 +74,7 @@ def make_model(model_cls, activation="relu"):
         atomic_energies={1: -1.0},
     )
     if model_cls is LESFrankenPotential:
+        pytest.importorskip("les")
         kwargs["les_config"] = LESConfig(
             hidden_dim=(4, 2), les_output_scale=1.0, activation=activation
         )
@@ -84,7 +85,7 @@ def make_model(model_cls, activation="relu"):
             # Make the LES contribution nonzero, so dropping it fails comparisons.
             for parameter in model.les.parameters():
                 parameter.zero_()
-            model.les.outnet[-1].bias.fill_(0.5)
+            model.les.atomwise.outnet[-1].linear.bias.fill_(0.5)
     return model
 
 
@@ -119,7 +120,10 @@ def test_explicit_les_loader_still_works(toy_backbone, tmp_path, activation):
     model.save(path)
     loaded = LESFrankenPotential.load(path, map_location="cpu")
     assert isinstance(loaded, LESFrankenPotential)
-    torch.testing.assert_close(loaded.les.outnet[-1].bias, model.les.outnet[-1].bias)
+    torch.testing.assert_close(
+        loaded.les.atomwise.outnet[-1].linear.bias,
+        model.les.atomwise.outnet[-1].linear.bias,
+    )
 
 
 @pytest.mark.parametrize("has_les", [False, True])

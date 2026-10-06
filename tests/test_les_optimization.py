@@ -7,9 +7,8 @@ import pytest
 import torch
 
 from franken.autotune.cli import parse_cli
-from franken.config import LESTrainingConfig
+from franken.config import LESConfig
 from franken.data.base import Configuration, Target
-from franken.les.les_head import LESHead
 from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
 
@@ -54,7 +53,7 @@ def make_trainer(config, n=5):
         {"energy": 1.0, "forces": 0.0},
         device="cpu",
         dtype=torch.float64,
-        training_config=config,
+        les_config=config,
         best_model_selection=["energy_MAE"],
     )
     trainer._print_eval = Mock()
@@ -109,9 +108,7 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
         device="cpu",
         dtype=torch.float64,
         save_fmaps=save_fmaps,
-        training_config=LESTrainingConfig(
-            optimizer="lbfgs", mode="variable_projection"
-        ),
+        les_config=LESConfig(optimizer="lbfgs", mode="variable_projection"),
     )
     model = CancellationModel()
     # The double coefficients differ by one, but their float32 adjoints cancel
@@ -130,9 +127,17 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
 @pytest.mark.parametrize("periodic", [False, True])
 @pytest.mark.parametrize("activation", ["relu", "silu"])
 def test_les_force_and_parameter_derivatives(periodic, activation):
-    head = LESHead(
-        input_dim=3, hidden_dim=(4, 2), les_output_scale=1.0, activation=activation
-    ).double()
+    Les = pytest.importorskip("les").Les
+    head = Les(
+        les_arguments={
+            "use_atomwise": True,
+            "n_hidden": [4, 2],
+            "output_scaling_factor": 1.0,
+        }
+    )
+    head.atomwise.activation = getattr(torch.nn.functional, activation)
+    head.atomwise(torch.zeros(1, 3), torch.zeros(1, dtype=torch.long))
+    head = head.double()
     positions = torch.tensor([[0.2, 0.3, 0.1], [1.4, 0.8, 0.5]], dtype=torch.float64)
     data = Configuration(
         positions,
@@ -144,7 +149,9 @@ def test_les_force_and_parameter_derivatives(periodic, activation):
     def energy(pos):
         # Position-dependent charges exercise both the explicit Coulomb force
         # and the derivative propagated through atomic descriptors.
-        return head(pos.square(), pos, data).sum()
+        return head(positions=pos, desc=pos.square(), cell=data.cell.unsqueeze(0))[
+            "E_lr"
+        ].sum()
 
     pos = positions.clone().requires_grad_()
     force = -torch.autograd.grad(energy(pos), pos, create_graph=True)[0]
@@ -159,7 +166,7 @@ def test_les_force_and_parameter_derivatives(periodic, activation):
     )
 
     loss = energy(pos).square() + 0.2 * (force - 0.1).square().sum()
-    parameter = head.linear_nn.weight
+    parameter = head.atomwise.linear_nn.linear.weight
     gradient = torch.autograd.grad(loss, parameter)[0]
     direction = torch.randn_like(parameter)
     direction /= direction.norm()
@@ -182,7 +189,7 @@ def test_les_force_and_parameter_derivatives(periodic, activation):
 
 
 def test_accumulated_gradient_matches_full_mean_and_partial_batch():
-    trainer = make_trainer(LESTrainingConfig())
+    trainer = make_trainer(LESConfig(mode="alternating"))
     model = ToyModel()
     for indices in ([0, 1, 2, 3, 4], [4]):
         model.zero_grad()
@@ -195,7 +202,7 @@ def test_accumulated_gradient_matches_full_mean_and_partial_batch():
 
 
 def test_accumulated_gradient_with_energy_and_force_losses():
-    trainer = make_trainer(LESTrainingConfig())
+    trainer = make_trainer(LESConfig(mode="alternating"))
     model = ToyModel()
     loss = trainer._backward_batch(
         model, list(range(5)), {"energy": 0.25, "forces": 0.75}
@@ -333,9 +340,7 @@ def test_variable_projection_gradient_and_accepted_state(normalization, save_fma
         dtype=torch.float64,
         random_features_normalization=normalization,
         save_fmaps=save_fmaps,
-        training_config=LESTrainingConfig(
-            optimizer="lbfgs", mode="variable_projection"
-        ),
+        les_config=LESConfig(optimizer="lbfgs", mode="variable_projection"),
     )
     model = PolynomialModel()
     trainer._print_eval = Mock()
@@ -385,8 +390,8 @@ def test_variable_projection_gradient_and_accepted_state(normalization, save_fma
 
     trainer.on_fit_start = Mock()
     trainer.create_log_entry = Mock(side_effect=lambda *a: LogEntry("toy", 0, 0, 0))
-    trainer.training_config.num_cycles = 2
-    trainer.training_config.restore_best = False
+    trainer.les_config.num_cycles = 2
+    trainer.les_config.restore_best = False
     objectives = []
 
     def record(*args, **kwargs):
@@ -413,8 +418,13 @@ def test_variable_projection_gradient_and_accepted_state(normalization, save_fma
 @pytest.mark.parametrize("batch_size,steps", [(None, 2), (2, 6)])
 def test_adam_epochs_and_persistent_state(batch_size, steps):
     trainer = make_trainer(
-        LESTrainingConfig(
-            epochs_per_cycle=2, batch_size=batch_size, learning_rate=0.05, lr_decay=0.5
+        LESConfig(
+            optimizer="adam",
+            mode="alternating",
+            epochs_per_cycle=2,
+            batch_size=batch_size,
+            learning_rate=0.05,
+            lr_decay=0.5,
         )
     )
     model = ToyModel()
@@ -443,7 +453,9 @@ def test_adam_epochs_and_persistent_state(batch_size, steps):
 
 
 def test_lbfgs_reduces_loss_uses_fixed_dataset_and_resets_history():
-    trainer = make_trainer(LESTrainingConfig(optimizer="lbfgs", lbfgs_max_iter=10))
+    trainer = make_trainer(
+        LESConfig(optimizer="lbfgs", mode="alternating", lbfgs_max_iter=10)
+    )
     model = ToyModel()
     real_optimizer = torch.optim.LBFGS
     with patch("torch.optim.LBFGS", wraps=real_optimizer) as construct:
@@ -475,12 +487,14 @@ def test_lbfgs_reduces_loss_uses_fixed_dataset_and_resets_history():
 )
 def test_invalid_settings(kwargs):
     with pytest.raises(ValueError):
-        LESTrainingConfig(**kwargs)
+        LESConfig(**kwargs)
 
 
 @pytest.mark.parametrize("restore_best", [True, False])
 def test_fit_restores_both_components_from_best_rff_stage(tmp_path, restore_best):
-    trainer = make_trainer(LESTrainingConfig(num_cycles=2, restore_best=restore_best))
+    trainer = make_trainer(
+        LESConfig(mode="alternating", num_cycles=2, restore_best=restore_best)
+    )
     trainer.log_dir = tmp_path
     model = ToyModel()
     trainer.on_fit_start = Mock()
@@ -521,7 +535,7 @@ def test_fit_restores_both_components_from_best_rff_stage(tmp_path, restore_best
 
 
 def test_best_selection_without_validation_and_nonfinite_metrics():
-    trainer = make_trainer(LESTrainingConfig())
+    trainer = make_trainer(LESConfig(mode="alternating"))
     model = ToyModel()
     for value in (2.0, float("nan"), 3.0):
         log = LogEntry("toy", 0, 0, 0)
@@ -550,6 +564,8 @@ def test_cli_training_options():
         + [
             "--les-optimizer",
             "adam",
+            "--les-mode",
+            "alternating",
             "--les-batch-size",
             "3",
             "--les-num-cycles",
@@ -559,11 +575,11 @@ def test_cli_training_options():
             "--les-no-restore-best",
         ]
     )
-    assert config.les_training.batch_size == 3
-    assert config.les_training.num_cycles == 4
-    assert config.les_training.epochs_per_cycle == 2
-    assert config.les_training.restore_best is False
-    defaults = parse_cli(args).les_training
+    assert config.les.batch_size == 3
+    assert config.les.num_cycles == 4
+    assert config.les.epochs_per_cycle == 2
+    assert config.les.restore_best is False
+    defaults = parse_cli(args).les
     assert defaults.batch_size is None
     assert defaults.restore_best is True
     projected = parse_cli(
@@ -577,5 +593,5 @@ def test_cli_training_options():
             "silu",
         ]
     )
-    assert projected.les_training.mode == "variable_projection"
+    assert projected.les.mode == "variable_projection"
     assert projected.les.activation == "silu"
