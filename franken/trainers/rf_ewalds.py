@@ -45,6 +45,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         training_targets: list[TargetType],
         l2_penalty: float,
         target_weight: Mapping[TargetType, float],
+        mode: Literal["alternating", "joint", "variable_projection"],
         num_cycles: int,
         lbfgs_max_iter: int,
         lbfgs_lr: float,
@@ -80,7 +81,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.mode: Literal["alternating", "joint"] = "alternating"
+        self.mode = mode
         self.val_dataloader: torch.utils.data.DataLoader | None = None
         self.training_history: list[dict] = []
 
@@ -107,6 +108,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             "lbfgs_history_size": self.lbfgs_history_size,
             "lbfgs_tolerance_grad": self.lbfgs_tolerance_grad,
             "lbfgs_tolerance_change": self.lbfgs_tolerance_change,
+            "mode": self.mode,
         } | {f"{k}_relative_weight": v for k, v in self.rel_tgt_weight.items()}
         hp_groups = model.hyperparameters | {"solver": solver_hps}
         hyperparameters = []
@@ -196,7 +198,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self,
         model: LESFrankenPotential,
         covs: dict[TargetType, Tensor],
-        normalization: dict[str, Tensor] | None,
+        normalization: dict[TargetType, Tensor] | None,
         direct_coeffs: dict[TargetType, Tensor] | None = None,
     ) -> Tensor:
         if direct_coeffs is not None:
@@ -213,7 +215,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         rf_weights = rf_weights.unsqueeze(0)
         return rf_weights
 
-    def _backward_batch(self, model, indices, do_bwd=True):
+    def _backward_batch(self, model, indices, normalization, do_bwd=True):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         target_weights = self.rel_tgt_weight
         per_tgt_losses = {
@@ -240,9 +242,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     raise RuntimeError(
                         f"Target {index} does not contain any values for {tgt_name}."
                     )
-                loss = target_weights[tgt_name] * torch.mean(
+                # vector targets are summed like in RFFs
+                loss = target_weights[tgt_name] * torch.sum(
                     (predictions[tgt_name] - tgt) ** 2
                 )
+                if normalization is not None:
+                    loss = loss / normalization[tgt_name].squeeze()
                 loss = loss / len(indices)  # normalize gradient by the batch size
                 per_tgt_losses[tgt_name] += loss.detach()
                 per_index_loss += loss
@@ -250,13 +255,19 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 per_index_loss.backward()
         return {k: v.item() for k, v in per_tgt_losses.items()}
 
-    def _fit_les(self, model, epoch: int):
+    def _fit_les(
+        self,
+        model,
+        epoch: int,
+        normalization: dict[TargetType, Tensor] | None,
+        proj_mat: Tensor | None = None,
+    ):
         n_samples = len(self.train_dataloader.dataset)  # type: ignore
 
         params = list(model.les.parameters())
         if self.mode == "joint":
             params += list(model.rf.parameters())
-        # RFF refits change this objective: do not reuse curvature history.
+
         optim = torch.optim.LBFGS(
             params,
             lr=self.lbfgs_lr * self.lbfgs_lr_decay**epoch,
@@ -269,11 +280,29 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         indices = list(range(n_samples))  # full-batch
 
         def closure():
+            if self.mode == "variable_projection":
+                assert proj_mat is not None
+                self._refit_projected_rff(model, proj_mat, normalization)
             optim.zero_grad()
-            batch_loss = self._backward_batch(model, indices)
-            return sum(batch_loss.values())
+            batch_loss = self._backward_batch(model, indices, normalization)
+            loss = sum(batch_loss.values())
+            if self.mode == "variable_projection":
+                # Envelope theorem: no derivative through the exact RFF
+                # minimizer is needed. Its ridge cost is still needed by
+                # the line search, since it changes between trial points.
+                loss = loss + (
+                    self.l2_penalty
+                    * model.rf.weights.detach().square().sum()
+                    / n_samples
+                )
+            return loss
 
         optim.step(closure)
+
+        # The last closure may have evaluated a rejected trial. Re-fit a last time.
+        if self.mode == "variable_projection":
+            assert proj_mat is not None
+            self._refit_projected_rff(model, proj_mat, normalization)
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -299,33 +328,29 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         model.train()
         self.on_fit_start(model)
 
-        covs, coeffs, normalization = None, None, None
+        covs, coeffs, normalization, proj_mat = None, None, None, None
         if self.mode != "joint":
             # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
+            if self.mode == "variable_projection":
+                proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
 
         for outer_it in range(self.num_cycles):
             # 1. Train RFF on full targets (original coefficients)
             #    or on residual coefficients depending on the iteration
-            if self.mode == "alternating":
+            if self.mode in {"alternating", "variable_projection"}:
                 assert covs is not None
                 assert coeffs is not None
-                if outer_it == 0:
-                    # 1st iteration has no valid LES residual: train against full target
-                    rf_weights = self._fit_rff(
-                        model,
-                        covs,  # type: ignore
-                        normalization,
-                        direct_coeffs=coeffs,  # type: ignore
-                    )
-                else:
-                    # pass
-                    # From 2nd iteration, train against y - y_les
-                    rf_weights = self._fit_rff(
-                        model, covs, normalization  # type: ignore
-                    )
+                # 1st iteration has no valid LES residual: train against full target
+                # From 2nd iteration, train against y - y_les
+                rf_weights = self._fit_rff(
+                    model,
+                    covs,  # type: ignore
+                    normalization,
+                    direct_coeffs=coeffs if outer_it == 0 else None,
+                )
                 if torch.any(torch.isnan(rf_weights)):
                     logger.warning(
                         f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
@@ -335,7 +360,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 self._print_eval(model, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
             #    or in joint mode, train also RFF coefficients jointly.
-            self._fit_les(model, epoch=outer_it)
+            self._fit_les(
+                model, epoch=outer_it, normalization=normalization, proj_mat=proj_mat
+            )
             step_name = "joint" if self.mode == "joint" else "les"
             self._print_eval(model, epoch=outer_it, step=step_name)
         # Logging
@@ -416,13 +443,25 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         logger.warning(f"Could not add metric: {str(e)}")
         return log_collection
 
+    @torch.no_grad()
+    def _prepare_projection(self, covs: dict[TargetType, Tensor]) -> Tensor:
+        """Factor the fixed regularized RFF matrix once for all LES trial points."""
+        l2_penalty = self.l2_penalty
+        target_weights = self.rel_tgt_weight
+        matrix: torch.Tensor
+        matrix = sum(
+            target_weights[t] * covs[t] for t in self.training_targets
+        )  # type: ignore
+        matrix.diagonal().add_(l2_penalty)
+        return torch.linalg.cholesky(matrix)
+
     @no_jit()
     @torch.no_grad()
     def residual_coeffs(
         self,
         model: LESFrankenPotential,
         dataloader: torch.utils.data.DataLoader,
-        normalization: dict[str, Tensor] | None,
+        normalization: dict[TargetType, Tensor] | None,
     ):
         n_samples = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
@@ -478,11 +517,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         n_samples = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
 
-        covs = {
+        covs: dict[TargetType, Tensor] = {
             t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-        coeffs = {
+        coeffs: dict[TargetType, Tensor] = {
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
@@ -532,14 +571,13 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return covs, coeffs, norm_coefs
 
     @torch.no_grad()
-    def solve(
+    def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
-        l2_penalty: float = 1e-6,
-        **kwargs,  # only for compatibility with super
     ) -> Tensor:
         target_weights = self.rel_tgt_weight
+        l2_penalty = self.l2_penalty
         solve_cov, solve_coeff = None, None
         for tt in self.training_targets:
             if solve_cov is None or solve_coeff is None:
@@ -550,3 +588,17 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 solve_coeff.add_(coeffs[tt], alpha=target_weights[tt])
         assert solve_cov is not None and solve_coeff is not None
         return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+
+    @torch.no_grad()
+    def _refit_projected_rff(
+        self,
+        model: LESFrankenPotential,
+        proj_mat: Tensor,
+        normalization: dict[TargetType, Tensor] | None,
+    ) -> Tensor:
+        coeffs = self.residual_coeffs(model, self.train_dataloader, normalization)
+        target_weights = self.rel_tgt_weight
+        rhs: Tensor = sum(
+            target_weights[t] * coeffs[t] for t in self.training_targets
+        )  # type: ignore
+        return torch.cholesky_solve(rhs[:, None], proj_mat).T

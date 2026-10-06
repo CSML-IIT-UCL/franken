@@ -510,6 +510,7 @@ def get_arg_groups():
         data_class=LESConfig,
         arguments=[
             Argument.from_dataclass(LESConfig, "N_max", "n-max"),
+            Argument.from_dataclass(LESConfig, "mode", "mode"),
             Argument.from_dataclass(
                 LESConfig,
                 "num_cycles",

@@ -337,6 +337,10 @@ class MultiscaleGaussianRFConfig(RFConfig):
 class LESConfig:
     N_max: float = 10
     """Extent of the integer k-grid per direction. Keep N_max * 2 above the cell's longest side. Periodic only. Check [LES documentation](https://les.readthedocs.io/en/latest/library.html#choosing-n-max) for more details."""
+    mode: Literal["alternating", "joint", "variable_projection"] = field(
+        default="alternating"
+    )
+    """Optimization mode."""
     num_cycles: HPSearchConfig | list[int] | int = 50
     """Number of alternating RFF/LES cycles."""
     lbfgs_max_iter: HPSearchConfig | list[int] | int = 50

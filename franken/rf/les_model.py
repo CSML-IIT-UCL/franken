@@ -22,7 +22,7 @@ class LESFrankenPotential(FrankenPotential):
         gnn_config: BackboneConfig,
         rf_config: RFConfig,
         les_config: LESConfig,
-        is_periodic: bool,
+        is_periodic: bool | None,
         jac_chunk_size: Union[int, Literal["auto"]] = "auto",
         scale_by_Z: bool = True,
         num_species: int = 1,
