@@ -24,7 +24,6 @@ from franken.config import (
     BackboneConfig,
     DatasetConfig,
     LESConfig,
-    LESTrainingConfig,
     MaceBackboneConfig,
     MultiscaleGaussianRFConfig,
     RFConfig,
@@ -95,7 +94,7 @@ def train_model(
     rfs: RFConfig,
     *,
     use_les: bool,
-    les_training: LESTrainingConfig | None = None,
+    les_config: LESConfig | None = None,
 ) -> Path:
     """Run the short-range fit or the alternating RFF + LES fit."""
     kind = "les" if use_les else "franken"
@@ -104,12 +103,10 @@ def train_model(
         solver=solver,
         backbone=backbone,
         rfs=rfs,
-        les=(
-            LESConfig(hidden_dim=(64, 32), les_output_scale=1.0, dl=3, activation="silu")
-            if use_les
-            else None
-        ),
-        les_training=None if les_training is None else les_training,
+        les=(les_config or LESConfig(
+            hidden_dim=(64, 32), les_output_scale=1.0, dl=3,
+            activation="silu", is_periodic=True,
+        )) if use_les else None,
         best_model_selection=["energy_MAE", "forces_MAE"],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
@@ -210,7 +207,7 @@ if __name__ == "__main__":
         length_scale_high=20,
         length_scale_num=6,
     )
-    # full_batch_adam = LESTrainingConfig(
+    # full_batch_adam = LESConfig(
     #     optimizer="adam",
     #     num_cycles=50,
     #     epochs_per_cycle=20,
@@ -219,7 +216,9 @@ if __name__ == "__main__":
     #     restore_best=True,
     # )
 
-    les_training = LESTrainingConfig(
+    les_config = LESConfig(
+        hidden_dim=(64, 32), les_output_scale=1.0, dl=3,
+        activation="silu", is_periodic=True,
         optimizer="lbfgs",
         mode="variable_projection",
         num_cycles=50,
@@ -256,6 +255,6 @@ if __name__ == "__main__":
             backbone,
             rfs,
             use_les=True,
-            les_training=les_training,
+            les_config=les_config,
         )
         evaluate_and_plot(dset, use_les=True)

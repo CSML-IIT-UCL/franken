@@ -247,7 +247,7 @@ class PETBackboneConfig(BackboneConfig):
 
 @dataclass
 class LESConfig:
-    """Architecture and electrostatics settings for the external LES package."""
+    """Architecture, electrostatics, and optimization settings for LES."""
 
     n_layers: int = 3
     hidden_dim: tuple[int, ...] = (32, 16)
@@ -260,18 +260,6 @@ class LESConfig:
     """None selects upstream's legacy, per-structure boundary detection."""
     N_max: int = 10
     """Reciprocal grid extent for is_periodic=True; N_max * dl must cover the cell."""
-
-    def to_ckpt(self):
-        return dataclasses.asdict(self)
-
-    @staticmethod
-    def from_ckpt(ckpt):
-        return LESConfig(**ckpt)
-
-
-@dataclass
-class LESTrainingConfig:
-    """Optimizer settings for alternating RFF/LES fitting (not model architecture)."""
 
     optimizer: Literal["adam", "lbfgs"] = "lbfgs"
     num_cycles: int = 50
@@ -329,6 +317,13 @@ class LESTrainingConfig:
                 raise ValueError(f"{name} must be positive and finite")
         if self.optimizer == "lbfgs" and self.batch_size is not None:
             raise ValueError("L-BFGS requires batch_size=None (full training set)")
+
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return LESConfig(**ckpt)
 
 
 @dataclass
@@ -507,6 +502,3 @@ class AutotuneConfig:
         default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
     )
     """Which data labels to train Franken with."""
-
-    les_training: LESTrainingConfig = field(default_factory=LESTrainingConfig)
-    """Training schedule and optimizer for LES-enabled models."""

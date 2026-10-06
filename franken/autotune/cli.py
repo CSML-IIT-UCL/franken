@@ -9,7 +9,6 @@ from typing import Any, Sequence, cast, get_args
 from franken.config import (
     AutotuneConfig,
     LESConfig,
-    LESTrainingConfig,
     MaceBackboneConfig,
     PETBackboneConfig,
     SevennBackboneConfig,
@@ -113,6 +112,18 @@ def parse_none_type(f: Any):
     raise TypeError(f)
 
 
+def parse_int_tuple(value: str) -> tuple[int, ...]:
+    try:
+        parsed = ast.literal_eval(value)
+    except (ValueError, SyntaxError) as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected an integer tuple, e.g. '(32, 16)'"
+        ) from exc
+    if not isinstance(parsed, tuple) or any(type(v) is not int for v in parsed):
+        raise argparse.ArgumentTypeError("Expected an integer tuple, e.g. '(32, 16)'")
+    return parsed
+
+
 def parse_literal(t: Any):
     all_allowed_literals = typing.get_args(t)
 
@@ -186,6 +197,8 @@ class Argument:
             type_origin = typing.get_origin(named_field.type)
             if named_field.type in {int, float, str}:
                 arg_kwargs["type"] = named_field.type
+            elif named_field.type == tuple[int, ...]:
+                arg_kwargs["type"] = parse_int_tuple
             elif type_origin == typing.Literal:
                 arg_kwargs["choices"] = typing.get_args(named_field.type)
             elif field_is_optional_literal(named_field.type):
@@ -194,6 +207,8 @@ class Argument:
                 ]
                 arg_kwargs["type"] = parse_optional_literal
             elif named_field.type is bool:
+                # Boolean actions do not parse string defaults through a type.
+                arg_kwargs["default"] = named_field.default
                 if named_field.default is False:
                     arg_kwargs["action"] = "store_true"
                 elif named_field.default is True:
@@ -510,11 +525,34 @@ def get_arg_groups():
         desc="Configure the Latent Ewald Summation model",
         data_class=LESConfig,
         arguments=[
-            Argument.from_dataclass(LESConfig, "hidden_dim", "les-hidden-dim"),
-            Argument.from_dataclass(LESConfig, "dl", "les-dl"),
-            Argument.from_dataclass(LESConfig, "sigma", "les-sigma"),
-            Argument.from_dataclass(LESConfig, "N_max", "les-n-max"),
-            Argument.from_dataclass(LESConfig, "activation", "les-activation"),
+            Argument.from_dataclass(
+                LESConfig,
+                name,
+                f"les-{name.replace('_', '-').lower()}",
+                opposite_full_name=(
+                    "les-no-restore-best" if name == "restore_best" else None
+                ),
+            )
+            for name in (
+                "hidden_dim",
+                "dl",
+                "sigma",
+                "N_max",
+                "activation",
+                "optimizer",
+                "num_cycles",
+                "epochs_per_cycle",
+                "batch_size",
+                "learning_rate",
+                "lr_decay",
+                "lbfgs_max_iter",
+                "lbfgs_learning_rate",
+                "lbfgs_history_size",
+                "lbfgs_tolerance_grad",
+                "lbfgs_tolerance_change",
+                "restore_best",
+                "mode",
+            )
         ],
     )
     return {
@@ -523,22 +561,6 @@ def get_arg_groups():
         "backbone": bbone_groups,
         "rfs": rf_groups,
         "les": les_group,
-        "les_training": ArgumentGroup(
-            "les_training",
-            "LES training options",
-            desc="Configure LES optimization and alternating cycles",
-            data_class=LESTrainingConfig,
-            arguments=[
-                Argument.from_dataclass(
-                    LESTrainingConfig,
-                    f.name,
-                    f"les-{f.name.replace('_', '-')}",
-                    opposite_full_name="les-no-restore-best",
-                    default=f.default,
-                )
-                for f in dataclasses.fields(LESTrainingConfig)
-            ],
-        ),
     }
 
 
@@ -675,7 +697,6 @@ def parse_cli(argv):
         solver=solver_config,
         backbone=bbone_config,
         les=les_config,
-        les_training=groups["les_training"].to_dataclass(args),
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
