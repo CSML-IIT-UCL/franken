@@ -189,7 +189,6 @@ class BackboneConfig(ABC):
             "MACE-OFF-small": "mace_off/small",
             "MACE-OFF-medium": "mace_off/medium",
             "MACE-OFF-large": "mace_off/large",
-            "SevenNet0": "SevenNet0/11July2024",
         }
 
         new_path_or_id = _deprecated_path_ids.get(self.path_or_id)
@@ -208,8 +207,6 @@ class BackboneConfig(ABC):
     def from_ckpt(ckpt: dict):
         if ckpt["family"].lower() == "mace":
             cls = MaceBackboneConfig
-        elif ckpt["family"].lower() == "sevenn":
-            cls = SevennBackboneConfig
         elif ckpt["family"].lower() == "pet":
             cls = PETBackboneConfig
         else:
@@ -224,19 +221,6 @@ class MaceBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "mace"
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
-
-
-@dataclass(slots=True)
-class SevennBackboneConfig(BackboneConfig):
-    family: ClassVar[str] = "sevenn"
-    interaction_block: int = 2
-    """GNN layer out of which the features are extracted."""
-
-    extract_after_act: bool = True
-    """Whether features should be extracted before or after activations."""
-
-    append_layers: bool = True
-    """Whether to take only the features from the last interaction layer, or to concatenate them all."""
 
 
 @dataclass(slots=True)
