@@ -29,8 +29,10 @@ This can be useful in case one wants to modify the Mace patch to LAMMPS. In part
  - [https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp](https://github.com/ACEsuit/lammps/blob/mace/src/KOKKOS/pair_mace_kokkos.cpp)
 
 We will assume to start from directory `$BASE_DIR`
- 1. ```git clone --branch=mace --depth=1 https://github.com/ACEsuit/lammps```
- 2. download libtorch. For now keeping the default version as specified by MACE, but note that new versions exist!
+ 1. Clone the repository
+    ```bash
+    git clone --branch=mace --depth=1 https://github.com/ACEsuit/lammps
+ 2. Download libtorch. For now keeping the default version as specified by MACE, but note that new versions exist!
     ```bash
     wget https://download.pytorch.org/libtorch/cu121/libtorch-shared-with-deps-2.2.0%2Bcu121.zip
     unzip libtorch-shared-with-deps-2.2.0+cu121.zip
@@ -38,7 +40,8 @@ We will assume to start from directory `$BASE_DIR`
     mv libtorch libtorch-gpu
     ```
  3. Get a GPU node for compilation
-    `srun -N 1 --ntasks-per-node=1 --cpus-per-task=8 --gres=gpu:1 -A <account> -p boost_usr_prod -t 00:30:00 --pty /bin/bash`
+       ```bash
+      srun -N 1 --ntasks-per-node=1 --cpus-per-task=8 --gres=gpu:1 -A <account> -p boost_usr_prod -t 00:30:00 --pty /bin/bash
  4. Compile:
     1. Load modules
         ```bash

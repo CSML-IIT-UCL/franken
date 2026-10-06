@@ -1,18 +1,18 @@
-# Distributed training
+# Multi-GPU training
 
 Franken supports data-parallel training across multiple GPUs via Pytorch distributed support. Each rank processes a shard of the dataset, accumulates local covariance, and the results are summed to obtain the global covariance before solving.
 
 ```bash
 torchrun --standalone --nnodes=1 --nproc-per-node=4 franken.autotune \
-    --train-path="train_dataset.xyz" \
-    --backbone=mace --mace.path-or-id "mace_mp/small" \
-    --rf=gaussian --gaussian.num-rf 4096 --gaussian.length-scale="[5.,10.,20.]"
+    --train-path="train_dataset.xyz" --val-path="valid_dataset.xyz" \
+    --backbone=mace --mace.path-or-id "mace_mh/0" \
+    --rf=ms.gaussian --ms.gaussian.num-rf 4096 
 ```
 
 If you see a `FileNotFoundError`, call the script via its absolute path, for example:
 `ENV_PATH/bin/franken.autotune`.
 
-Below is an example Slurm script (for Leonardo HPC):
+Below is an example Slurm script (for [Leonardo HPC](https://leonardo-supercomputer.cineca.eu/hpc-system/)):
 
 ```bash 
 #!/bin/bash
@@ -30,8 +30,7 @@ ENV_PATH=...
 conda activate "$ENV_PATH"
 
 torchrun --standalone --nnodes=1 --nproc-per-node="${SLURM_NTASKS_PER_NODE}" "$ENV_PATH/bin/franken.autotune" \
-    --train-path="train_dataset.xyz" \
-    --val-path="valid_dataset.xyz" \
-    --backbone=mace --mace.path-or-id "mace_mp/small" --mace.interaction-block 2 \
-    --rf=gaussian --gaussian.num-rf 4096 --gaussian.length-scale="[5.,10.,20.]"
+    --train-path="train_dataset.xyz" --val-path="valid_dataset.xyz" \
+    --backbone=mace --mace.path-or-id "mace_mh/0" \
+    --rf=ms.gaussian --ms.gaussian.num-rf 4096
 ```
