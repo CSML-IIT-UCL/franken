@@ -49,6 +49,7 @@ Repository = "https://github.com/CSML-IIT-UCL/franken"
 "franken.wrap_metatomic" = "franken.calculators.metatomic_inf_wrap:wrap_metatomic_cli"
 
 [project.optional-dependencies]
+les = ["les @ git+https://github.com/ChengUCB/les.git@35b971a650cf30adb84fef7138761e81aa47b3a2"] # pin to latest release v0.2.0
 develop = [
     "black ~= 24.0",
     "ruff",
@@ -91,6 +92,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 path = "franken/__init__.py"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.sdist]
 only-include = ["franken", "tests"]
