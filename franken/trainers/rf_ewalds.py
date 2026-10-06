@@ -30,7 +30,6 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
-from franken.utils.linalg.cgsolve import conjugate_gradient
 from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import no_jit, params_grid, throughput
 
@@ -78,8 +77,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.solver: Literal["cg", "direct"] = "direct"
-        self.cg_num_iter: int = 10
         self.les_config = les_config or LESConfig()
         self.mode: Literal["alternating", "variable_projection", "joint"] = (
             self.les_config.mode
@@ -249,14 +246,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
-        # old weights are used as starting point for optimization
-        old_rf_weights = model.rf.weights.squeeze(0)
         rf_weights = self.solve(
             covs=covs,
             coeffs=coeffs,
-            x0=old_rf_weights,
-            cg_maxiter=self.cg_num_iter,
-            cg_tol=1e-6,
             **rf_hps,
         )
         # weights from [n_rf] to [1, n_rf]
@@ -723,9 +715,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
-        x0: Tensor | None = None,
-        cg_maxiter: int = 50,
-        cg_tol: float = 1e-4,
         **weights,
     ) -> Tensor:
         target_weight = {}
@@ -742,10 +731,4 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        if self.solver == "cg":
-            solve_cov.diagonal().add_(l2_penalty)
-            return conjugate_gradient(
-                A=solve_cov, b=solve_coeff, x0=x0, max_iter=cg_maxiter, tol=cg_tol
-            )
-        else:
-            return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
