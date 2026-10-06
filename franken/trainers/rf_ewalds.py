@@ -12,7 +12,7 @@ import torch.utils.data
 from torch import Tensor
 import tqdm
 
-from franken.config import LESTrainingConfig
+from franken.config import LESConfig
 from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
@@ -54,7 +54,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
-        training_config: LESTrainingConfig | None = None,
+        les_config: LESConfig | None = None,
         best_model_selection: list[str] | None = None,
         seed: int = 1337,
     ):
@@ -80,9 +80,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 )
         self.solver: Literal["cg", "direct"] = "direct"
         self.cg_num_iter: int = 10
-        self.training_config = training_config or LESTrainingConfig()
+        self.les_config = les_config or LESConfig()
         self.mode: Literal["alternating", "variable_projection", "joint"] = (
-            self.training_config.mode
+            self.les_config.mode
         )
         self.best_model_selection = best_model_selection or [
             f"{target}_MAE" for target in self.training_targets
@@ -103,10 +103,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         model_hash = model_hash.hexdigest()
         solver_hps = rf_hps | {
             "dtype": self.buffer_dt,
-            **{
-                f"les_{key}": value
-                for key, value in asdict(self.training_config).items()
-            },
+            **{f"les_{key}": value for key, value in asdict(self.les_config).items()},
         }
         hp_groups = model.hyperparameters | {"solver": solver_hps}
         hyperparameters = []
@@ -183,7 +180,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 )
 
         if dist_utils.get_rank() == 0:
-            if self.training_config.restore_best:
+            if self.les_config.restore_best:
                 self._remember_best(model, weights, logc[0], epoch + 1, step)
             self.training_history.append(
                 {
@@ -330,7 +327,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return total
 
     def _fit_les(self, model, epoch, rf_hps):
-        cfg = self.training_config
+        cfg = self.les_config
         n_samples = len(self.train_dataloader.dataset)
         if n_samples == 0:
             raise ValueError("LES requires a nonempty training dataset")
@@ -487,14 +484,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 self._prepare_projection(covs, rf_hps)
             t_cov = perf_counter() - t_cov
 
-        for outer_it in range(self.training_config.num_cycles):
+        for outer_it in range(self.les_config.num_cycles):
             # 1. Fit the residual of the current LES head, including its
             # nonzero random initialization in the first cycle.
             if self.mode in {"alternating", "variable_projection"}:
                 assert covs is not None
                 assert coeffs is not None
                 rf_weights = self._fit_rff(
-                    model, covs, normalization, rf_hps, epoch=outer_it #, direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
+                    model,
+                    covs,
+                    normalization,
+                    rf_hps,
+                    epoch=outer_it,  # , direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
                 )
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(rf_hps, model, rf_weights, outer_it, step="rff")
@@ -502,7 +503,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             #    or in joint mode, train also RFF coefficients jointly.
             self._fit_les(model, epoch=outer_it, rf_hps=rf_hps)
 
-        if self.training_config.restore_best:
+        if self.les_config.restore_best:
             if self._best_state is None:
                 raise RuntimeError("No stage has finite model-selection metrics")
             with torch.no_grad():
