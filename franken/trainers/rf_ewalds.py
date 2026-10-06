@@ -94,6 +94,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.lbfgs_history_size = lbfgs_history_size
         self.lbfgs_tolerance_grad = lbfgs_tolerance_grad
         self.lbfgs_tolerance_change = lbfgs_tolerance_change
+        self.fmaps: dict[TargetType, list[Tensor]] = {}
 
     def create_log_entry(self, model):
         model_hash = hashlib.md5(str(model.hyperparameters).encode())
@@ -482,7 +483,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             les_preds = model.predict_les(
                 data, self.training_targets, is_training=False  # type: ignore
             )
-            target_fmaps = model.grad_feature_map(data, self.training_targets)
+            target_fmaps = (
+                {t: self.fmaps[t][i] for t in self.training_targets}
+                if self.fmaps
+                else model.grad_feature_map(data, self.training_targets)
+            )
             for tgt_name in self.training_targets:
                 try:
                     tgt = targets[tgt_name] - les_preds[tgt_name]
@@ -525,6 +530,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
+        if self.save_fmaps:
+            self.fmaps = {t: [] for t in self.training_targets}
 
         progress_bar = throughput(
             dataloader, "covs", total=n_samples, device=self.device
@@ -545,6 +552,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
+                if self.save_fmaps:
+                    self.fmaps[tgt_name].append(fmap)
                 if is_scalar_target(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
                     coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
