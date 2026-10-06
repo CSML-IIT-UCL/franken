@@ -9,7 +9,6 @@ import torch
 from franken.config import BackboneConfig, LESConfig, RFConfig
 from franken.data import Configuration
 import franken.data.base
-from franken.les.les_head import initialize_les
 from franken.rf.model import FrankenPotential
 from franken.utils.derivatives import forces_bwdad, forces_stress_bwdad
 
@@ -27,6 +26,14 @@ class LESFrankenPotential(FrankenPotential):
         num_species: int = 1,
         atomic_energies: Optional[Mapping[int, torch.Tensor | float]] = None,
     ):
+        try:
+            from les import Les
+        except ImportError as exc:
+            raise ImportError(
+                "LESFrankenPotential requires the external LES package. "
+                "Install it with pip install 'franken[les]'."
+            ) from exc
+
         super(LESFrankenPotential, self).__init__(
             gnn_config=gnn_config,
             rf_config=rf_config,
@@ -36,9 +43,40 @@ class LESFrankenPotential(FrankenPotential):
             atomic_energies=atomic_energies,
         )
         self.les_config = les_config
-        self.les = initialize_les(
-            les_config=les_config, feature_dim=self.gnn.feature_dim()
+        # checks on hidden_dim (keep them?)
+        hidden_dim = les_config.hidden_dim
+        if isinstance(hidden_dim, int):
+            hidden_dim = (hidden_dim,)
+        if len(hidden_dim) == 1:
+            hidden_dim = hidden_dim * (les_config.n_layers - 1)
+        if len(hidden_dim) != les_config.n_layers - 1:
+            raise ValueError("hidden_dim must contain n_layers - 1 dimensions")
+
+        # Initialize LES
+        self.les = Les(
+            les_arguments={
+                "use_atomwise": True,
+                "n_layers": les_config.n_layers,
+                "n_hidden": list(hidden_dim),
+                "add_linear_nn": les_config.add_linear_nn,
+                "output_scaling_factor": les_config.les_output_scale,
+                "dl": les_config.dl,
+                "sigma": les_config.sigma,
+                "is_periodic": les_config.is_periodic,
+                "N_max": les_config.N_max,
+            }
         )
+        # Initialize the LES MLP immediately to avoid annoying downstream issues (Upstream builds its MLP on the first call)
+        self.les.atomwise.activation = (
+            torch.nn.functional.silu
+            if les_config.activation == "silu"
+            else torch.nn.functional.relu
+        )
+        with torch.no_grad():
+            self.les.atomwise(
+                torch.zeros(1, self.gnn.feature_dim()),
+                torch.zeros(1, dtype=torch.long),
+            )
 
     @property
     @torch.jit.unused
@@ -123,6 +161,26 @@ class LESFrankenPotential(FrankenPotential):
         else:
             return model
 
+    def _get_les_energy(
+        self,
+        atom_pos: torch.Tensor,
+        descriptors: torch.Tensor,
+        data: Configuration,
+    ) -> torch.Tensor:
+        # check on cell (TODO check if it also handles the non-periodic case)
+        cell = data.cell
+        assert cell is not None
+        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
+
+        energy = self.les(
+            positions=atom_pos,
+            cell=cell,
+            desc=descriptors,
+            batch=data.batch_ids,
+        )["E_lr"]
+        assert energy is not None
+        return energy.reshape(1, -1)
+
     def _energy_aux(
         self,
         atom_pos: torch.Tensor,
@@ -140,7 +198,9 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        les_energies = self.les(gnn_descriptors, atom_pos, data)
+        les_energies = self._get_les_energy(
+            atom_pos, gnn_descriptors, data
+        )
         energies = rff_energies + les_energies
 
         return energies.sum(1), energies
@@ -152,8 +212,10 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self.les(gnn_descriptors, atom_pos, data)
-        return les_energies, les_energies
+        les_energies = self._get_les_energy(
+            atom_pos, gnn_descriptors, data
+        )
+        return les_energies.sum(1), les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,

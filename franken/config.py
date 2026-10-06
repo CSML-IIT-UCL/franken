@@ -245,16 +245,21 @@ class PETBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "pet"
 
 
-# TODO: Document LES/Ewalds parameters and add them here.
 @dataclass
 class LESConfig:
+    """Architecture and electrostatics settings for the external LES package."""
+
     n_layers: int = 3
     hidden_dim: tuple[int, ...] = (32, 16)
     dl: float = 1.5
     sigma: float = 1.0
     les_output_scale: float = 1.0
     add_linear_nn: bool = True
-    activation: Literal["relu", "silu"] = "silu" # Charge-head activation.
+    activation: Literal["relu", "silu"] = "silu"  # Charge-head activation.
+    is_periodic: bool | None = None
+    """None selects upstream's legacy, per-structure boundary detection."""
+    N_max: int = 10
+    """Reciprocal grid extent for is_periodic=True; N_max * dl must cover the cell."""
 
     def to_ckpt(self):
         return dataclasses.asdict(self)
@@ -268,7 +273,7 @@ class LESConfig:
 class LESTrainingConfig:
     """Optimizer settings for alternating RFF/LES fitting (not model architecture)."""
 
-    optimizer: Literal["adam", "lbfgs"] = "adam"
+    optimizer: Literal["adam", "lbfgs"] = "lbfgs"
     num_cycles: int = 50
     """Number of alternating RFF/LES cycles."""
     epochs_per_cycle: int = 50
