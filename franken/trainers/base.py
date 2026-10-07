@@ -16,7 +16,7 @@ from franken.trainers.log_utils import (
     LogEntry,
     dtypeJSONEncoder,
 )
-from franken.utils.linalg.psdsolve import _naive_psd_ridge
+from franken.utils.linalg.tri import pack_upper
 from franken.utils.misc import are_dicts_equal
 
 logger = logging.getLogger("franken")
@@ -54,8 +54,12 @@ class BaseTrainer(abc.ABC):
         self.device = torch.device(device)
 
     def psd_solve(
-        self, cov: torch.Tensor, rhs: torch.Tensor, penalty: float
-    ) -> torch.Tensor:
+        self,
+        cov: torch.Tensor,
+        rhs: torch.Tensor,
+        penalty: float,
+        return_cho_factor: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
 
         Multiple right-hand sides are supported. Instead of providing the data
@@ -70,11 +74,23 @@ class BaseTrainer(abc.ABC):
             cov (Tensor): covariance of the linear system
             rhs (Tensor): right hand side (one or more) of the linear system
             penalty (float): Tikhonov l2 penalty
+            return_cho_factor (bool): Also return the packed upper Cholesky factor.
 
         Returns:
-            solution (Tensor): the ridge regression coefficients
+            The ridge regression coefficients, or (coefficients, packed factor)
+            when return_cho_factor is True.
         """
-        return _naive_psd_ridge(cov, rhs, penalty)
+        # Add diagonal without copies
+        cov.diagonal().add_(penalty)
+        # Solve with cholesky on GPU
+        L = torch.linalg.cholesky(cov, upper=True)
+        rhs_shape = rhs.shape
+        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True).view(
+            rhs_shape
+        )
+        if return_cho_factor:
+            return solution, pack_upper(L).detach()
+        return solution
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:

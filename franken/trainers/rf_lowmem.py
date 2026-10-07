@@ -16,9 +16,17 @@ from franken.utils.linalg.cov import (
     rank1_update,
     rankk_update,
 )
-from franken.utils.linalg.psdsolve import _lowmem_psd_ridge, cupy
-from franken.utils.linalg.tri import triangular_lerp
+from franken.utils.linalg.tri import pack_upper, triangular_lerp
 from franken.utils.misc import no_jit, throughput
+
+try:
+    import cupy.cuda
+    from cupy_backends.cuda.libs import cublas, cusolver
+except ImportError:
+    cupy = None
+    cusolver = None
+    cublas = None
+
 
 logger = logging.getLogger("franken")
 
@@ -67,17 +75,117 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         )
 
     def psd_solve(
-        self, cov: torch.Tensor, rhs: torch.Tensor, penalty: float
-    ) -> torch.Tensor:
-        """Solve ridge regression with the low-memory CUDA solver when available."""
-        if cupy is not None and cov.device.type == "cuda":
-            return _lowmem_psd_ridge(cov, rhs, penalty)
-        if cov.device.type == "cuda":
-            warnings.warn(
-                "low-memory solver cannot be used because `cupy` is not available. "
-                "Install `cupy` if you encounter memory problems."
+        self,
+        cov: torch.Tensor,
+        rhs: torch.Tensor,
+        penalty: float,
+        return_cho_factor: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Solve ridge regression with the low-memory CUDA solver when available.
+
+        If return_cho_factor is True, return (coefficients, packed upper factor).
+        """
+        if cupy is None or cov.device.type != "cuda":
+            if cov.device.type == "cuda":
+                warnings.warn(
+                    "low-memory solver cannot be used because `cupy` is not available. "
+                    "Install `cupy` if you encounter memory problems."
+                )
+            return super().psd_solve(cov, rhs, penalty, return_cho_factor)
+
+        assert cusolver is not None and cublas is not None and cupy is not None
+        assert cov.device.type == "cuda"
+        dtype = cov.dtype
+        n = cov.shape[0]
+
+        # Add diagonal without copies
+        cov.diagonal().add_(penalty)
+
+        if dtype == torch.float32:
+            potrf = cusolver.spotrf
+            potrf_bufferSize = cusolver.spotrf_bufferSize
+            potrs = cusolver.spotrs
+        elif dtype == torch.float64:
+            potrf = cusolver.dpotrf
+            potrf_bufferSize = cusolver.dpotrf_bufferSize
+            potrs = cusolver.dpotrs
+        else:
+            raise ValueError(dtype)
+
+        # cov must be f-contiguous (column-contiguous, stride is (1, n))
+        assert cov.dim() == 2
+        assert cov.shape[0] == cov.shape[1]
+        transpose = False
+        if n != 1:
+            if cov.stride(0) != 1:
+                cov = cov.T
+                transpose = True
+        assert cov.stride(0) == 1
+        cov_cp = cupy.asarray(cov)
+
+        # save rhs shape to restore it later on.
+        rhs_shape = rhs.shape
+        rhs = rhs.reshape(n, -1)
+        n_rhs = rhs.shape[1]
+        if rhs.stride(0) != 1:  # force rhs to be f-contiguous
+            # `contiguous` causes a copy
+            rhs = rhs.T.contiguous().T
+        assert rhs.stride(0) == 1
+        rhs_cp = cupy.asarray(rhs)
+
+        handle = cupy.cuda.device.get_cusolver_handle()
+        uplo = (
+            cublas.CUBLAS_FILL_MODE_LOWER
+            if transpose
+            else cublas.CUBLAS_FILL_MODE_UPPER
+        )
+        dev_info = torch.empty(
+            1, dtype=torch.int32
+        )  # don't allocate with cupy as it uses a separate mem pool
+        dev_info_cp = cupy.asarray(dev_info)
+
+        worksize = potrf_bufferSize(handle, uplo, n, cov_cp.data.ptr, n)
+        workspace = torch.empty(worksize, dtype=dtype)
+        workspace_cp = cupy.asarray(workspace)
+
+        # Cholesky factorization
+        potrf(
+            handle,
+            uplo,
+            n,
+            cov_cp.data.ptr,
+            n,
+            workspace_cp.data.ptr,
+            worksize,
+            dev_info_cp.data.ptr,
+        )
+        if (dev_info_cp != 0).any():
+            raise torch.linalg.LinAlgError(
+                f"Error reported by {potrf.__name__} in cuSOLVER. devInfo = {dev_info_cp}."
             )
-        return super().psd_solve(cov, rhs, penalty)
+
+        # Solve: A * X = B
+        potrs(
+            handle,
+            uplo,
+            n,
+            n_rhs,
+            cov_cp.data.ptr,
+            n,
+            rhs_cp.data.ptr,
+            n,
+            dev_info_cp.data.ptr,
+        )
+        if (dev_info_cp != 0).any():
+            raise torch.linalg.LinAlgError(
+                f"Error reported by {potrf.__name__} in cuSOLVER. devInfo = {dev_info_cp}."
+            )
+
+        solution = torch.as_tensor(rhs).reshape(rhs_shape)
+        if return_cho_factor:
+            # Restore the input orientation: its upper triangle now holds the factor.
+            return solution, pack_upper(cov.T if transpose else cov).detach()
+        return solution
 
     @no_jit()
     @torch.no_grad()
@@ -177,8 +285,9 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, tuple[Tensor, Tensor, bool]],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
+        return_cho_factor: bool = False,
         **weights,
-    ) -> Tensor:
+    ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
         for k, v in weights.items():
             target_weight[k.split("_")[0]] = v
@@ -215,4 +324,4 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         )
         lerped_cov.diagonal().copy_(lerped_diag)
         rhs = torch.lerp(coeff_upper, coeff_lower, weight_lower)
-        return self.psd_solve(lerped_cov, rhs, l2_penalty)
+        return self.psd_solve(lerped_cov, rhs, l2_penalty, return_cho_factor)

@@ -412,8 +412,9 @@ class RandomFeaturesTrainer(BaseTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
+        return_cho_factor: bool = False,
         **weights,
-    ) -> Tensor:
+    ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
         for k, v in weights.items():
             target_weight[k.split("_")[0]] = v
@@ -429,7 +430,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return self.psd_solve(solve_cov, solve_coeff, l2_penalty)
+        return self.psd_solve(solve_cov, solve_coeff, l2_penalty, return_cho_factor)
 
 
 def process_tgt_weights(
