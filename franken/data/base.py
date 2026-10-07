@@ -222,6 +222,11 @@ ENERGY_TARGET_KEY: TargetType = "energy"
 FORCES_TARGET_KEY: TargetType = "forces"
 STRESS_TARGET_KEY: TargetType = "stress"
 
+TARGET_UNITS = {
+    ENERGY_TARGET_KEY: "meV/atom",
+    FORCES_TARGET_KEY: "meV/Ang",
+    STRESS_TARGET_KEY: "meV/Ang^3",
+}
 
 def is_target_key(s: str):
     return s in get_args(TargetType)
