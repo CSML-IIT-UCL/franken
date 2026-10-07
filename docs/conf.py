@@ -33,7 +33,14 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "requirements.txt"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "requirements.txt",
+    "notebooks/autotune.ipynb",
+    "notebooks/getting_started.ipynb",
+]
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -92,8 +99,8 @@ templates_path = ["_templates"]
 # Favicon configuration
 # html_favicon = '_static/favicon.ico'
 # Configure syntax highlighting for Awesome Sphinx Theme
-pygments_style = "default"
-pygments_style_dark = "material"
+pygments_style = "sphinx"
+pygments_dark_style = "monokai"
 html_title = "franken"
 # Additional theme configuration
 html_theme_options = {
