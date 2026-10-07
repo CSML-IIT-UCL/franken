@@ -401,3 +401,6 @@ class AutotuneConfig:
         default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
     )
     """Which data labels to train Franken with."""
+
+    save_cho_factor: bool = True
+    """Whether to save the best model's packed Cholesky factor in its checkpoint."""

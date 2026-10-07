@@ -47,6 +47,21 @@ def unpack_upper(packed: torch.Tensor, n: int) -> torch.Tensor:
     return matrix
 
 
+def unpack_symm(packed: torch.Tensor, n: int) -> torch.Tensor:
+    """Reconstruct a symmetric matrix from its row-wise packed upper triangle."""
+    if n < 0 or packed.ndim != 1 or packed.numel() != n * (n + 1) // 2:
+        raise ValueError("Packed upper triangle has an invalid size")
+    matrix = packed.new_empty((n, n))
+    offset = 0
+    for row in range(n):
+        length = n - row
+        values = packed[offset : offset + length]
+        matrix[row, row:].copy_(values)
+        matrix[row:, row].copy_(values)
+        offset += length
+    return matrix
+
+
 def naive_lerp(
     start: torch.Tensor,
     end: torch.Tensor,

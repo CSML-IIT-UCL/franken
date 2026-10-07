@@ -1,11 +1,16 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
 
 from franken.config import GaussianRFConfig, MaceBackboneConfig
 from franken.rf.model import FrankenPotential
-from franken.trainers.log_utils import DataSplit
+from franken.trainers.log_utils import (
+    DataSplit,
+    HyperParameterGroup,
+    LogCollection,
+    LogEntry,
+)
 from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 from franken.utils.linalg.tri import pack_upper
@@ -21,11 +26,45 @@ def make_model(device="cpu"):
 
 
 @pytest.mark.parametrize("device", DEVICES)
+def test_covs_and_coeffs_cache_roundtrip_with_three_targets(device):
+    trainer = RandomFeaturesTrainer(
+        train_dataloader=None,
+        training_targets=["energy", "forces", "stress"],
+        l2_penalty=0.1,
+        target_weight={},
+        device=device,
+    )
+    matrices = {}
+    for target in trainer.training_targets:
+        value = torch.randn(4, 4, device=device)
+        matrices[target] = value @ value.T
+    coeffs = {target: torch.randn(4, device=device) for target in matrices}
+
+    trainer._offload_covs_and_coeffs(matrices, coeffs)
+    with pytest.raises(RuntimeError, match="previous fit"):
+        trainer.on_fit_start(None)
+    restored_covs, restored_coeffs = trainer._restore_covs_and_coeffs(n_features=4)
+
+    assert set(trainer._covs_cache) == set(matrices)
+    assert set(restored_covs) == set(matrices)
+    assert set(restored_coeffs) == set(coeffs)
+    for target in matrices:
+        assert trainer._covs_cache[target].device.type == "cpu"
+        assert trainer._coeffs_cache[target].device.type == "cpu"
+        torch.testing.assert_close(restored_covs[target], matrices[target])
+        torch.testing.assert_close(restored_coeffs[target], coeffs[target])
+    trainer._purge_covs_and_coeffs_cache()
+    assert trainer._covs_cache is None
+    assert trainer._coeffs_cache is None
+
+
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize(
     "trainer_cls", [RandomFeaturesTrainer, LowMemRandomFeaturesTrainer]
 )
-def test_winning_factor(tmp_path, device, dtype, trainer_cls):
+@pytest.mark.parametrize("save_cho_factor", [True, False])
+def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
     trainer = trainer_cls(
         train_dataloader=None,
         training_targets=["energy", "forces"],
@@ -35,6 +74,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls):
         log_dir=tmp_path,
         device=device,
         dtype=dtype,
+        save_cho_factor=save_cho_factor,
     )
     a = torch.randn(4, 4, device=device, dtype=dtype)
     b = torch.randn(4, 4, device=device, dtype=dtype)
@@ -74,24 +114,31 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls):
             )
 
             trainer.serialize_logs(model, logs, weights, ["energy_MAE"])
-            assert solve.call_count == 5
-            assert trainer._fit_system is None
-            assert model._cho_factor.shape == (10,)
-            factor = model.get_cho_factor()
-            torch.testing.assert_close(factor, factor.triu())
-            torch.testing.assert_close(factor.T @ factor, expected)
+            assert solve.call_count == 4 + save_cho_factor
+            assert trainer._covs_cache is None
+            assert trainer._coeffs_cache is None
+            if save_cho_factor:
+                assert model._cho_factor.shape == (10,)
+                factor = model.get_cho_factor()
+                torch.testing.assert_close(factor, factor.triu())
+                torch.testing.assert_close(factor.T @ factor, expected)
+            else:
+                assert model.get_cho_factor() is None
             torch.testing.assert_close(model.rf.weights, weights[1].reshape(1, -1))
             loaded = FrankenPotential.load(
                 tmp_path / "best_ckpt.pt", map_location=device
             )
-            torch.testing.assert_close(loaded._cho_factor, model._cho_factor)
-            loaded.double().cpu()
-            assert loaded._cho_factor.dtype == torch.float64
-            assert loaded._cho_factor.device.type == "cpu"
+            if save_cho_factor:
+                torch.testing.assert_close(loaded._cho_factor, model._cho_factor)
+                loaded.double().cpu()
+                assert loaded._cho_factor.dtype == torch.float64
+                assert loaded._cho_factor.device.type == "cpu"
+            else:
+                assert loaded.get_cho_factor() is None
 
             # Repeating serialization for the same winner does not solve again.
             trainer.serialize_best_model(model, weights, ["energy_MAE"])
-            assert solve.call_count == 5
+            assert solve.call_count == 4 + save_cho_factor
 
             # A later losing RF trial leaves the previous best checkpoint intact.
             previous_checkpoint = (tmp_path / "best_ckpt.pt").read_bytes()
@@ -105,8 +152,9 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls):
             trainer.serialize_logs(
                 other_model, other_logs, other_weights, ["energy_MAE"]
             )
-            assert solve.call_count == 9
-            assert trainer._fit_system is None
+            assert solve.call_count == 8 + save_cho_factor
+            assert trainer._covs_cache is None
+            assert trainer._coeffs_cache is None
             assert other_model._cho_factor is None
             assert (tmp_path / "best_ckpt.pt").read_bytes() == previous_checkpoint
 
@@ -139,10 +187,7 @@ def test_factor_checkpoint_compatibility(tmp_path, device):
             FrankenPotential.load(tmp_path / "invalid.pt")
 
 
-@pytest.mark.parametrize("wrong_trial", [False, True])
-def test_failed_factor_does_not_publish_best(tmp_path, wrong_trial):
-    from franken.trainers.log_utils import HyperParameterGroup, LogCollection, LogEntry
-
+def test_failed_factor_does_not_publish_best(tmp_path):
     trainer = RandomFeaturesTrainer(
         train_dataloader=None,
         training_targets=["energy"],
@@ -166,18 +211,41 @@ def test_failed_factor_does_not_publish_best(tmp_path, wrong_trial):
         )
         log.add_metric("energy_MAE", 1.0, DataSplit.TRAIN)
         LogCollection([log]).save_json(tmp_path / "log.json")
-        trainer._fit_system = (
-            model,
-            "other-trial" if wrong_trial else "trial",
+        trainer._offload_covs_and_coeffs(
             {"energy": torch.eye(4)},
             {"energy": torch.ones(4)},
         )
         with patch.object(
             trainer, "solve", side_effect=torch.linalg.LinAlgError("failed")
         ):
-            expected_error = ValueError if wrong_trial else torch.linalg.LinAlgError
-            with pytest.raises(expected_error):
+            with pytest.raises(torch.linalg.LinAlgError):
                 trainer.serialize_best_model(model, torch.ones(1, 4), ["energy_MAE"])
-        assert trainer._fit_system is None
+        assert trainer._covs_cache is None
+        assert trainer._coeffs_cache is None
         assert not (tmp_path / "best.json").exists()
         assert not (tmp_path / "best_ckpt.pt").exists()
+
+
+@pytest.mark.parametrize("failure_stage", ["logs", "checkpoint"])
+def test_early_serialization_failure_purges_cache(tmp_path, failure_stage):
+    trainer = RandomFeaturesTrainer(
+        train_dataloader=None,
+        training_targets=["energy"],
+        l2_penalty=0.1,
+        target_weight={},
+        log_dir=tmp_path,
+        device="cpu",
+    )
+    trainer._offload_covs_and_coeffs(
+        {"energy": torch.eye(4)}, {"energy": torch.ones(4)}
+    )
+    model = Mock()
+    logs = LogCollection([LogEntry("trial", 0, 0.0, 0.0, hyperparameters=[])])
+    failing_object, method = (
+        (logs, "save_json") if failure_stage == "logs" else (model, "save")
+    )
+    with patch.object(failing_object, method, side_effect=OSError("failed")):
+        with pytest.raises(OSError, match="failed"):
+            trainer.serialize_logs(model, logs, torch.ones(1, 4), ["energy_MAE"])
+    assert trainer._covs_cache is None
+    assert trainer._coeffs_cache is None
