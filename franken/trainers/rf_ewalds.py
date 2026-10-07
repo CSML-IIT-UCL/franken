@@ -5,7 +5,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, Mapping
+from typing import Literal, Mapping, Sequence
 
 import torch
 import torch.utils.data
@@ -18,9 +18,11 @@ from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
 from franken.data.base import (
+    TARGET_UNITS,
     Configuration,
     Target,
     TargetType,
+    all_target_keys,
     is_scalar_target,
 )
 from franken.rf.model import FrankenPotential
@@ -30,7 +32,6 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
-from franken.utils.linalg.cgsolve import conjugate_gradient
 from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import no_jit, params_grid, throughput
 
@@ -78,8 +79,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
-        self.solver: Literal["cg", "direct"] = "direct"
-        self.cg_num_iter: int = 10
         self.les_config = les_config or LESConfig()
         self.mode: Literal["alternating", "variable_projection", "joint"] = (
             self.les_config.mode
@@ -109,7 +108,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         hyperparameters = []
         for group_name, hps in hp_groups.items():
             hyperparameters.append(HyperParameterGroup.from_dict(group_name, hps))
-
         local_log = LogEntry(
             checkpoint_hash=model_hash,
             checkpoint_rf_weight_id=0,
@@ -120,13 +118,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return local_log
 
     def eval_summary(
-        self, log: LogEntry, epoch: int, split: DataSplit, title=""
+        self,
+        log: LogEntry,
+        cycle: int,
+        splits: Sequence[DataSplit],
+        title: str = "",
+        prev_metrics: dict | None = None,
     ) -> str:
-        hp_summary = f"[Epoch {epoch:3}] {title} {split.name}"
 
         def _get_first_available_metric(
             candidates: list[str],
-        ) -> tuple[float, str] | tuple[None, None]:
+            split: DataSplit,
+        ):
             for name in candidates:
                 try:
                     return log.get_metric(name, split), name
@@ -134,69 +137,120 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     pass
             return None, None
 
-        energy_error, energy_metric = _get_first_available_metric(
-            ["energy_MAE", "energy_RMSE"],
-        )
-        forces_error, forces_metric = _get_first_available_metric(
-            ["forces_MAE", "forces_RMSE"],
-        )
-        stress_error, stress_metric = _get_first_available_metric(
-            ["stress_MAE", "stress_RMSE"],
-        )
-        if energy_error is None:
-            energy_error = float("nan")
-        hp_summary += f" ({energy_metric} {energy_error:.2f} meV/atom)"
-        if forces_error is None:
-            forces_error = float("nan")
-        hp_summary += f" ({forces_metric} {forces_error:.2f} meV/Ang)"
-        if stress_error is not None:
-            hp_summary += f" ({stress_metric} {stress_error:.2f} meV/Ang^3)"
-        return hp_summary
+        lines = []
+        lines.append("=" * 60)
+        lines.append(f"[Cycle {cycle:3}] {title.upper()}")
+        lines.append("")
+        
+        for split in splits:
+            entries = []
+            for tgt in all_target_keys():
+                error, metric_name = _get_first_available_metric(
+                    [f"{tgt}_RMSE", f"{tgt}_MAE"],
+                    split,
+                )
+                if error is None:
+                    continue
+                label = metric_name
+                delta_str = ""
+                if prev_metrics is not None:
+                    split_key = split.name.lower()
+                    key = f"{split_key}:{metric_name}"
+                    if key in prev_metrics:
+                        delta = error - prev_metrics[key]
+                        delta_str = f" ({delta:+.2f})"
+                entries.append(
+                    f"{label}={error:.2f} {TARGET_UNITS[tgt]}{delta_str}"
+                )
+            split_name = (
+                "VAL"
+                if split == DataSplit.VAL
+                else split.name
+            )
+            lines.append(
+                f"{split_name:<6}: " + " | ".join(entries)
+            )
+
+        lines.append("")
+        lines.append("=" * 60)
+        return "\n".join(lines)
+    
+    def _get_previous_metrics(self, step: str): # store metrics of previous cycle to compare with the new ones and check improvements
+        for entry in reversed(self.training_history):
+            if entry["step"] != step:
+                continue
+            prev = {}
+            for split_name, split_metrics in entry["metrics"].items():
+                for metric_name, value in split_metrics.items():
+                    prev[f"{split_name}:{metric_name}"] = value
+            return prev
+        return None
 
     def _print_eval(
-        self, rf_hps, model, weights, epoch, step: Literal["rff", "les", "joint"]
+        self,
+        rf_hps,
+        model,
+        weights,
+        cycle: int,
+        step: Literal["rff", "les", "joint"],
     ):
         logc = LogCollection([self.create_log_entry(rf_hps, model)])
-        for split, loader in (
+
+        # Evaluate all available splits
+        for _, loader in (
             (DataSplit.TRAIN, self.train_dataloader),
             (DataSplit.VAL, self.val_dataloader),
         ):
             if loader is None:
                 continue
+
             self.evaluate(
                 model,
                 loader,
                 log_collection=logc,
                 all_weights=weights,
             )
-            if dist_utils.get_rank() == 0:
-                print(
-                    self.eval_summary(
-                        log=logc[0],
-                        epoch=epoch,
-                        split=split,
-                        title=f"after {step.upper()} training",
-                    )
-                )
 
         if dist_utils.get_rank() == 0:
+            splits = [DataSplit.TRAIN]
+            if self.val_dataloader is not None:
+                splits.append(DataSplit.VAL)
+            
+            prev_metrics = self._get_previous_metrics(step)
+            summary = self.eval_summary(
+                log=logc[0],
+                cycle=cycle + 1,
+                splits=splits,
+                title=f"after {step.upper()}",
+                prev_metrics=prev_metrics,
+            )
+
+            logger.info(summary)
+
+        # Store history / best model
+        if dist_utils.get_rank() == 0:
             if self.les_config.restore_best:
-                self._remember_best(model, weights, logc[0], epoch + 1, step)
+                self._remember_best(model, weights, logc[0], cycle + 1, step)
+
             self.training_history.append(
                 {
-                    "cycle": epoch + 1,
+                    "cycle": cycle + 1,
                     "step": step,
                     "metrics": logc[0].to_dict()["metrics"],
                 }
             )
+
             if self.log_dir is not None:
                 self.log_dir.mkdir(parents=True, exist_ok=True)
+
                 history_path = self.log_dir / "training_history.json"
-                # Preserve completed stages even if a later training step fails.
                 temp_path = history_path.with_suffix(".json.tmp")
-                temp_path.write_text(json.dumps(self.training_history, indent=2))
+
+                temp_path.write_text(
+                    json.dumps(self.training_history, indent=2)
+                )
                 temp_path.replace(history_path)
-            print()
+
 
     def _remember_best(self, model, weights, log, cycle, step):
         split = DataSplit.VAL if self.val_dataloader is not None else DataSplit.TRAIN
@@ -249,14 +303,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
-        # old weights are used as starting point for optimization
-        old_rf_weights = model.rf.weights.squeeze(0)
         rf_weights = self.solve(
             covs=covs,
             coeffs=coeffs,
-            x0=old_rf_weights,
-            cg_maxiter=self.cg_num_iter,
-            cg_tol=1e-6,
             **rf_hps,
         )
         # weights from [n_rf] to [1, n_rf]
@@ -412,7 +461,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             rf_hps,
             model,
             weights=None,
-            epoch=epoch,
+            cycle=epoch,
             step="joint" if self.mode == "joint" else "les",
         )
 
@@ -495,8 +544,15 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     covs,
                     normalization,
                     rf_hps,
-                    epoch=outer_it,  # , direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
+                    epoch=outer_it,
+                    # TODO consider if it make sense to discriminate between the first and the following iterations
+                    #direct_coeffs=coeffs if outer_it == 0 else None ## use direct_coeffs only for the first cycle, otherwise use residuals from previous LES head
                 )
+                if torch.any(torch.isnan(rf_weights)):
+                    logger.warning(
+                        f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
+                    )
+                    break
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(rf_hps, model, rf_weights, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
@@ -723,9 +779,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
-        x0: Tensor | None = None,
-        cg_maxiter: int = 50,
-        cg_tol: float = 1e-4,
         **weights,
     ) -> Tensor:
         target_weight = {}
@@ -742,10 +795,5 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        if self.solver == "cg":
-            solve_cov.diagonal().add_(l2_penalty)
-            return conjugate_gradient(
-                A=solve_cov, b=solve_coeff, x0=x0, max_iter=cg_maxiter, tol=cg_tol
-            )
-        else:
-            return psd_ridge(solve_cov, solve_coeff, l2_penalty)
+
+        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
