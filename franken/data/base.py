@@ -228,7 +228,6 @@ TARGET_UNITS = {
     STRESS_TARGET_KEY: "meV/Ang^3",
 }
 
-
 def is_target_key(s: str):
     return s in get_args(TargetType)
 
