@@ -67,11 +67,18 @@ class RandomFeaturesTrainer(BaseTrainer):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
             the ``evaluate()`` path on training data. Defaults to True.
+        save_cho_factor (bool):
+            Whether to include the best model's packed Cholesky factor in its checkpoint.
+            Covariances and coefficients are cached on CPU between fitting and best-model
+            serialization. Defaults to True.
 
     Note:
         The ``target_weight`` and ``l2_penalty`` can be used to specify a grid-search over
         solver parameters. Take into account that the size of this grid can become large if
         several target weights are specified.
+
+        When saving Cholesky factors, serialize the latest fitted model before the next fit.
+        Call ``_purge_covs_and_coeffs_cache()`` to abandon a pending fit instead.
     """
 
     def __init__(
@@ -87,11 +94,13 @@ class RandomFeaturesTrainer(BaseTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
+        save_cho_factor: bool = True,
     ):
         super().__init__(
             train_dataloader,
             log_dir=log_dir,
             save_every_model=save_every_model,
+            save_cho_factor=save_cho_factor,
             device=device,
             dtype=dtype,
         )
@@ -112,6 +121,12 @@ class RandomFeaturesTrainer(BaseTrainer):
         }
 
     def on_fit_start(self, model: FrankenPotential):
+        if self._covs_cache is not None or self._coeffs_cache is not None:
+            raise RuntimeError(
+                "The previous fit still has cached covariances and coefficients. "
+                "Serialize it or call _purge_covs_and_coeffs_cache() before fitting again."
+            )
+        model._cho_factor = None
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
@@ -139,8 +154,6 @@ class RandomFeaturesTrainer(BaseTrainer):
             tuple[LogCollection, torch.Tensor]:
                 The fitting logs, together with the learned weights.
         """
-        self._fit_system = None
-        model._cho_factor = None
         self.patch_e3nn()
 
         model = model.to(self.device)
@@ -208,8 +221,12 @@ class RandomFeaturesTrainer(BaseTrainer):
                 f"Solver failed in {num_failed.item()}/{solver_grid_size} cases."
             )
 
-        if self.log_dir is not None and dist_utils.get_rank() == 0:
-            self._fit_system = (model, model_hash, covs, coeffs)
+        if (
+            self.save_cho_factor
+            and self.log_dir is not None
+            and dist_utils.get_rank() == 0
+        ):
+            self._offload_covs_and_coeffs(covs, coeffs)
         return log_collection, all_weights
 
     def get_metrics(self) -> list[BaseMetric]:

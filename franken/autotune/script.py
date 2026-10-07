@@ -433,6 +433,7 @@ def autotune(cfg: AutotuneConfig):
             random_features_normalization=cfg.rf_normalization,
             save_every_model=cfg.save_every_model,
             dtype=torch.float64,
+            save_cho_factor=cfg.save_cho_factor,
             save_fmaps=cfg.save_fmaps,
             log_dir=run_dir,
             device=device,

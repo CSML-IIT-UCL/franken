@@ -26,7 +26,8 @@ from franken.utils.linalg.tri import (
     inplace_triangular_divide,
     pack_upper,
     triangular_lerp,
-    unpack_upper
+    unpack_symm,
+    unpack_upper,
 )
 from .conftest import (
     DEVICES,
@@ -379,11 +380,22 @@ def test_packed_upper(device, n):
     torch.testing.assert_close(unpack_upper(packed, n), torch.triu(matrix))
 
 
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("n", [0, 1, 5])
+def test_packed_symmetric(device, n):
+    matrix = torch.randn(n, n, device=device, dtype=torch.float64)
+    matrix = matrix + matrix.T
+    packed = pack_upper(matrix)
+    torch.testing.assert_close(unpack_symm(packed, n), matrix)
+
+
 def test_invalid_packed_upper():
     with pytest.raises(ValueError):
         pack_upper(torch.zeros(2, 3))
     with pytest.raises(ValueError):
         unpack_upper(torch.zeros(4), 2)
+    with pytest.raises(ValueError):
+        unpack_symm(torch.zeros(4), 2)
 
 
 @SKIP_NO_CUDA
