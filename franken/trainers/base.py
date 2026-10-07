@@ -52,6 +52,7 @@ class BaseTrainer(abc.ABC):
             )
         self.buffer_dt = dtype
         self.device = torch.device(device)
+        self._fit_system = None
 
     def psd_solve(
         self,
@@ -91,6 +92,20 @@ class BaseTrainer(abc.ABC):
         if return_cho_factor:
             return solution, pack_upper(L).detach()
         return solution
+
+    def _best_cho_factor(self, model: FrankenPotential, best_model: LogEntry):
+        """Repeat only the winning solve, capturing its packed factor."""
+        if self._fit_system is None:
+            return None  # Manual serialization without a preceding fit.
+        fitted_model, model_hash, covs, coeffs = self._fit_system
+        if model is not fitted_model or best_model.checkpoint_hash != model_hash:
+            raise ValueError("The selected model does not belong to the cached fit")
+        solver_hps = best_model.to_dict()["hyperparameters"]["solver"]
+        solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
+        _, factor = self.solve(
+            covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
+        )
+        return factor
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
@@ -200,28 +215,32 @@ class BaseTrainer(abc.ABC):
         best_model_selection: list[str],
         split: DataSplit = DataSplit.TRAIN,
     ) -> None:
-        assert self.log_dir is not None, "Log directory is not set"
-        log_collection = LogCollection.from_json(self.log_dir / "log.json")
-        best_model = log_collection.get_best_model(
-            split=split, metrics_to_minimize=best_model_selection
-        )
-
-        best_model_file = self.log_dir / "best.json"
-        should_save = True
-        if best_model_file.exists():
-            with open(best_model_file, "r") as f:
-                current_best = LogEntry.from_dict(json.load(f))
-            if best_model == current_best:
-                should_save = False
-
-        if should_save:
-            logger.debug(f"Identified new best model: {best_model}")
-            with open(best_model_file, "w") as f:
-                json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
-            weights = all_weights[best_model.checkpoint_rf_weight_id]
-            model.rf.weights = weights.reshape_as(model.rf.weights)
-            model.save(self.log_dir / "best_ckpt.pt")
-            logger.debug(
-                f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
-                f"to {self.log_dir / 'best_ckpt.pt'}"
+        try:
+            assert self.log_dir is not None, "Log directory is not set"
+            log_collection = LogCollection.from_json(self.log_dir / "log.json")
+            best_model = log_collection.get_best_model(
+                split=split, metrics_to_minimize=best_model_selection
             )
+
+            best_model_file = self.log_dir / "best.json"
+            should_save = True
+            if best_model_file.exists():
+                with open(best_model_file, "r") as f:
+                    current_best = LogEntry.from_dict(json.load(f))
+                if best_model == current_best:
+                    should_save = False
+
+            if should_save:
+                logger.debug(f"Identified new best model: {best_model}")
+                model._cho_factor = self._best_cho_factor(model, best_model)
+                weights = all_weights[best_model.checkpoint_rf_weight_id]
+                model.rf.weights = weights.reshape_as(model.rf.weights)
+                model.save(self.log_dir / "best_ckpt.pt")
+                with open(best_model_file, "w") as f:
+                    json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
+                logger.debug(
+                    f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
+                    f"to {self.log_dir / 'best_ckpt.pt'}"
+                )
+        finally:
+            self._fit_system = None

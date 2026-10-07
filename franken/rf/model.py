@@ -16,6 +16,7 @@ from franken.data.base import TargetType
 from franken.rf.atomic_energies import AtomicEnergiesShift
 from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
+from franken.utils.linalg.tri import unpack_upper
 from franken.utils.jac import jacfwd, tune_jacfwd_chunksize
 
 logger = logging.getLogger("franken")
@@ -90,6 +91,8 @@ class FrankenPotential(torch.nn.Module):
             num_species=num_species, atomic_energies=atomic_energies
         )
         self.force_func_grad = False
+        # Upper-triangular Cholesky factor, packed row by row, including the diagonal.
+        self.register_buffer("_cho_factor", None, persistent=False)
 
     @property
     @torch.jit.unused
@@ -101,17 +104,18 @@ class FrankenPotential(torch.nn.Module):
         }
         return hps
 
+    @torch.jit.unused
+    def get_cho_factor(self) -> torch.Tensor | None:
+        """Return the dense upper factor U, where A + penalty * I = U.T @ U."""
+        if self._cho_factor is None:
+            return None
+        return unpack_upper(self._cho_factor, self.rf.total_random_features)
+
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
         if multi_weights is not None:
             assert torch.is_tensor(multi_weights)
             assert multi_weights.ndim <= 2
             assert multi_weights.shape[-1] == self.rf.weights.shape[-1]
-
-        ckpt = {
-            "jac_chunk_size": self.jac_chunk_size,
-            "multi_weights": multi_weights,
-            "num_species": self.num_species,
-        }
 
         ckpt = {
             "jac_chunk_size": self.jac_chunk_size,
@@ -130,6 +134,8 @@ class FrankenPotential(torch.nn.Module):
                 "config": self.gnn_config.to_ckpt(),
             },
         }
+        if multi_weights is None and self._cho_factor is not None:
+            ckpt["_cho_factor"] = self._cho_factor
         torch.save(ckpt, path)
 
     @classmethod
@@ -159,6 +165,13 @@ class FrankenPotential(torch.nn.Module):
         model.rf.load_state_dict(ckpt["rf"]["state_dict"])
         model.input_scaler.load_state_dict(ckpt["input_scaler"]["state_dict"])
         model.energy_shift.load_state_dict(ckpt["energy_shift"])
+
+        factor = ckpt.get("_cho_factor")
+        if factor is not None and ckpt["multi_weights"] is None:
+            n = model.rf.total_random_features
+            if factor.ndim != 1 or factor.numel() != n * (n + 1) // 2:
+                raise ValueError("Checkpoint Cholesky factor has an invalid size")
+            model._cho_factor = factor
 
         if ckpt["multi_weights"] is not None:
             if rf_weight_id is None:
