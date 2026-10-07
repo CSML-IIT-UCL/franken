@@ -163,7 +163,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 hp_summary += f"{split.name}: {split_summary[:-2]} - "
         return hp_summary[:-2]
 
-    def _print_eval(self, model, epoch, step: Literal["rff", "les", "joint"]):
+    def _print_eval(self, model, cycle, step: Literal["rff", "les", "joint"]):
         logc = LogCollection([self.create_log_entry(model)])
         for split, loader in (
             (DataSplit.TRAIN, self.train_dataloader),
@@ -175,7 +175,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         if dist_utils.get_rank() == 0:
             summary = self.eval_summary(
                 log=logc[0],
-                epoch=epoch,
+                epoch=cycle,
                 splits=[DataSplit.TRAIN, DataSplit.VAL],
                 title=f"after {step.upper()}",
             )
@@ -184,19 +184,23 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         if dist_utils.get_rank() == 0:
             self.training_history.append(
                 {
-                    "cycle": epoch + 1,
+                    "cycle": cycle + 1,
                     "step": step,
                     "metrics": logc[0].to_dict()["metrics"],
                 }
             )
+
             if self.log_dir is not None:
                 self.log_dir.mkdir(parents=True, exist_ok=True)
+
                 history_path = self.log_dir / "training_history.json"
-                # Preserve completed stages even if a later training step fails.
                 temp_path = history_path.with_suffix(".json.tmp")
-                temp_path.write_text(json.dumps(self.training_history, indent=2))
+
+                temp_path.write_text(
+                    json.dumps(self.training_history, indent=2)
+                )
                 temp_path.replace(history_path)
-            print()
+
 
     def _get_relative_weights(
         self, hps: Mapping[TargetType, float]
@@ -378,7 +382,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
         self._print_eval(
             model,
-            epoch=epoch,
+            cycle=epoch,
             step="joint" if self.mode == "joint" else "les",
         )
 
@@ -452,7 +456,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
                     )
                     break
-
                 model.rf.weights = torch.nn.Parameter(rf_weights)
                 self._print_eval(model, outer_it, step="rff")
             # 2. Train LES on residuals from RFF training
