@@ -139,6 +139,8 @@ class RandomFeaturesTrainer(BaseTrainer):
             tuple[LogCollection, torch.Tensor]:
                 The fitting logs, together with the learned weights.
         """
+        self._fit_system = None
+        model._cho_factor = None
         self.patch_e3nn()
 
         model = model.to(self.device)
@@ -206,6 +208,8 @@ class RandomFeaturesTrainer(BaseTrainer):
                 f"Solver failed in {num_failed.item()}/{solver_grid_size} cases."
             )
 
+        if self.log_dir is not None and dist_utils.get_rank() == 0:
+            self._fit_system = (model, model_hash, covs, coeffs)
         return log_collection, all_weights
 
     def get_metrics(self) -> list[BaseMetric]:
