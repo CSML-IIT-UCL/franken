@@ -16,6 +16,7 @@ from franken.trainers.log_utils import (
     LogEntry,
     dtypeJSONEncoder,
 )
+from franken.utils.linalg.tri import pack_upper
 from franken.utils.misc import are_dicts_equal
 
 logger = logging.getLogger("franken")
@@ -51,6 +52,45 @@ class BaseTrainer(abc.ABC):
             )
         self.buffer_dt = dtype
         self.device = torch.device(device)
+
+    def psd_solve(
+        self,
+        cov: torch.Tensor,
+        rhs: torch.Tensor,
+        penalty: float,
+        return_cho_factor: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        r"""Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
+
+        Multiple right-hand sides are supported.
+        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
+        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
+        and :math:`\text{rhs} = X^{\top} y`.
+        Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
+
+        To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
+        may also be overwritten (depending on its memory layout).
+
+        Args:
+            cov (Tensor): covariance of the linear system
+            rhs (Tensor): right hand side (one or more) of the linear system
+            penalty (float): Tikhonov l2 penalty
+            return_cho_factor (bool): Also return the packed upper Cholesky factor.
+
+        Returns:
+            The ridge regression coefficients, or (coefficients, packed factor)
+            when return_cho_factor is True.
+        """
+        # Add diagonal without copies
+        cov.diagonal().add_(penalty)
+        # Solve with cholesky on GPU
+        L = torch.linalg.cholesky(cov, upper=True)
+        rhs_shape = rhs.shape
+        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True)
+        solution = solution.view(rhs_shape)
+        if return_cho_factor:
+            return solution, pack_upper(L).detach()
+        return solution
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:

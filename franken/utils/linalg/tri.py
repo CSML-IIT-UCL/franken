@@ -20,6 +20,25 @@ except ImportError:
     tl = mock_tl()
 
 
+def pack_upper(matrix: torch.Tensor) -> torch.Tensor:
+    """Pack a square matrix's upper triangle row by row, including the diagonal."""
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError(f"Expected a square matrix, found {matrix.shape}")
+    n = matrix.shape[0]
+    mask = torch.ones(n, n, dtype=torch.bool, device=matrix.device).triu_()
+    return matrix.masked_select(mask)
+
+
+def unpack_upper(packed: torch.Tensor, n: int) -> torch.Tensor:
+    """Reconstruct an upper-triangular matrix from row-wise packed values."""
+    if n < 0 or packed.ndim != 1 or packed.numel() != n * (n + 1) // 2:
+        raise ValueError(
+            "Packed upper triangle has an invalid size for n={n}. Found {packed.shape}"
+        )
+    mask = torch.ones(n, n, dtype=torch.bool, device=packed.device).triu_()
+    return packed.new_zeros((n, n)).masked_scatter_(mask, packed)
+
+
 def naive_lerp(
     start: torch.Tensor,
     end: torch.Tensor,
