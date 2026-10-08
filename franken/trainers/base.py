@@ -60,11 +60,12 @@ class BaseTrainer(abc.ABC):
         penalty: float,
         return_cho_factor: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
+        r"""Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
 
-        Multiple right-hand sides are supported. Instead of providing the data
-        matrix (commonly :math:`X` in ridge-regression notation), and labels (commonly :math:`y`),
-        we are given directly :math:`\text{cov} = X^T X` and :math:`\text{rhs} = X^T y`.
+        Multiple right-hand sides are supported.
+        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
+        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
+        and :math:`\text{rhs} = X^{\top} y`.
         Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
 
         To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
@@ -85,9 +86,8 @@ class BaseTrainer(abc.ABC):
         # Solve with cholesky on GPU
         L = torch.linalg.cholesky(cov, upper=True)
         rhs_shape = rhs.shape
-        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True).view(
-            rhs_shape
-        )
+        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True)
+        solution = solution.view(rhs_shape)
         if return_cho_factor:
             return solution, pack_upper(L).detach()
         return solution

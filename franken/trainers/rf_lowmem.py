@@ -81,9 +81,26 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         penalty: float,
         return_cho_factor: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Solve ridge regression with the low-memory CUDA solver when available.
+        r"""Solve ridge regression with the low-memory CUDA solver when available.
 
-        If return_cho_factor is True, return (coefficients, packed upper factor).
+        Multiple right-hand sides are supported.
+        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
+        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
+        and :math:`\text{rhs} = X^{\top} y`.
+        Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
+
+        To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
+        may also be overwritten (depending on its memory layout).
+
+        Args:
+            cov (Tensor): covariance of the linear system
+            rhs (Tensor): right hand side (one or more) of the linear system
+            penalty (float): Tikhonov l2 penalty
+            return_cho_factor (bool): Also return the packed upper Cholesky factor.
+
+        Returns:
+            The ridge regression coefficients, or (coefficients, packed factor)
+            when return_cho_factor is True.
         """
         if cupy is None or cov.device.type != "cuda":
             if cov.device.type == "cuda":
