@@ -9,20 +9,24 @@ from statistics import median
 from time import perf_counter
 
 import torch
+from torch.cpu import is_available
 
 from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer, cupy
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 
 
 def time_solver(solver, cov, rhs, warmup, repeats):
+    is_cuda = cov.device.type == "cuda"
     times = []
     for iteration in range(warmup + repeats):
         # Both solvers mutate their inputs; give each run fresh, identical data.
         solve_cov, solve_rhs = cov.clone(), rhs.clone()
-        torch.cuda.synchronize(cov.device)
+        if is_cuda:
+            torch.cuda.synchronize(cov.device)
         start = perf_counter()
         solution = solver(solve_cov, solve_rhs, 1e-3)
-        torch.cuda.synchronize(cov.device)
+        if is_cuda:
+            torch.cuda.synchronize(cov.device)
         elapsed = perf_counter() - start
         if iteration >= warmup:
             times.append(elapsed)
@@ -45,15 +49,20 @@ def main():
         parser.error("powers must satisfy 0 <= min-power <= max-power <= 14")
     if args.repeats < 1 or args.warmup < 0:
         parser.error("repeats must be positive and warmup nonnegative")
-    if not torch.cuda.is_available() or cupy is None:
-        parser.error("CUDA and CuPy are required to compare both solvers")
+    # if not torch.cuda.is_available() or cupy is None:
+    #     parser.error("CUDA and CuPy are required to compare both solvers")
 
-    if not 0 <= args.gpu < torch.cuda.device_count():
-        parser.error("gpu must be the index of a visible CUDA device")
-    device = torch.device(f"cuda:{args.gpu}")
+    if torch.cuda.is_available():
+        if not 0 <= args.gpu < torch.cuda.device_count():
+            parser.error("gpu must be the index of a visible CUDA device")
+        device = torch.device(f"cuda:{args.gpu}")
+        cupy.cuda.Device(args.gpu).use()
+        torch.cuda.set_device(device)
+        print(f"GPU: {torch.cuda.get_device_name(device)} ({device})", flush=True)
+    else:
+        device = torch.device("cpu")
+        print("CPU. Low-mem is equivalent to standard solver.", flush=True)
     # PyTorch and CuPy must select the same device, including cuSOLVER allocations.
-    torch.cuda.set_device(device)
-    cupy.cuda.Device(args.gpu).use()
     generator = torch.Generator(device=device).manual_seed(0)
     dtype = getattr(torch, args.dtype)
     trainer_args = dict(
@@ -66,7 +75,7 @@ def main():
     )
     naive = RandomFeaturesTrainer(**trainer_args).psd_solve
     lowmem = LowMemRandomFeaturesTrainer(**trainer_args).psd_solve
-    print(f"GPU: {torch.cuda.get_device_name(device)} ({device})", flush=True)
+    
     print(flush=True)
     print(
         f"{'Size':>8} {'Naive (ms)':>12} {'Lowmem (ms)':>13} {'Naive/Lowmem':>14}",
