@@ -10,6 +10,7 @@ from franken.data.base import (
     ENERGY_TARGET_KEY,
     FORCES_TARGET_KEY,
     STRESS_TARGET_KEY,
+    LES_CHARGES_TARGET_KEY,
 )
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
@@ -20,10 +21,10 @@ class FrankenCalculator(Calculator):
 
     Attributes:
         implemented_properties:
-            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress".
+            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress", "charges".
     """
 
-    implemented_properties = ["energy", "forces", "stress"]
+    implemented_properties = ["energy", "forces", "stress", "charges"]
     default_parameters = {}
     nolabel = True  # ??
 
@@ -110,20 +111,25 @@ class FrankenCalculator(Calculator):
             targets.append(FORCES_TARGET_KEY)
         if "stress" in properties:
             targets.append(STRESS_TARGET_KEY)
-        computed = self.franken(targets, data)
+        if "charges" in properties:
+            targets.append(LES_CHARGES_TARGET_KEY)        
+        results = self.franken(targets, data)
 
         self.results["energy"] = (
-            computed[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
+            results[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
         )
         if "forces" in properties:
             self.results["forces"] = (
-                computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
+                results[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
             )
         if "stress" in properties:
             self.results["stress"] = (
-                computed[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
+                results[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
             )
-
+        if "charges" in properties:
+            self.results["charges"] = (
+                results[LES_CHARGES_TARGET_KEY].squeeze(0).numpy(force=True)
+            )
 
 def calculator_throughput(
     calculator, atoms_list, num_repetitions=1, warmup_configs=5, verbose=True
