@@ -503,6 +503,7 @@ class FrankenPotential(torch.nn.Module):
         differential_mode: str = "torch.autograd",
         add_energy_shift: bool = True,
         compute_gp_uncertainty: bool = False,
+        energy_uncertainty_per_atom: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Infer energy, forces and other quantities for an atomic system with a learned RF model.
 
@@ -533,6 +534,10 @@ class FrankenPotential(torch.nn.Module):
                 Computes feature maps once for both predictions and uncertainty.
                 This path uses forward-mode feature Jacobians regardless of
                 ``differential_mode`` and is unavailable in TorchScript.
+            energy_uncertainty_per_atom: Also return posterior/prior ratios for
+                individual atomic energy contributions, before pooling. Requires
+                ``compute_gp_uncertainty=True`` and ``energy`` in ``targets``.
+                Adds a descriptor/feature forward pass, without another Jacobian.
 
         Returns:
             A dictionary mapping requested properties to the computed values.
@@ -545,6 +550,8 @@ class FrankenPotential(torch.nn.Module):
             saved factor's dtype and device. These dimensionless scores measure
             uncertainty relative to the prior and are not calibrated standard
             deviations or probabilities of prediction accuracy.
+            ``energy_uncertainty_per_atom=True`` adds an entry of that name shaped
+            ``[1, total_atoms]`` in input atom order.
             For predictions, forces have size `[num_models, num_systems * num_atoms_per_system, 3]`; stress tensors instead
             have size `[num_models, num_systems, 3, 3]` and energy tensors have size `[num_models, num_systems]`.
 
@@ -553,6 +560,14 @@ class FrankenPotential(torch.nn.Module):
             Use `"torch.autograd"` if the model has been processed by :code:`torch.jit.script`.
         """
         self._check_properties(properties)
+        if energy_uncertainty_per_atom and (
+            not compute_gp_uncertainty
+            or franken.data.base.ENERGY_KEY not in properties
+        ):
+            raise ValueError(
+                "energy_uncertainty_per_atom requires compute_gp_uncertainty=True "
+                "and energy in targets."
+            )
         if compute_gp_uncertainty:
             if torch.jit.is_scripting():
                 raise RuntimeError("GP uncertainty is unavailable in TorchScript.")
@@ -580,6 +595,21 @@ class FrankenPotential(torch.nn.Module):
                         for target, score in scores.items()
                     }
                 )
+                if energy_uncertainty_per_atom:
+                    with torch.no_grad():
+                        descriptors = self.gnn.descriptors(data)
+                        descriptors = self.input_scaler(
+                            descriptors, atomic_numbers=data.atomic_numbers
+                        )
+                        atomic_fmaps = self.rf.atomic_feature_map(
+                            descriptors,
+                        )
+                        atomic_scores = self._compute_gp_uncertainty_from_fmaps(
+                            {franken.data.base.ENERGY_KEY: atomic_fmaps.T}
+                        )
+                    out["energy_uncertainty_per_atom"] = atomic_scores[
+                        franken.data.base.ENERGY_KEY
+                    ]
                 return out
 
         natoms = torch.atleast_1d(data.natoms)

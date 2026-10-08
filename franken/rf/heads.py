@@ -2,6 +2,7 @@
 
 import dataclasses
 from math import ceil, sqrt
+from typing import Any
 
 import numpy as np
 import scipy as sp
@@ -48,6 +49,7 @@ class RandomFeaturesHead(torch.nn.Module):
         self,
         Z: torch.Tensor,
         batch_ids: torch.Tensor | None = None,
+        per_atom: bool = False,
     ) -> torch.Tensor:
         """Average atomic feature rows within each configuration.
 
@@ -65,7 +67,7 @@ class RandomFeaturesHead(torch.nn.Module):
         counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=Z.dtype)
         return out / counts.clamp_min(1).unsqueeze(-1)
 
-    def init_args(self):
+    def init_args(self) -> dict[str, Any]:
         """Return the arguments needed to re-initialize this class."""
         return {"num_random_features": self._num_random_features}
 
