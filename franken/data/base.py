@@ -216,16 +216,18 @@ class Configuration:
 #       dict[Enum, Any] do not work with torch jit. We
 #       use aliases of strings such that when scripting
 #       str can be used.
-TargetType = Literal["energy", "forces", "stress"]
+TargetType = Literal["energy", "forces", "stress", "les_charges"] #TODO probably we want to generalised with other LES output quantities e.g., latent dipoles
 """TargetType describes the range of possible targets for :class:`franken.rf.model.FrankenPotential`"""
 ENERGY_TARGET_KEY: TargetType = "energy"
 FORCES_TARGET_KEY: TargetType = "forces"
 STRESS_TARGET_KEY: TargetType = "stress"
+LES_CHARGES_TARGET_KEY: TargetType = "les_charges"
 
 TARGET_UNITS = {
     ENERGY_TARGET_KEY: "meV/atom",
     FORCES_TARGET_KEY: "meV/Ang",
     STRESS_TARGET_KEY: "meV/Ang^3",
+    LES_CHARGES_TARGET_KEY: "|e|", # absolute value elementary electron charge
 }
 
 def is_target_key(s: str):
@@ -249,6 +251,18 @@ class Target:
     energy: Tensor | None
     forces: Tensor | None
     stress: Tensor | None = None
+    les_charges: Tensor | None = None
+
+    def __post_init__(self):
+        if self.les_charges is not None:
+            assert self.les_charges.ndim >= 2, (
+                f"LES charges must have at least 2 dimensions, got "
+                f"{self.les_charges.shape}"
+            )
+            assert self.les_charges.shape[-1] == 1, (
+                f"LES charges must have shape (..., natoms, 1), got "
+                f"{self.les_charges.shape}"
+            )
 
     def __getitem__(self, key) -> Tensor:
         if not is_target_key(key):
@@ -259,6 +273,8 @@ class Target:
             val = self.forces
         elif key == STRESS_TARGET_KEY:
             val = self.stress
+        elif key == LES_CHARGES_TARGET_KEY:
+            val = self.les_charges
         else:
             raise KeyError(key)
         if val is None:
@@ -288,6 +304,11 @@ class Target:
                 if self.stress is not None
                 else None
             ),
+            les_charges=(
+                self.les_charges.to(device=device, dtype=dtype)
+                if self.les_charges is not None
+                else None
+            ),
         )
 
     def detach(self) -> "Target":
@@ -295,6 +316,7 @@ class Target:
             energy=self.energy.detach() if self.energy is not None else None,
             forces=self.forces.detach() if self.forces is not None else None,
             stress=self.stress.detach() if self.stress is not None else None,
+            les_charges=self.les_charges.detach() if self.les_charges is not None else None,
         )
 
     @staticmethod
@@ -303,6 +325,7 @@ class Target:
             energy=tt_dict.get(ENERGY_TARGET_KEY),
             forces=tt_dict.get(FORCES_TARGET_KEY),
             stress=tt_dict.get(STRESS_TARGET_KEY),
+            les_charges=tt_dict.get(LES_CHARGES_TARGET_KEY),
         )
 
     def iter_individual_systems(
@@ -313,7 +336,7 @@ class Target:
         else:
             sys_ids = data.batch_ids.unique()
             for i, sys_id in enumerate(sys_ids):
-                cfg_energy, cfg_forces, cfg_stress = None, None, None
+                cfg_energy, cfg_forces, cfg_stress, cfg_les_charges = None, None, None, None
                 if self.energy is not None:
                     cfg_energy = self.energy[..., i]
                 if self.forces is not None:
@@ -324,13 +347,16 @@ class Target:
                     cfg_stress = stress[:, i]
                     if not has_batch:
                         cfg_stress = cfg_stress.squeeze(0)
-                yield Target(cfg_energy, cfg_forces, cfg_stress)
+                if self.les_charges is not None:
+                    cfg_les_charges = self.les_charges[..., data.batch_ids == sys_id, :]
+                yield Target(cfg_energy, cfg_forces, cfg_stress, cfg_les_charges)
 
     @staticmethod
     def concatenate(targets: Sequence["Target"]):
         e_lst: list[Tensor] = []
         f_lst: list[Tensor] = []
         s_lst: list[Tensor] = []
+        c_lst: list[Tensor] = []
 
         energy_none = np.asarray([t.energy is None for t in targets])
         if not np.all(energy_none == energy_none[0]):
@@ -344,7 +370,11 @@ class Target:
         if not np.all(stress_none == stress_none[0]):
             raise ValueError("Stresses inconsistent")
 
-        e_has_batch, f_has_batch, s_has_batch = False, False, False
+        les_charges_none = np.asarray([t.les_charges is None for t in targets])
+        if not np.all(les_charges_none == les_charges_none[0]):
+            raise ValueError("LES charges inconsistent")
+
+        e_has_batch, f_has_batch, s_has_batch, c_has_batch = False, False, False, False
         for target in targets:
             if target.energy is not None:
                 e_lst.append(target.energy)
@@ -370,6 +400,14 @@ class Target:
                     )
                 if target.stress.ndim > 2:
                     s_has_batch = True
+            if target.les_charges is not None:
+                            c_lst.append(target.les_charges)
+                            if target.les_charges.ndim != c_lst[0].ndim:
+                                raise ValueError(
+                                    f"LES charges shapes inconsistent. Found {target.les_charges.ndim} and {c_lst[0].ndim} dimensions"
+                                )
+                            if target.les_charges.ndim > 2:
+                                c_has_batch = True
         return Target(
             energy=(
                 torch.cat(e_lst, 1 if e_has_batch else 0) if len(e_lst) > 0 else None
@@ -379,5 +417,8 @@ class Target:
             ),
             stress=(
                 torch.cat(s_lst, 1 if s_has_batch else 0) if len(s_lst) > 0 else None
+            ),
+            les_charges=(
+                torch.cat(c_lst, 1 if c_has_batch else 0) if len(c_lst) > 0 else None
             ),
         )
