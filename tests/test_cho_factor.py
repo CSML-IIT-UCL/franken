@@ -121,7 +121,9 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
                 assert model._cho_factor.shape == (10,)
                 factor = model.get_cho_factor()
                 torch.testing.assert_close(factor, factor.triu())
-                torch.testing.assert_close(factor.T @ factor, expected)
+                torch.testing.assert_close(
+                    factor.T @ factor, expected / hp["l2_penalty"]
+                )
             else:
                 assert model.get_cho_factor() is None
             torch.testing.assert_close(model.rf.weights, weights[1].reshape(1, -1))
@@ -249,3 +251,30 @@ def test_early_serialization_failure_purges_cache(tmp_path, failure_stage):
             trainer.serialize_logs(model, logs, torch.ones(1, 4), ["energy_MAE"])
     assert trainer._covs_cache is None
     assert trainer._coeffs_cache is None
+
+
+@pytest.mark.parametrize("penalty", [0.0, -1.0, float("inf"), float("nan")])
+def test_prior_normalized_factor_requires_positive_ridge(penalty):
+    trainer = RandomFeaturesTrainer(
+        train_dataloader=None,
+        training_targets=["energy"],
+        l2_penalty=penalty,
+        target_weight={},
+        device="cpu",
+    )
+    trainer._offload_covs_and_coeffs(
+        {"energy": torch.eye(4)}, {"energy": torch.ones(4)}
+    )
+    winner = LogEntry(
+        "trial",
+        0,
+        0.0,
+        0.0,
+        hyperparameters=[
+            HyperParameterGroup.from_dict("solver", {"l2_penalty": penalty})
+        ],
+    )
+    with patch.object(trainer, "solve") as solve:
+        with pytest.raises(ValueError, match="finite positive l2_penalty"):
+            trainer._best_cho_factor(Mock(), winner)
+        solve.assert_not_called()

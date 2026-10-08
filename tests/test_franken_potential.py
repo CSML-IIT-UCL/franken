@@ -15,6 +15,7 @@ from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGE
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
+from franken.utils.linalg.tri import pack_upper
 from franken.datasets.registry import DATASET_REGISTRY
 
 from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
@@ -587,6 +588,158 @@ class TestEnergyShift:
                                        msg=f"Batched (func) equality failed on target {tt}")
 
 
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("targets", [["energy"], ["forces"], ["energy", "forces"]])
+def test_gp_uncertainty_batched(device, dtype, targets):
+    with mocked_gnn(device, torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+            jac_chunk_size=2,
+        ).to(device)
+    a = torch.randn(8, 8, device=device, dtype=dtype)
+    penalty = 0.3
+    system = a @ a.T + torch.eye(8, device=device, dtype=dtype) * penalty
+    model._cho_factor = pack_upper(
+        torch.linalg.cholesky(system, upper=True) / penalty**0.5
+    )
+    configs = [random_cfg(n, torch.float32, device) for n in [3, 5]]
+    batch = Configuration.concatenate(configs)
+
+    with patch.object(
+        model, "grad_feature_map", wraps=model.grad_feature_map
+    ) as compute_maps:
+        out = model.predict(targets, batch, compute_gp_uncertainty=True)
+        compute_maps.assert_called_once()
+    scores = {target: out[f"{target}_gp_uncertainty"] for target in targets}
+    assert set(out) == set(targets) | {f"{target}_gp_uncertainty" for target in targets}
+    predictions = model.predict(targets, batch, differential_mode="torch.func")
+    for target in targets:
+        torch.testing.assert_close(
+            out[target], predictions[target], rtol=2e-5, atol=1e-6
+        )
+    fmaps = model.grad_feature_map(batch, targets)
+    for target in targets:
+        # Reference quadratic form uses a full linear solve, independent of the
+        # triangular whitening used by the implementation.
+        features = fmaps[target].to(system)
+        variance = (features * torch.linalg.solve(system, features)).sum(0)
+        ratio = (penalty * variance).sqrt() / features.norm(dim=0)
+        if target == "energy":
+            expected = ratio[None, :]
+            assert scores[target].shape == (1, 2)
+        else:
+            expected = ratio.reshape(1, -1, 3)
+            assert scores[target].shape == (1, 8, 3)
+        torch.testing.assert_close(scores[target], expected)
+        assert ((scores[target] >= 0) & (scores[target] <= 1)).all()
+        assert scores[target].dtype == dtype
+        assert not scores[target].requires_grad
+
+    separate = [
+        model.predict(targets, config, compute_gp_uncertainty=True)
+        for config in configs
+    ]
+    for target in targets:
+        torch.testing.assert_close(
+            scores[target],
+            torch.cat(
+                [result[f"{target}_gp_uncertainty"] for result in separate], dim=1
+            ),
+            rtol=2e-5,
+            atol=1e-6,
+        )
+
+
+def test_gp_uncertainty_energy_skips_force_jacobian():
+    with mocked_gnn("cpu", torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+        )
+    model._cho_factor = pack_upper(torch.eye(8))
+    config = random_cfg(3, torch.float32, "cpu")
+    with patch.object(
+        model, "_compute_forces", side_effect=AssertionError("unexpected Jacobian")
+    ):
+        scores = model.predict(["energy"], config, compute_gp_uncertainty=True)
+    # With no training covariance, posterior equals prior.
+    torch.testing.assert_close(scores["energy_gp_uncertainty"], torch.ones(1, 1))
+
+
+def test_gp_uncertainty_missing_factor_and_unsupported_target():
+    with mocked_gnn("cpu", torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
+        )
+    config = random_cfg(3, torch.float32, "cpu")
+    with patch.object(model, "grad_feature_map") as fmaps:
+        with pytest.raises(RuntimeError, match="saved Cholesky factor"):
+            model.predict(["energy", "forces"], config, compute_gp_uncertainty=True)
+        with pytest.raises(
+            ValueError, match="Unsupported GP uncertainty target: stress"
+        ):
+            model.predict(["stress"], config, compute_gp_uncertainty=True)
+        assert model.predict([], config, compute_gp_uncertainty=True) == {}
+        fmaps.assert_not_called()
+
+
+def test_gp_uncertainty_energy_shift_and_weights():
+    with mocked_gnn("cpu", torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+        )
+    model._cho_factor = pack_upper(torch.eye(8))
+    config = random_cfg(3, torch.float32, "cpu")
+    model.energy_shift.set_from_atomic_energies({int(config.atomic_numbers[0]): 2.0})
+    weights = torch.randn(2, 8)
+    plain = model.predict(["energy"], config, weights, add_energy_shift=False)
+    unshifted = model.predict(
+        ["energy"], config, weights, add_energy_shift=False, compute_gp_uncertainty=True
+    )
+    shifted = model.predict(["energy"], config, weights, compute_gp_uncertainty=True)
+    torch.testing.assert_close(unshifted["energy"], plain["energy"])
+    torch.testing.assert_close(
+        shifted["energy"],
+        unshifted["energy"] + model.energy_shift(config.atomic_numbers),
+    )
+    torch.testing.assert_close(
+        shifted["energy_gp_uncertainty"], unshifted["energy_gp_uncertainty"]
+    )
+    assert shifted["energy"].shape == (2, 1)
+    assert shifted["energy_gp_uncertainty"].shape == (1, 1)
+
+
+def test_gp_uncertainty_prior_ratio_limits_and_zero_features():
+    with mocked_gnn("cpu", torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=4, length_scale=1.0),
+            scale_by_Z=False,
+        )
+    # G/lambda has eigenvalues 0, 3, 8, 99, so posterior/prior standard
+    # deviations along those directions are 1, 1/2, 1/3, 1/10.
+    model._cho_factor = pack_upper(torch.diag(torch.tensor([1.0, 2.0, 3.0, 10.0])))
+    config = random_cfg(2, torch.float32, "cpu")
+    fmaps = {
+        "energy": torch.tensor([[0.0], [1.0], [0.0], [0.0]]),
+        "forces": torch.cat([torch.eye(4), torch.zeros(4, 2)], dim=1),
+    }
+    with patch.object(model, "grad_feature_map", return_value=fmaps):
+        out = model.predict(["energy", "forces"], config, compute_gp_uncertainty=True)
+    torch.testing.assert_close(out["energy_gp_uncertainty"], torch.tensor([[0.5]]))
+    torch.testing.assert_close(
+        out["forces_gp_uncertainty"],
+        torch.tensor([1.0, 0.5, 1.0 / 3.0, 0.1, 0.0, 0.0]).reshape(1, 2, 3),
+    )
+
+
 class TestStatistics:
     def test_online_algo(self):
         dim = 128
@@ -629,4 +782,3 @@ class TestStatistics:
         torch.testing.assert_close(
             st.statistics[5]["std"], atom5_std.double(), rtol=1e-2, atol=1e-2
         )
-

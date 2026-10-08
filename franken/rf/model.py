@@ -91,7 +91,8 @@ class FrankenPotential(torch.nn.Module):
             num_species=num_species, atomic_energies=atomic_energies
         )
         self.force_func_grad = False
-        # Upper-triangular Cholesky factor, packed row by row, including the diagonal.
+        # Upper-triangular Cholesky factor, packed including the diagonal.
+        # Stored as U / sqrt(lambda) for posterior/prior uncertainty ratios.
         self.register_buffer("_cho_factor", None, persistent=False)
 
     @property
@@ -106,7 +107,7 @@ class FrankenPotential(torch.nn.Module):
 
     @torch.jit.unused
     def get_cho_factor(self) -> torch.Tensor | None:
-        """Return the dense upper factor U, where A + penalty * I = U.T @ U."""
+        """Return the dense upper factor V = U / sqrt(lambda), with V.T @ V = I + G / lambda."""
         if self._cho_factor is None:
             return None
         return unpack_upper(self._cho_factor, self.rf.total_random_features)
@@ -401,6 +402,38 @@ class FrankenPotential(torch.nn.Module):
             out[franken.data.base.STRESS_TARGET_KEY] = out_s.reshape(out_s.shape[0], -1)
         return out
 
+    @torch.jit.unused
+    @torch.no_grad()
+    def _compute_gp_uncertainty_from_fmaps(
+        self,
+        fmaps: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        r"""Return posterior/prior standard-deviation ratios in [0, 1].
+
+        For the saved factor V = U / sqrt(lambda), the ratio is
+        ``||V^{-T} phi|| / ||phi||``. Energy and force components use their
+        respective feature vectors; atom-count scaling cancels in the ratio.
+        Zero feature vectors contribute no uncertainty and return zero.
+        These dimensionless ratios describe how strongly training constrains
+        each feature direction, not probabilities of prediction accuracy.
+        """
+        factor = self.get_cho_factor()
+        assert factor is not None
+        out: dict[str, torch.Tensor] = {}
+        for target, fmap in fmaps.items():
+            features = fmap.to(factor)
+            whitened = torch.linalg.solve_triangular(factor.T, features, upper=False)
+            posterior = torch.linalg.vector_norm(whitened, dim=0)
+            prior = torch.linalg.vector_norm(features, dim=0)
+            # Avoid 0/0 for zero feature vectors; clamp roundoff at the theoretical bound.
+            denominator = torch.where(prior > 0, prior, torch.ones_like(prior))
+            scores = (posterior / denominator).clamp(0, 1)
+            if target == franken.data.base.ENERGY_TARGET_KEY:
+                out[target] = scores[None, :]
+            else:
+                out[target] = scores.reshape(1, -1, 3)
+        return out
+
     def _energy_aux(
         self,
         atom_pos: torch.Tensor,
@@ -481,6 +514,7 @@ class FrankenPotential(torch.nn.Module):
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",
         add_energy_shift: bool = True,
+        compute_gp_uncertainty: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Infer energy, forces and other quantities for an atomic system with a learned RF model.
 
@@ -504,19 +538,60 @@ class FrankenPotential(torch.nn.Module):
                 the weights set in :attr:`FrankenPotential.rf` will be used instead.
             differential_mode: how to compute the model's differential quantites. Defaults to :code:`"torch.autograd"`.
             add_energy_shift: whether to add the energy shift to the energy.
+            compute_gp_uncertainty: Include posterior/prior standard-deviation
+                ratios in [0, 1] for energy and/or forces, using a saved
+                prior-normalized training Cholesky factor.
+                Computes feature maps once for both predictions and uncertainty.
+                This path uses forward-mode feature Jacobians regardless of
+                ``differential_mode`` and is unavailable in TorchScript.
 
         Returns:
             A dictionary mapping requested targets to the computed values.
             Each requested target has a first dimension which depends on the number of models present
             in the current weights. The second dimension depends on the number of separate systems present
-            in the data. Further dimensions depend on the specific target. For example,
-            forces have size `[num_models, num_systems * num_atoms_per_system, 3]`; stress tensors instead
+            in the data. Further dimensions depend on the specific target.
+            With ``compute_gp_uncertainty=True``, additional keys
+            ``energy_gp_uncertainty`` and/or ``forces_gp_uncertainty`` contain
+            scores shaped ``[1, num_systems]`` and ``[1, total_atoms, 3]`` in the
+            saved factor's dtype and device. These dimensionless scores measure
+            uncertainty relative to the prior and are not calibrated standard
+            deviations or probabilities of prediction accuracy.
+            For predictions, forces have size `[num_models, num_systems * num_atoms_per_system, 3]`; stress tensors instead
             have size `[num_models, num_systems, 3, 3]` and energy tensors have size `[num_models, num_systems]`.
 
         Note:
             The `"torch.func"` strategy for differentiation is not supported for torch-jitted models.
             Use `"torch.autograd"` if the model has been processed by :code:`torch.jit.script`.
         """
+        if compute_gp_uncertainty:
+            if torch.jit.is_scripting():
+                raise RuntimeError("GP uncertainty is unavailable in TorchScript.")
+            else:
+                for target in targets:
+                    if target not in (
+                        franken.data.base.ENERGY_TARGET_KEY,
+                        franken.data.base.FORCES_TARGET_KEY,
+                    ):
+                        raise ValueError(f"Unsupported GP uncertainty target: {target}")
+                if not targets:
+                    return {}
+                if self._cho_factor is None:
+                    raise RuntimeError(
+                        "GP uncertainty requires a saved Cholesky factor. "
+                        "Train with save_cho_factor=True and load the best-model checkpoint."
+                    )
+                fmaps = self.grad_feature_map(data, targets)
+                fmaps = {target: fmaps[target] for target in targets}
+                out = self.predict_from_fmaps(data, fmaps, weights, add_energy_shift)
+                scores = self._compute_gp_uncertainty_from_fmaps(fmaps)
+                out.update(
+                    {
+                        f"{target}_gp_uncertainty": score
+                        for target, score in scores.items()
+                    }
+                )
+                return out
+
         natoms = torch.atleast_1d(data.natoms)
         out = self._predict(weights, data, targets, differential_mode)
 
