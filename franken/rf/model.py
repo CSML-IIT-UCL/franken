@@ -140,7 +140,7 @@ class FrankenPotential(torch.nn.Module):
         if cls is FrankenPotential and "les" in ckpt:
             # Import lazily: LESFrankenPotential inherits from this class.
             from franken.rf.les_model import LESFrankenPotential
-
+            print("Loading of the checkpoint as a LESFrankenPotential model !")
             cls = LESFrankenPotential
         return cls._from_checkpoint(
             ckpt,
