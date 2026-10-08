@@ -16,7 +16,7 @@ from franken.trainers.log_utils import (
     LogEntry,
     dtypeJSONEncoder,
 )
-from franken.utils.linalg.tri import pack_upper
+from franken.utils.linalg.tri import pack_upper, unpack_symm
 from franken.utils.misc import are_dicts_equal
 
 logger = logging.getLogger("franken")
@@ -32,9 +32,11 @@ class BaseTrainer(abc.ABC):
         save_every_model: bool = True,
         device: Union[torch.device, str, int] = "cpu",
         dtype: Union[str, torch.dtype] = torch.float32,
+        save_cho_factor: bool = True,
     ):
         self.log_dir = log_dir
         self.save_every_model = save_every_model
+        self.save_cho_factor = save_cho_factor
         self.train_dataloader = train_dataloader
         self.statistics_ = None
         if isinstance(dtype, str):
@@ -52,6 +54,38 @@ class BaseTrainer(abc.ABC):
             )
         self.buffer_dt = dtype
         self.device = torch.device(device)
+        self._covs_cache = None
+        self._coeffs_cache = None
+
+    def _offload_covs_and_coeffs(self, covs, coeffs):
+        """Cache packed covariances and coefficients on CPU until serialization."""
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: pack_upper(cov.detach().to("cpu"))
+                for target, cov in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
+        )
+
+    def _restore_covs_and_coeffs(self, n_features: int):
+        """Restore the latest fit's system on the trainer device for the winning solve."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        return (
+            {
+                target: unpack_symm(packed, n_features).to(self.device)
+                for target, packed in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
+
+    def _purge_covs_and_coeffs_cache(self):
+        """Release cached systems after serialization or when abandoning a fit."""
+        self._covs_cache = None
+        self._coeffs_cache = None
 
     def psd_solve(
         self,
@@ -91,6 +125,20 @@ class BaseTrainer(abc.ABC):
         if return_cho_factor:
             return solution, pack_upper(L).detach()
         return solution
+
+    def _best_cho_factor(self, model: FrankenPotential, best_model: LogEntry):
+        """Repeat the winning solve for the latest fitted model, capturing its packed factor."""
+        if not self.save_cho_factor:
+            return None
+        if self._covs_cache is None and self._coeffs_cache is None:
+            return None  # Manual serialization without a preceding fit.
+        solver_hps = best_model.to_dict()["hyperparameters"]["solver"]
+        solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
+        covs, coeffs = self._restore_covs_and_coeffs(model.rf.total_random_features)
+        _, factor = self.solve(
+            covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
+        )
+        return factor
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
@@ -170,28 +218,32 @@ class BaseTrainer(abc.ABC):
         best_model_selection: list[str],
         best_model_split: DataSplit = DataSplit.TRAIN,
     ):
-        assert self.log_dir is not None, "Log directory is not set"
-        model_hash_set = set(log.checkpoint_hash for log in log_collection)
-        assert len(model_hash_set) == 1
-        model_hash = model_hash_set.pop()
-        log_collection.save_json(self.log_dir / "log.json")
+        """Serialize the latest fitted model and release its cached system, even on failure."""
+        try:
+            assert self.log_dir is not None, "Log directory is not set"
+            model_hash_set = set(log.checkpoint_hash for log in log_collection)
+            assert len(model_hash_set) == 1
+            model_hash = model_hash_set.pop()
+            log_collection.save_json(self.log_dir / "log.json")
 
-        # Save the model checkpoint
-        if self.save_every_model:
-            ckpt_dir = self.log_dir / "checkpoints"
-            ckpt_dir.mkdir(parents=True, exist_ok=True)
-            model_save_path = ckpt_dir / f"{model_hash}.pt"
-            model.save(model_save_path, multi_weights=all_weights)
-            logger.debug(
-                f"Saved multiple models (hash={model_hash}) " f"to {model_save_path}"
+            # Save the model checkpoint
+            if self.save_every_model:
+                ckpt_dir = self.log_dir / "checkpoints"
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                model_save_path = ckpt_dir / f"{model_hash}.pt"
+                model.save(model_save_path, multi_weights=all_weights)
+                logger.debug(
+                    f"Saved multiple models (hash={model_hash}) to {model_save_path}"
+                )
+            # Log the best model
+            self.serialize_best_model(
+                model,
+                all_weights,
+                split=best_model_split,
+                best_model_selection=best_model_selection,
             )
-        # Log the best model
-        self.serialize_best_model(
-            model,
-            all_weights,
-            split=best_model_split,
-            best_model_selection=best_model_selection,
-        )
+        finally:
+            self._purge_covs_and_coeffs_cache()
 
     def serialize_best_model(
         self,
@@ -200,28 +252,33 @@ class BaseTrainer(abc.ABC):
         best_model_selection: list[str],
         split: DataSplit = DataSplit.TRAIN,
     ) -> None:
-        assert self.log_dir is not None, "Log directory is not set"
-        log_collection = LogCollection.from_json(self.log_dir / "log.json")
-        best_model = log_collection.get_best_model(
-            split=split, metrics_to_minimize=best_model_selection
-        )
-
-        best_model_file = self.log_dir / "best.json"
-        should_save = True
-        if best_model_file.exists():
-            with open(best_model_file, "r") as f:
-                current_best = LogEntry.from_dict(json.load(f))
-            if best_model == current_best:
-                should_save = False
-
-        if should_save:
-            logger.debug(f"Identified new best model: {best_model}")
-            with open(best_model_file, "w") as f:
-                json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
-            weights = all_weights[best_model.checkpoint_rf_weight_id]
-            model.rf.weights = weights.reshape_as(model.rf.weights)
-            model.save(self.log_dir / "best_ckpt.pt")
-            logger.debug(
-                f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
-                f"to {self.log_dir / 'best_ckpt.pt'}"
+        """Save the best checkpoint using the latest fit's system, then release the cache."""
+        try:
+            assert self.log_dir is not None, "Log directory is not set"
+            log_collection = LogCollection.from_json(self.log_dir / "log.json")
+            best_model = log_collection.get_best_model(
+                split=split, metrics_to_minimize=best_model_selection
             )
+
+            best_model_file = self.log_dir / "best.json"
+            should_save = True
+            if best_model_file.exists():
+                with open(best_model_file, "r") as f:
+                    current_best = LogEntry.from_dict(json.load(f))
+                if best_model == current_best:
+                    should_save = False
+
+            if should_save:
+                logger.debug(f"Identified new best model: {best_model}")
+                model._cho_factor = self._best_cho_factor(model, best_model)
+                weights = all_weights[best_model.checkpoint_rf_weight_id]
+                model.rf.weights = weights.reshape_as(model.rf.weights)
+                model.save(self.log_dir / "best_ckpt.pt")
+                with open(best_model_file, "w") as f:
+                    json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
+                logger.debug(
+                    f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
+                    f"to {self.log_dir / 'best_ckpt.pt'}"
+                )
+        finally:
+            self._purge_covs_and_coeffs_cache()

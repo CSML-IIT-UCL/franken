@@ -189,7 +189,6 @@ class BackboneConfig(ABC):
             "MACE-OFF-small": "mace_off/small",
             "MACE-OFF-medium": "mace_off/medium",
             "MACE-OFF-large": "mace_off/large",
-            "SevenNet0": "SevenNet0/11July2024",
         }
 
         new_path_or_id = _deprecated_path_ids.get(self.path_or_id)
@@ -208,8 +207,6 @@ class BackboneConfig(ABC):
     def from_ckpt(ckpt: dict):
         if ckpt["family"].lower() == "mace":
             cls = MaceBackboneConfig
-        elif ckpt["family"].lower() == "sevenn":
-            cls = SevennBackboneConfig
         elif ckpt["family"].lower() == "pet":
             cls = PETBackboneConfig
         else:
@@ -224,19 +221,6 @@ class MaceBackboneConfig(BackboneConfig):
     family: ClassVar[str] = "mace"
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
-
-
-@dataclass(slots=True)
-class SevennBackboneConfig(BackboneConfig):
-    family: ClassVar[str] = "sevenn"
-    interaction_block: int = 2
-    """GNN layer out of which the features are extracted."""
-
-    extract_after_act: bool = True
-    """Whether features should be extracted before or after activations."""
-
-    append_layers: bool = True
-    """Whether to take only the features from the last interaction layer, or to concatenate them all."""
 
 
 @dataclass(slots=True)
@@ -295,10 +279,10 @@ class MultiscaleGaussianRFConfig(RFConfig):
     length_scale_low: float = 4
     """Bottom of the range for the length-scale. Should be positive."""
 
-    length_scale_high: float = 20
+    length_scale_high: float = 32
     """Top of the range for the length-scale. Should be positive."""
 
-    length_scale_num: int = 6
+    length_scale_num: int = 5
     """Number of different length-scales to include within the specified range."""
 
     use_offset: bool = True
@@ -319,12 +303,12 @@ class SolverConfig:
     """Controls the weight of the energy loss term. Weights are normalized to sum to 1."""
 
     force_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=7, scale="log")
     )
     """Controls the weight of the force loss term. Weights are normalized to sum to 1."""
 
     stress_weight: HPSearchConfig | list[float] | float = field(
-        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=10, scale="log")
+        default_factory=lambda: HPSearchConfig(start=-2, stop=4, num=7, scale="log")
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
@@ -417,3 +401,6 @@ class AutotuneConfig:
         default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
     )
     """Which data labels to train Franken with."""
+
+    save_cho_factor: bool = True
+    """Whether to save the best model's packed Cholesky factor in its checkpoint."""

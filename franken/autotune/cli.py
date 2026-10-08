@@ -10,7 +10,6 @@ from franken.config import (
     AutotuneConfig,
     MaceBackboneConfig,
     PETBackboneConfig,
-    SevennBackboneConfig,
     GaussianRFConfig,
     MultiscaleGaussianRFConfig,
     SolverConfig,
@@ -410,32 +409,6 @@ def get_arg_groups():
                     ),
                 ],
             ),
-            MutuallyExclusiveArgumentGroup(
-                "sevenn",
-                title="SevenNet backbone",
-                desc="Configure the MACE backbone. Specify ``--backbone=sevenn`` to enable.",
-                data_class=SevennBackboneConfig,
-                arguments=[
-                    Argument.from_dataclass(
-                        SevennBackboneConfig, "path_or_id", "path-or-id"
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig, "interaction_block", "interaction-block"
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig,
-                        "extract_after_act",
-                        "extract-after-act",
-                        "extract-before-act",
-                    ),
-                    Argument.from_dataclass(
-                        SevennBackboneConfig,
-                        "append_layers",
-                        "append-layers",
-                        "last-layer-only",
-                    ),
-                ],
-            ),
         ],
         help_text="The GNN backbone which will be used by franken.",
     )
@@ -527,6 +500,13 @@ def build_parser(return_groups: bool = False):
         "--save-every-model",
         action="store_true",
         help=get_field_docstring(AutotuneConfig, "save_every_model"),
+    )
+    parser.add_argument(
+        "--no-save-cho-factor",
+        dest="save_cho_factor",
+        action="store_false",
+        default=True,
+        help="Do not save the best model's Cholesky factor in its checkpoint.",
     )
     parser.add_argument(
         "--dtype",
@@ -637,6 +617,7 @@ def parse_cli(argv):
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
+        save_cho_factor=args.save_cho_factor,
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
         metrics=args.metrics,

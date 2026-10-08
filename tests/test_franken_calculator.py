@@ -63,6 +63,8 @@ GNN_CONFIGS = [
     ),
 ]
 
+# Energy baselines use the explicit RF configuration below so changing production
+# defaults does not change the potential used in these regression tests.
 EXPECTED_ENERGIES = {
     "mace_mp/small": -0.614428,
     "PET_MAD/xs_1.5": -1.19013,
@@ -118,7 +120,12 @@ def init_langevin_md(calc):
 def test_calculator_in_md(device, gnn_cfg):
     np.random.seed(1)
     torch.manual_seed(1)
-    rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
+    rf_cfg = MultiscaleGaussianRFConfig(
+        num_random_features=128,
+        length_scale_low=4,
+        length_scale_high=20,
+        length_scale_num=6,
+    )
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
@@ -138,7 +145,12 @@ def test_calculator_in_md(device, gnn_cfg):
 def test_calculator_in_npt_md(device, gnn_cfg):
     np.random.seed(1)
     torch.manual_seed(1)
-    rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
+    rf_cfg = MultiscaleGaussianRFConfig(
+        num_random_features=128,
+        length_scale_low=4,
+        length_scale_high=20,
+        length_scale_num=6,
+    )
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
@@ -160,7 +172,12 @@ def test_calculator_jitscript(device, gnn_cfg):
     unpatch_e3nn()
     np.random.seed(1)
     torch.manual_seed(1)
-    rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
+    rf_cfg = MultiscaleGaussianRFConfig(
+        num_random_features=128,
+        length_scale_low=4,
+        length_scale_high=20,
+        length_scale_num=6,
+    )
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
@@ -189,7 +206,12 @@ def test_calculator_compile(device, gnn_cfg):
         pytest.skip(reason="torch.compile segfault for the `get_adaptive_cutoffs_grid` function")
     np.random.seed(1)
     torch.manual_seed(1)
-    rf_cfg = MultiscaleGaussianRFConfig(num_random_features=128)
+    rf_cfg = MultiscaleGaussianRFConfig(
+        num_random_features=128,
+        length_scale_low=4,
+        length_scale_high=20,
+        length_scale_num=6,
+    )
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD

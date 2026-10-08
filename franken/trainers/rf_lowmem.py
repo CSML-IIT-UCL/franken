@@ -16,7 +16,7 @@ from franken.utils.linalg.cov import (
     rank1_update,
     rankk_update,
 )
-from franken.utils.linalg.tri import pack_upper, triangular_lerp
+from franken.utils.linalg.tri import pack_upper, triangular_lerp, unpack_upper
 from franken.utils.misc import no_jit, throughput
 
 try:
@@ -53,6 +53,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
+        save_cho_factor: bool = True,
     ):
         if len(training_targets) != 2:
             raise ValueError(
@@ -72,6 +73,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             dtype=dtype,
             save_fmaps=save_fmaps,
             metrics=metrics,
+            save_cho_factor=save_cho_factor,
         )
 
     def psd_solve(
@@ -204,6 +206,38 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             return solution, pack_upper(cov.T if transpose else cov).detach()
         return solution
 
+    def _offload_covs_and_coeffs(self, covs, coeffs):
+        """Cache both covariance triangles, their diagonals, and coefficients on CPU."""
+        covariance = next(iter(covs.values()))[0].detach().to("cpu")
+        packed_upper = pack_upper(covariance)
+        packed_lower = pack_upper(covariance.T)
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: (packed_upper, packed_lower, diagonal.detach().to("cpu"), upper)
+                for target, (_, diagonal, upper) in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
+        )
+
+    def _restore_covs_and_coeffs(self, n_features: int):
+        """Restore the shared covariance layout and coefficients on the trainer device."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        packed_upper, packed_lower, _, _ = next(iter(self._covs_cache.values()))
+        covariance = unpack_upper(packed_upper, n_features).to(self.device)
+        covariance.add_(unpack_upper(packed_lower, n_features).T.to(self.device))
+        covariance.diagonal().zero_()
+        return (
+            {
+                target: (covariance, diagonal.to(self.device), upper)
+                for target, (_, _, diagonal, upper) in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
+
     @no_jit()
     @torch.no_grad()
     def _covs_and_coeffs(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -329,7 +363,6 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             and coeff_upper is not None
             and coeff_lower is not None
         )
-        print(f"{target_weight=} {weight_lower=}")
 
         # This is the 2nd copy of the covariance matrix that we need to store.
         lerped_cov, lerped_diag = triangular_lerp(
