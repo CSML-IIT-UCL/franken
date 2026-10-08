@@ -10,6 +10,8 @@ try:
 except ImportError:
     cupy_available = False
 
+from franken.trainers.base import BaseTrainer
+from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer
 from franken.utils.linalg.cov import (
     _lowmemcov_rank1_update,
     _lowmemcov_rankk_update,
@@ -18,16 +20,14 @@ from franken.utils.linalg.cov import (
     rank1_update,
     rankk_update
 )
-from franken.utils.linalg.psdsolve import (
-    _lowmem_psd_ridge,
-    _naive_psd_ridge,
-    psd_ridge
-)
 from franken.utils.linalg.tri import (
     _trilerp_cpu,
     _trilerp_triton,
     inplace_triangular_divide,
-    triangular_lerp
+    pack_upper,
+    triangular_lerp,
+    unpack_symm,
+    unpack_upper,
 )
 from .conftest import (
     DEVICES,
@@ -228,6 +228,12 @@ class TestCovUpdates:
 
 
 class TestPSDSolvers:
+    def trainer(self):
+        return LowMemRandomFeaturesTrainer(
+            train_dataloader=None, l2_penalty=1e-5,
+            training_targets=["energy", "forces"], target_weight={}, device="cpu",
+        )
+
     mat_size = 5  # needs to be small otherwise too much numerical error
 
     def A(self, device, dtype):
@@ -248,16 +254,22 @@ class TestPSDSolvers:
     @SKIP_NO_CUDA
     @FAIL_NO_CUPY_MARK
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    def test_lowmem_cuda(self, dtype):
+    @pytest.mark.parametrize("return_cho_factor", [False, True])
+    def test_lowmem_cuda(self, dtype, return_cho_factor):
         A = self.A("cuda", dtype)
         B = self.B("cuda", dtype)
         penalty = 1e-5
+        expected_cov = A + torch.eye(self.mat_size, device=A.device, dtype=A.dtype) * penalty
         expected = self.expected(A, B, penalty)
 
         # To make sure only upper part of A is accessed set the lower to zero
         A = torch.triu(A)
         Acopy = torch.clone(A)
-        result = _lowmem_psd_ridge(A, B, penalty)
+        result = self.trainer().psd_solve(A, B, penalty, return_cho_factor)
+        if return_cho_factor:
+            result, packed = result
+            factor = unpack_upper(packed, self.mat_size)
+            torch.testing.assert_close(factor.T @ factor, expected_cov)
 
         # A should have been overwritten (by cholesky)
         assert not torch.isclose(A, Acopy).all()
@@ -267,26 +279,39 @@ class TestPSDSolvers:
         # correctness
         torch.testing.assert_close(result, expected)
 
-    def test_lowmem_cpu(self):
+    @pytest.mark.parametrize("return_cho_factor", [False, True])
+    def test_lowmem_cpu(self, return_cho_factor):
         A = self.A("cpu", torch.float32)
         B = self.B("cpu", torch.float32)
         penalty = 1e-5
-        with pytest.raises(AssertionError):
-            _lowmem_psd_ridge(A, B, penalty)
+        expected_cov = A + torch.eye(self.mat_size, device=A.device, dtype=A.dtype) * penalty
+        expected = self.expected(A, B, penalty)
+        result = self.trainer().psd_solve(A, B, penalty, return_cho_factor)
+        if return_cho_factor:
+            result, packed = result
+            factor = unpack_upper(packed, self.mat_size)
+            torch.testing.assert_close(factor.T @ factor, expected_cov)
+        torch.testing.assert_close(result, expected)
 
     @pytest.mark.parametrize("device", DEVICES)
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    def test_naive(self, device, dtype):
+    @pytest.mark.parametrize("return_cho_factor", [False, True])
+    def test_naive(self, device, dtype, return_cho_factor):
         A = self.A(device, dtype)
         B = self.B(device, dtype)
         penalty = 1e-5
+        expected_cov = A + torch.eye(self.mat_size, device=A.device, dtype=A.dtype) * penalty
         expected = self.expected(A, B, penalty)
 
         # To make sure only upper part of A is accessed set the lower to zero
         A = torch.triu(A)
         Acopy = torch.clone(A)
         Bcopy = torch.clone(B)
-        result = _naive_psd_ridge(A, B, penalty)
+        result = BaseTrainer.psd_solve(self.trainer(), A, B, penalty, return_cho_factor)
+        if return_cho_factor:
+            result, packed = result
+            factor = unpack_upper(packed, self.mat_size)
+            torch.testing.assert_close(factor.T @ factor, expected_cov)
 
         # A should have been been overwritten (only diagonal)
         assert not torch.isclose(A, Acopy, rtol=penalty / 10, atol=penalty / 10).all()
@@ -298,33 +323,109 @@ class TestPSDSolvers:
     @SKIP_NO_CUDA
     @FAIL_NO_CUPY_MARK
     def test_dispatcher_cuda(self):
-        with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT
-        ) as mocks:
+        with patch.object(BaseTrainer, "psd_solve") as naive:
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
-            psd_ridge(A, B, 1e-5)
-            mocks['_lowmem_psd_ridge'].assert_called_once()
+            expected = self.expected(A, B, 1e-5)
+            result = self.trainer().psd_solve(A, B, 1e-5)
+            torch.testing.assert_close(result, expected)
+            naive.assert_not_called()
 
     @SKIP_NO_CUDA
     def test_dispatcher_cuda_nocupy(self):
-        with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT, cupy=None
-        ) as mocks:
+        with patch("franken.trainers.rf_lowmem.cupy", None), patch.object(
+            BaseTrainer, "psd_solve", autospec=True, side_effect=BaseTrainer.psd_solve
+        ) as naive:
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
+            expected = self.expected(A, B, 1e-5)
+            trainer = self.trainer()
             with pytest.warns(UserWarning, match="`cupy` is not available"):
-                psd_ridge(A, B, 1e-5)
-            mocks['_naive_psd_ridge'].assert_called_once()
+                result = trainer.psd_solve(A, B, 1e-5)
+            torch.testing.assert_close(result, expected)
+            naive.assert_called_once_with(trainer, A, B, 1e-5, False)
 
     def test_dispatcher_cpu(self):
-        with patch.multiple(
-            "franken.utils.linalg.psdsolve", _naive_psd_ridge=DEFAULT, _lowmem_psd_ridge=DEFAULT
-        ) as mocks:
+        with patch.object(
+            BaseTrainer, "psd_solve", autospec=True, side_effect=BaseTrainer.psd_solve
+        ) as naive:
             A = self.A("cpu", torch.float32)
             B = self.B("cpu", torch.float32)
-            psd_ridge(A, B, 1e-5)
-            mocks['_naive_psd_ridge'].assert_called_once()
+            expected = self.expected(A, B, 1e-5)
+            trainer = self.trainer()
+            result = trainer.psd_solve(A, B, 1e-5)
+            torch.testing.assert_close(result, expected)
+            naive.assert_called_once_with(trainer, A, B, 1e-5, False)
+
+    @pytest.mark.parametrize("device", DEVICES)
+    def test_base_dispatcher(self, device):
+        with patch("franken.trainers.rf_lowmem.cupy", None), patch("warnings.warn") as warn:
+            A = self.A(device, torch.float32)
+            B = self.B(device, torch.float32)
+            expected = self.expected(A, B, 1e-5)
+            result = BaseTrainer.psd_solve(self.trainer(), A, B, 1e-5)
+            torch.testing.assert_close(result, expected)
+            warn.assert_not_called()
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("n", [0, 1, 5])
+def test_packed_upper(device, n):
+    matrix = torch.randn(n, n, device=device, dtype=torch.float64)
+    packed = pack_upper(matrix)
+    assert packed.shape == (n * (n + 1) // 2,)
+    assert packed.untyped_storage().nbytes() == packed.numel() * packed.element_size()
+    indices = torch.triu_indices(n, n, device=device)
+    torch.testing.assert_close(packed, matrix[indices[0], indices[1]])
+    torch.testing.assert_close(unpack_upper(packed, n), torch.triu(matrix))
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("n", [0, 1, 5])
+def test_packed_symmetric(device, n):
+    matrix = torch.randn(n, n, device=device, dtype=torch.float64)
+    matrix = matrix + matrix.T
+    packed = pack_upper(matrix)
+    torch.testing.assert_close(unpack_symm(packed, n), matrix)
+
+
+def test_invalid_packed_upper():
+    with pytest.raises(ValueError):
+        pack_upper(torch.zeros(2, 3))
+    with pytest.raises(ValueError):
+        unpack_upper(torch.zeros(4), 2)
+    with pytest.raises(ValueError):
+        unpack_symm(torch.zeros(4), 2)
+
+
+@SKIP_NO_CUDA
+@pytest.mark.parametrize("n", [1, 4])
+@pytest.mark.parametrize("column_contiguous", [False, True])
+def test_lowmem_factor_orientation(n, column_contiguous):
+    pytest.importorskip("cupy")
+    a = torch.randn(n, n, device="cuda", dtype=torch.float64)
+    cov = a @ a.T
+    expected = cov + torch.eye(n, device="cuda", dtype=torch.float64) * 0.1
+    cov = cov.T.contiguous().T if column_contiguous else cov.contiguous()
+    trainer = LowMemRandomFeaturesTrainer(
+        train_dataloader=None,
+        l2_penalty=0.1,
+        training_targets=["energy", "forces"],
+        target_weight={},
+        device="cuda",
+    )
+    solution, packed = trainer.psd_solve(
+        cov,
+        torch.ones(n, device="cuda", dtype=torch.float64),
+        0.1,
+        return_cho_factor=True,
+    )
+    factor = unpack_upper(packed, n)
+    torch.testing.assert_close(
+        solution,
+        torch.linalg.solve(expected, torch.ones(n, device="cuda", dtype=torch.float64)),
+    )
+    torch.testing.assert_close(factor.T @ factor, expected)
 
 
 @pytest.mark.parametrize("device", DEVICES)
