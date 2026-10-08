@@ -11,6 +11,7 @@ from franken.data import Configuration
 import franken.data.base
 from franken.rf.model import FrankenPotential
 from franken.utils.derivatives import forces_bwdad, forces_stress_bwdad
+from franken.data.base import ENERGY_TARGET_KEY,FORCES_TARGET_KEY,STRESS_TARGET_KEY,LES_CHARGES_TARGET_KEY
 
 logger = logging.getLogger("franken")
 
@@ -178,6 +179,7 @@ class LESFrankenPotential(FrankenPotential):
             desc=descriptors,
             batch=data.batch_ids,
         )["E_lr"]
+        
         assert energy is not None
         return energy.reshape(1, -1)
 
@@ -217,6 +219,46 @@ class LESFrankenPotential(FrankenPotential):
         )
         return les_energies.sum(1), les_energies
 
+    def _get_les_charges(
+        self,
+        atom_pos: torch.Tensor,
+        descriptors: torch.Tensor,
+        data: Configuration,
+    ) -> torch.Tensor:
+        # check on cell (TODO check if it also handles the non-periodic case)
+        cell = data.cell
+        assert cell is not None
+        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
+        
+        les_charges = self.les(
+            positions=atom_pos,
+            cell=cell,
+            desc=descriptors,
+            batch=data.batch_ids,
+        )["latent_charges"]
+        assert les_charges is not None
+
+        # Convert the normalized latent charges into physical units.
+        # Check if this normalization is required
+        epsilon_0 = 0.00552635  # e^2 eV^-1 A^-1
+        q_normalisation_factor = 1 #(2 * epsilon_0) ** 0.5
+        les_charges=les_charges* q_normalisation_factor
+
+        #TODO: probably we want to propagate other things in addtion to latent charges e.g. latent_dipoles etc...
+        return les_charges
+
+    def _les_charges_aux(
+        self,
+        atom_pos: torch.Tensor,
+        displacement: torch.Tensor | None,
+        data: Configuration,
+    ):
+        gnn_descriptors = self.descriptors(atom_pos, displacement, data)
+        les_charges = self._get_les_charges(
+            atom_pos, gnn_descriptors, data
+        )
+        return les_charges
+
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         weights: torch.Tensor | None,
@@ -226,19 +268,33 @@ class LESFrankenPotential(FrankenPotential):
     ) -> dict[str, torch.Tensor]:
         if weights is None:
             weights = self.rf.weights
-        compute_force = franken.data.base.FORCES_TARGET_KEY in targets
-        compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
+        compute_force = FORCES_TARGET_KEY in targets
+        compute_stress = STRESS_TARGET_KEY in targets
+        compute_charges = LES_CHARGES_TARGET_KEY in targets
+        
+        results = {}
+
         if compute_stress:
-            return forces_stress_bwdad(
+            results.update(forces_stress_bwdad(
                 data, fn=self._energy_aux, is_training=is_training, weights=weights
-            )
+            ))
         elif compute_force:
-            return forces_bwdad(
+            results.update(forces_bwdad(
                 data, fn=self._energy_aux, is_training=is_training, weights=weights
-            )
+            ))
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
-            return {franken.data.base.ENERGY_TARGET_KEY: energy}
+            results[ENERGY_TARGET_KEY] = energy
+
+        #TODO: probably we want to expose other things in addtion to latent charges e.g. latent_dipoles etc...
+        if compute_charges: 
+            # note: this calls the les module twice
+            results[franken.data.base.LES_CHARGES_TARGET_KEY] = self._les_charges_aux(
+                    data.atom_pos,
+                    None,
+                    data,
+                ) 
+        return results
 
     def predict_les(
         self,
