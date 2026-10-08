@@ -610,7 +610,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             else:
                 forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
             predictions = model.predict(
-                targets=self.training_targets,
+                targets=self.training_targets,  # type: ignore
                 data=data,
                 weights=all_weights,
                 differential_mode=forces_mode,
@@ -622,7 +622,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                     )
             for metric in metric_objects:
-                metric.update(Target.from_types(predictions), targets, data)
+                metric.update(Target.from_types(predictions), targets, data) # type: ignore
 
         num_models = (
             all_weights.shape[0]
@@ -674,7 +674,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             targets: Target = targets.to(device=self.device)
 
             les_preds = model.predict_les(
-                data, self.training_targets, is_training=False
+                data, self.training_targets, is_training=False  # type: ignore
             )
             target_fmaps = (
                 {t: self.fmaps[t][i] for t in self.training_targets}
@@ -774,7 +774,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return covs, coeffs, norm_coefs
 
     @torch.no_grad()
-    def solve(
+    def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
