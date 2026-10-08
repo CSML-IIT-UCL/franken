@@ -31,7 +31,7 @@ from franken.config import (
 )
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-# from plot_training_history import plot_training_history
+from plot_training_history import plot_training_history
 
 
 State = Literal["CC", "CP", "PP"]
@@ -114,8 +114,8 @@ def train_model(
     )
     run_dir = franken.autotune.autotune(config)
     assert isinstance(run_dir, Path)
-    # if use_les:
-    #     plot_training_history(run_dir / "training_history.json")
+    if use_les:
+        plot_training_history(run_dir)
     return run_dir / "best_ckpt.pt"
 
 
@@ -153,8 +153,8 @@ def evaluate_and_plot(dset: DimersDataset, *, use_les: bool) -> None:
     with (run / "best.json").open() as file:
         metrics = json.load(file)["metrics"]["validation"]
     print(f"{title}.")
-    print(f"\tEnergy RMSE: {metrics['energy_RMSE']:.1f}")
-    print(f"\tForces RMSE: {metrics['forces_RMSE']:.1f}")
+    for m_name, m_val in metrics.items():
+        print(f"\t{m_name}: {m_val:.2f}")
 
     prediction = predict(dset, run / "best_ckpt.pt")
     monomer_energy = dset.energy_a + dset.energy_b
