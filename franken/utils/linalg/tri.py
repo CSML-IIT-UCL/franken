@@ -32,7 +32,9 @@ def pack_upper(matrix: torch.Tensor) -> torch.Tensor:
 def unpack_upper(packed: torch.Tensor, n: int) -> torch.Tensor:
     """Reconstruct an upper-triangular matrix from row-wise packed values."""
     if n < 0 or packed.ndim != 1 or packed.numel() != n * (n + 1) // 2:
-        raise ValueError("Packed upper triangle has an invalid size for n={n}. Found {packed.shape}")
+        raise ValueError(
+            "Packed upper triangle has an invalid size for n={n}. Found {packed.shape}"
+        )
     mask = torch.ones(n, n, dtype=torch.bool, device=packed.device).triu_()
     return packed.new_zeros((n, n)).masked_scatter_(mask, packed)
 
