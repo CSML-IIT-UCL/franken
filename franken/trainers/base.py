@@ -1,6 +1,7 @@
 import abc
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -134,11 +135,18 @@ class BaseTrainer(abc.ABC):
             return None  # Manual serialization without a preceding fit.
         solver_hps = best_model.to_dict()["hyperparameters"]["solver"]
         solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
+        penalty = solver_hps.get("l2_penalty", 1e-6)
+        if not math.isfinite(penalty) or penalty <= 0:
+            raise ValueError(
+                "Saving a prior-normalized Cholesky factor requires a finite positive l2_penalty."
+            )
         covs, coeffs = self._restore_covs_and_coeffs(model.rf.total_random_features)
         _, factor = self.solve(
             covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
         )
-        return factor
+        # Encoding the ridge in the factor avoids storing lambda separately:
+        # V = U / sqrt(lambda), so ||V^{-T} phi|| / ||phi|| is posterior/prior std.
+        return factor.div_(math.sqrt(penalty))
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
