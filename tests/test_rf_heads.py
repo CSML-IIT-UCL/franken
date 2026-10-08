@@ -198,3 +198,30 @@ class TestScatterSum:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+@pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_atomic_features_reproduce_pooled_map(rf_type, num_species, kappa, dtype):
+    rf = init_rf(
+        rf_type,
+        input_dim=4,
+        **({"num_random_features": 8} if rf_type != "linear" else {}),
+        num_species=num_species,
+        chemically_informed_ratio=kappa,
+    )
+    descriptors = torch.randn(7, 4, dtype=dtype)
+    atomic_numbers = torch.tensor([1, 1, 8, 1, 8, 8, 8])
+    batch_ids = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+    atomic = rf.feature_map(descriptors, atomic_numbers, batch_ids, per_atom=True)
+    pooled = rf.feature_map(descriptors, atomic_numbers, batch_ids)
+    assert atomic.shape == (7, rf.total_random_features)
+    assert atomic.dtype == dtype
+    for i in range(2):
+        mask = batch_ids == i
+        torch.testing.assert_close(atomic[mask].mean(0), pooled[i])
+        separate = rf.feature_map(
+            descriptors[mask], atomic_numbers[mask], per_atom=True
+        )
+        torch.testing.assert_close(atomic[mask], separate)

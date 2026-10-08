@@ -740,6 +740,68 @@ def test_gp_uncertainty_prior_ratio_limits_and_zero_features():
     )
 
 
+@pytest.mark.parametrize("device", DEVICES)
+def test_energy_uncertainty_per_atom(device):
+    with mocked_gnn(device, torch.float32):
+        model = FrankenPotential(
+            gnn_config=DEFAULT_GNN_CONFIGS[0],
+            rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+            jac_chunk_size=2,
+        ).to(device)
+    model._cho_factor = pack_upper(torch.diag(torch.linspace(1, 4, 8, device=device)))
+    configs = [random_cfg(n, torch.float32, device) for n in [3, 5]]
+    batch = Configuration.concatenate(configs)
+    out = model.predict(
+        ["energy", "forces"],
+        batch,
+        compute_gp_uncertainty=True,
+        energy_uncertainty_per_atom=True,
+    )
+    atomic_scores = out["energy_uncertainty_per_atom"]
+    assert atomic_scores.shape == (1, 8)
+    assert ((atomic_scores >= 0) & (atomic_scores <= 1)).all()
+    assert not atomic_scores.requires_grad
+    # Each atom's vector enters the quadratic form independently, before pooling.
+    descriptors = model.input_scaler(
+        model.gnn.descriptors(batch), atomic_numbers=batch.atomic_numbers
+    )
+    atomic = model.rf.feature_map(
+        descriptors,
+        atomic_numbers=batch.atomic_numbers,
+        batch_ids=batch.batch_ids,
+        per_atom=True,
+    ).T
+    factor = model.get_cho_factor()
+    covariance = factor.T @ factor
+    variance = (atomic * torch.linalg.solve(covariance, atomic)).sum(0)
+    expected = variance.sqrt() / atomic.norm(dim=0)
+    torch.testing.assert_close(atomic_scores, expected[None, :])
+    separate = [
+        model.predict(
+            ["energy"],
+            cfg,
+            compute_gp_uncertainty=True,
+            energy_uncertainty_per_atom=True,
+        )["energy_uncertainty_per_atom"]
+        for cfg in configs
+    ]
+    torch.testing.assert_close(atomic_scores, torch.cat(separate, dim=1))
+    ordinary = model.predict(["energy", "forces"], batch, compute_gp_uncertainty=True)
+    assert "energy_uncertainty_per_atom" not in ordinary
+    for key, value in ordinary.items():
+        torch.testing.assert_close(out[key], value)
+    with pytest.raises(ValueError, match="requires compute_gp_uncertainty"):
+        model.predict(["energy"], batch, energy_uncertainty_per_atom=True)
+    with pytest.raises(ValueError, match="energy in targets"):
+        model.predict(
+            ["forces"],
+            batch,
+            compute_gp_uncertainty=True,
+            energy_uncertainty_per_atom=True,
+        )
+
+
 class TestStatistics:
     def test_online_algo(self):
         dim = 128
