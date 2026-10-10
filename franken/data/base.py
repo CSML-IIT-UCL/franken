@@ -216,7 +216,9 @@ class Configuration:
 #       dict[Enum, Any] do not work with torch jit. We
 #       use aliases of strings such that when scripting
 #       str can be used.
-TargetType = Literal["energy", "forces", "stress", "les_charges"] #TODO probably we want to generalised with other LES output quantities e.g., latent dipoles
+TargetType = Literal[
+    "energy", "forces", "stress", "les_charges"
+]  # TODO probably we want to generalised with other LES output quantities e.g., latent dipoles
 """TargetType describes the range of possible targets for :class:`franken.rf.model.FrankenPotential`"""
 ENERGY_TARGET_KEY: TargetType = "energy"
 FORCES_TARGET_KEY: TargetType = "forces"
@@ -227,8 +229,9 @@ TARGET_UNITS = {
     ENERGY_TARGET_KEY: "meV/atom",
     FORCES_TARGET_KEY: "meV/Ang",
     STRESS_TARGET_KEY: "meV/Ang^3",
-    LES_CHARGES_TARGET_KEY: "|e|", # absolute value elementary electron charge
+    LES_CHARGES_TARGET_KEY: "|e|",  # absolute value elementary electron charge
 }
+
 
 def is_target_key(s: str):
     return s in get_args(TargetType)
@@ -316,7 +319,9 @@ class Target:
             energy=self.energy.detach() if self.energy is not None else None,
             forces=self.forces.detach() if self.forces is not None else None,
             stress=self.stress.detach() if self.stress is not None else None,
-            les_charges=self.les_charges.detach() if self.les_charges is not None else None,
+            les_charges=(
+                self.les_charges.detach() if self.les_charges is not None else None
+            ),
         )
 
     @staticmethod
@@ -336,7 +341,12 @@ class Target:
         else:
             sys_ids = data.batch_ids.unique()
             for i, sys_id in enumerate(sys_ids):
-                cfg_energy, cfg_forces, cfg_stress, cfg_les_charges = None, None, None, None
+                cfg_energy, cfg_forces, cfg_stress, cfg_les_charges = (
+                    None,
+                    None,
+                    None,
+                    None,
+                )
                 if self.energy is not None:
                     cfg_energy = self.energy[..., i]
                 if self.forces is not None:
@@ -401,13 +411,13 @@ class Target:
                 if target.stress.ndim > 2:
                     s_has_batch = True
             if target.les_charges is not None:
-                            c_lst.append(target.les_charges)
-                            if target.les_charges.ndim != c_lst[0].ndim:
-                                raise ValueError(
-                                    f"LES charges shapes inconsistent. Found {target.les_charges.ndim} and {c_lst[0].ndim} dimensions"
-                                )
-                            if target.les_charges.ndim > 2:
-                                c_has_batch = True
+                c_lst.append(target.les_charges)
+                if target.les_charges.ndim != c_lst[0].ndim:
+                    raise ValueError(
+                        f"LES charges shapes inconsistent. Found {target.les_charges.ndim} and {c_lst[0].ndim} dimensions"
+                    )
+                if target.les_charges.ndim > 2:
+                    c_has_batch = True
         return Target(
             energy=(
                 torch.cat(e_lst, 1 if e_has_batch else 0) if len(e_lst) > 0 else None

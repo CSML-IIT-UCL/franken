@@ -11,6 +11,7 @@ import torch.utils.data
 from torch import Tensor
 import tqdm
 
+from franken.data.dataset import FrankenAtomsDataset
 from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
@@ -138,7 +139,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return local_log
 
     def eval_summary(
-        self, log: LogEntry, epoch: int, splits: Sequence[DataSplit], title=""
+        self, 
+        log: LogEntry, 
+        cycle: int, 
+        splits: Sequence[DataSplit], 
+        title="", 
+        prev_metrics: dict | None = None,
     ) -> str:
         def _get_first_available_metric(
             candidates: list[str], split: DataSplit
@@ -150,18 +156,42 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     pass
             return None, None
 
-        hp_summary = f"[Cycle {epoch:3}] {title}. "
+        lines = [
+             "=" * 60,
+             f"[Cycle {cycle:3}] {title.upper()}"
+        ]
         for split in splits:
-            split_summary = ""
+            entries = []
             for tgt in all_target_keys():
-                error, metric = _get_first_available_metric(
+                error, metric_name = _get_first_available_metric(
                     [f"{tgt}_RMSE", f"{tgt}_MAE"], split
                 )
-                if error is not None:
-                    split_summary += f"{metric} {error:.2f} {TARGET_UNITS[tgt]}, "
-            if len(split_summary) > 0:
-                hp_summary += f"{split.name}: {split_summary[:-2]} - "
-        return hp_summary[:-2]
+                if error is None:
+                    continue
+                delta_str = ""
+                if prev_metrics is not None:
+                    split_key = split.name.lower()
+                    key = f"{split_key}:{metric_name}"
+                    if key in prev_metrics:
+                        delta = error - prev_metrics[key]
+                        delta_str = f" ({delta:+.2f})"
+                entries.append(f"{metric_name}={error:.2f} {TARGET_UNITS[tgt]}{delta_str}")
+            split_name = "VAL" if split == DataSplit.VAL else split.name
+            lines.append(f"{split_name:<6}: " + " | ".join(entries))
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
+    def _get_previous_metrics(self, step: str):
+        """store metrics of previous cycle to compare with the new ones and check improvements"""
+        for entry in reversed(self.training_history):
+            if entry["step"] != step:
+                continue
+            prev = {}
+            for split_name, split_metrics in entry["metrics"].items():
+                for metric_name, value in split_metrics.items():
+                    prev[f"{split_name}:{metric_name}"] = value
+            return prev
+        return None
 
     def _print_eval(self, model, cycle, step: Literal["rff", "les", "joint"]):
         logc = LogCollection([self.create_log_entry(model)])
@@ -173,14 +203,19 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 continue
             self.evaluate(model, loader, log_collection=logc, all_weights=None)
         if dist_utils.get_rank() == 0:
+            splits = [DataSplit.TRAIN]
+            if self.val_dataloader is not None:
+                splits.append(DataSplit.VAL)
             summary = self.eval_summary(
                 log=logc[0],
-                epoch=cycle,
-                splits=[DataSplit.TRAIN, DataSplit.VAL],
+                cycle=cycle + 1,
+                splits=splits,
                 title=f"after {step.upper()}",
+                prev_metrics=self._get_previous_metrics(step)
             )
             logger.info(summary)
 
+        # Store history / best model
         if dist_utils.get_rank() == 0:
             self.training_history.append(
                 {
@@ -189,18 +224,14 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     "metrics": logc[0].to_dict()["metrics"],
                 }
             )
-
             if self.log_dir is not None:
                 self.log_dir.mkdir(parents=True, exist_ok=True)
 
                 history_path = self.log_dir / "training_history.json"
                 temp_path = history_path.with_suffix(".json.tmp")
 
-                temp_path.write_text(
-                    json.dumps(self.training_history, indent=2)
-                )
+                temp_path.write_text(json.dumps(self.training_history, indent=2))
                 temp_path.replace(history_path)
-
 
     def _get_relative_weights(
         self, hps: Mapping[TargetType, float]
@@ -480,10 +511,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         all_weights: torch.Tensor | None,
     ) -> LogCollection:
         self.patch_e3nn()
-        tot_dset_size = len(dataloader.dataset)  # type: ignore
-
+        assert isinstance(dataloader.dataset, FrankenAtomsDataset)
+        tot_dset_size = len(dataloader.dataset)
         metric_objects: list[BaseMetric] = self.get_metrics()
-
         split_name = dataloader.dataset.split
         try:
             split = DataSplit[split_name.upper()]
@@ -518,7 +548,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                     )
             for metric in metric_objects:
-                metric.update(Target.from_types(predictions), targets, data) # type: ignore
+                metric.update(Target.from_types(predictions), targets, data)  # type: ignore
 
         num_models = (
             all_weights.shape[0]
