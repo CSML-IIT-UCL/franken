@@ -112,12 +112,10 @@ class FrankenCalculator(Calculator):
         if "stress" in properties:
             targets.append(STRESS_TARGET_KEY)
         if "charges" in properties:
-            targets.append(LES_CHARGES_TARGET_KEY)        
+            targets.append(LES_CHARGES_TARGET_KEY)
         results = self.franken(targets, data)
 
-        self.results["energy"] = (
-            results[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
-        )
+        self.results["energy"] = results[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
         if "forces" in properties:
             self.results["forces"] = (
                 results[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
@@ -130,6 +128,7 @@ class FrankenCalculator(Calculator):
             self.results["charges"] = (
                 results[LES_CHARGES_TARGET_KEY].squeeze(0).numpy(force=True)
             )
+
 
 def calculator_throughput(
     calculator, atoms_list, num_repetitions=1, warmup_configs=5, verbose=True
