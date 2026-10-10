@@ -141,7 +141,7 @@ def predict(dset: DimersDataset, checkpoint: Path):
     model.eval()
     dataset = FrankenAtomsDataset(
         data_path=eval_path,
-        split="train",
+        split="test",
         gnn_config=model.gnn_config,
     )
     return [model.predict(targets=[ENERGY, FORCES], data=data) for data, _ in dataset]
