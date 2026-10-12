@@ -6,6 +6,14 @@ from typing import Literal, Mapping, Optional, Union
 
 import torch
 
+try:
+    from les import Les
+except ImportError as exc:
+    raise ImportError(
+        "LESFrankenPotential requires the external LES package. "
+        "Install it with pip install 'franken[les]'."
+    ) from exc
+
 from franken.config import BackboneConfig, LESConfig, RFConfig
 from franken.data import Configuration
 import franken.data.base
@@ -21,19 +29,12 @@ class LESFrankenPotential(FrankenPotential):
         gnn_config: BackboneConfig,
         rf_config: RFConfig,
         les_config: LESConfig,
+        is_periodic: bool | None = None,
         jac_chunk_size: Union[int, Literal["auto"]] = "auto",
         scale_by_Z: bool = True,
         num_species: int = 1,
         atomic_energies: Optional[Mapping[int, torch.Tensor | float]] = None,
     ):
-        try:
-            from les import Les
-        except ImportError as exc:
-            raise ImportError(
-                "LESFrankenPotential requires the external LES package. "
-                "Install it with pip install 'franken[les]'."
-            ) from exc
-
         super(LESFrankenPotential, self).__init__(
             gnn_config=gnn_config,
             rf_config=rf_config,
@@ -43,6 +44,7 @@ class LESFrankenPotential(FrankenPotential):
             atomic_energies=atomic_energies,
         )
         self.les_config = les_config
+        self.is_periodic = is_periodic
         # checks on hidden_dim (keep them?)
         hidden_dim = les_config.hidden_dim
         if isinstance(hidden_dim, int):
@@ -62,27 +64,24 @@ class LESFrankenPotential(FrankenPotential):
                 "output_scaling_factor": les_config.les_output_scale,
                 "dl": les_config.dl,
                 "sigma": les_config.sigma,
-                "is_periodic": les_config.is_periodic,
+                "is_periodic": is_periodic,
                 "N_max": les_config.N_max,
             }
         )
-        # Initialize the LES MLP immediately to avoid annoying downstream issues (Upstream builds its MLP on the first call)
-        self.les.atomwise.activation = (
-            torch.nn.functional.silu
-            if les_config.activation == "silu"
-            else torch.nn.functional.relu
+        # Initialize the LES MLP immediately to avoid annoying downstream issues
+        # Upstream builds its MLP on the first call
+        self.les(
+            positions=torch.randn(5, 3),
+            cell=torch.randn(1, 3, 3),
+            desc=torch.randn(5, self.gnn.feature_dim()),
         )
-        with torch.no_grad():
-            self.les.atomwise(
-                torch.zeros(1, self.gnn.feature_dim()),
-                torch.zeros(1, dtype=torch.long),
-            )
 
     @property
     @torch.jit.unused
     def hyperparameters(self):
         hps = super().hyperparameters
         hps["les"] = self.les_config.to_ckpt()
+        hps["les"]["is_periodic"] = self.is_periodic
         return hps
 
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
@@ -96,6 +95,7 @@ class LESFrankenPotential(FrankenPotential):
             "jac_chunk_size": self.jac_chunk_size,
             "multi_weights": multi_weights,
             "num_species": self.num_species,
+            "is_periodic": self.is_periodic,
             "rf": {
                 "config": self.rf_config.to_ckpt(),
                 "state_dict": self.rf.state_dict(),
@@ -137,6 +137,7 @@ class LESFrankenPotential(FrankenPotential):
             les_config=les_cfg,
             jac_chunk_size=ckpt["jac_chunk_size"],
             num_species=ckpt["num_species"],
+            is_periodic=ckpt["is_periodic"],
             **ckpt["input_scaler"]["config"],
         )
         model.rf.load_state_dict(ckpt["rf"]["state_dict"])
@@ -167,11 +168,9 @@ class LESFrankenPotential(FrankenPotential):
         descriptors: torch.Tensor,
         data: Configuration,
     ) -> torch.Tensor:
-        # check on cell (TODO check if it also handles the non-periodic case)
         cell = data.cell
-        assert cell is not None
-        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
-
+        if cell is not None:
+            cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
         energy = self.les(
             positions=atom_pos,
             cell=cell,
@@ -198,9 +197,7 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        les_energies = self._get_les_energy(
-            atom_pos, gnn_descriptors, data
-        )
+        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
         energies = rff_energies + les_energies
 
         return energies.sum(1), energies
@@ -212,9 +209,7 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self._get_les_energy(
-            atom_pos, gnn_descriptors, data
-        )
+        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
         return les_energies.sum(1), les_energies
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]

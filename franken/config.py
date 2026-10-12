@@ -4,9 +4,16 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import dataclasses
 import logging
-from typing import Any, ClassVar, Literal, Optional, Sequence, Union
+from typing import Any, ClassVar, Literal, Optional, Sequence, Union, Protocol, Mapping
+from typing_extensions import runtime_checkable, Self
 
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    TargetType,
+    all_target_keys,
+)
 
 logger = logging.getLogger("franken")
 
@@ -56,6 +63,23 @@ def asdict_with_classvar(obj) -> dict[str, Any]:
         )
     else:
         return deepcopy(obj)
+
+
+class DataclassInstance(Protocol):
+    """Structural type matched by any dataclass instance."""
+
+    __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
+
+
+@runtime_checkable
+class CheckpointableConfig(Protocol):
+    def to_ckpt(self) -> dict[str, Any]: ...
+
+    @classmethod
+    def from_ckpt(cls, ckpt: Mapping[str, Any]) -> Self: ...
+
+
+class CheckpointableDataclass(DataclassInstance, CheckpointableConfig, Protocol): ...
 
 
 @dataclass
@@ -255,30 +279,26 @@ class LESConfig:
     sigma: float = 1.0
     les_output_scale: float = 1.0
     add_linear_nn: bool = True
-    activation: Literal["relu", "silu"] = "silu"  # Charge-head activation.
-    is_periodic: bool | None = None
-    """None selects upstream's legacy, per-structure boundary detection."""
     N_max: int = 10
-    """Reciprocal grid extent for is_periodic=True; N_max * dl must cover the cell."""
-
+    """Reciprocal grid extent for periodic structures. N_max * dl must cover the cell."""
     optimizer: Literal["adam", "lbfgs"] = "lbfgs"
-    num_cycles: int = 50
+    """Optimizer. Some params are for adam, some for lbfgs"""
+    num_cycles: HPSearchConfig | list[int] | int = 50
     """Number of alternating RFF/LES cycles."""
-    epochs_per_cycle: int = 50
+    epochs_per_cycle: HPSearchConfig | list[int] | int = 50
     """Adam passes through the complete training set per LES stage."""
-    batch_size: int | None = None
+    batch_size: HPSearchConfig | list[int] | int | None = None
     """Configurations per Adam update; None accumulates the full training set."""
-    learning_rate: float = 1e-4
+    learning_rate: HPSearchConfig | list[float] | float = 1e-4
     """Adam learning rate."""
-    lr_decay: float = 1.0
+    lr_decay: HPSearchConfig | list[float] | float = 1.0
     """Multiply the learning rate by this factor after each alternating cycle."""
-    lbfgs_max_iter: int = 20
+    lbfgs_max_iter: HPSearchConfig | list[int] | int = 20
     """Maximum L-BFGS iterations per LES stage (each can evaluate multiple closures)."""
-    lbfgs_learning_rate: float = 1.0
-    lbfgs_history_size: int = 20
-    lbfgs_tolerance_grad: float = 1e-10
-    lbfgs_tolerance_change: float = 1e-13
-    restore_best: bool = True
+    lbfgs_learning_rate: HPSearchConfig | list[float] | float = 1.0
+    lbfgs_history_size: HPSearchConfig | list[int] | int = 20
+    lbfgs_tolerance_grad: HPSearchConfig | list[float] | float = 1e-10
+    lbfgs_tolerance_change: HPSearchConfig | list[float] | float = 1e-13
     """Restore the best combined model across both stages, using validation if available."""
     mode: Literal["alternating", "variable_projection"] = "variable_projection"
     """Variable projection refits RFF at every L-BFGS trial point."""
@@ -410,6 +430,20 @@ class SolverConfig:
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return SolverConfig(**ckpt)
+
+    def get_weights(self) -> dict[TargetType, HPSearchConfig | list[float] | float]:
+        return {
+            ENERGY_TARGET_KEY: self.energy_weight,
+            FORCES_TARGET_KEY: self.force_weight,
+            STRESS_TARGET_KEY: self.stress_weight,
+        }
+
 
 @dataclass
 class AutotuneConfig:
@@ -502,3 +536,12 @@ class AutotuneConfig:
         default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
     )
     """Which data labels to train Franken with."""
+
+    def __post_init__(self):
+        # 1. fix solver-config: remove target weights (e.g. stress_weight)
+        #    which are not used because not in training targets
+        for tgt_key in all_target_keys():
+            if tgt_key not in self.train_targets:
+                # set it to a single value so it doesn't interfere with the
+                # hyperparameter search procedures.
+                setattr(self.solver, f"{tgt_key}_weight", 1.0)
