@@ -268,6 +268,27 @@ class FrankenAtomsDataset(torch.utils.data.Dataset):
             config = partial_config
         return config
 
+    def is_all_periodic(self) -> bool:
+        """Check whether all systems in the dataset are periodic"""
+        for cfg, tgt in self:  # type: ignore
+            assert isinstance(cfg, Configuration)
+            if cfg.pbc is None:
+                return False
+            if cfg.pbc.any():
+                continue
+            return False
+        return True
+
+    def is_all_non_periodic(self) -> bool:
+        """Check whether all systems in the dataset are non-periodic"""
+        for cfg, tgt in self:  # type: ignore
+            assert isinstance(cfg, Configuration)
+            if cfg.pbc is None:
+                continue
+            if cfg.pbc.any():
+                return False
+        return True
+
     def __getitem__(
         self, idx, no_targets: bool = False
     ) -> Union[Configuration, Tuple[Configuration, Target]]:
