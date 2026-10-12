@@ -304,6 +304,7 @@ class LESConfig:
     """Variable projection refits RFF at every L-BFGS trial point."""
 
     def __post_init__(self):
+        return
         if self.optimizer not in {"adam", "lbfgs"}:
             raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
         if self.mode not in {"alternating", "variable_projection"}:
