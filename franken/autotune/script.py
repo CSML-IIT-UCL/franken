@@ -264,7 +264,7 @@ def run_autotune(
         best_model_selection = [f"{tgt}_MAE" for tgt in auto_cfg.train_targets]
     current_best = BestTrial(None, None)  # type: ignore
 
-    if is_les is not None:
+    if is_les:
         param_grid = list(
             create_outer_hpsearch_grid((auto_cfg.rfs, auto_cfg.les, auto_cfg.solver))
         )
@@ -289,7 +289,7 @@ def run_autotune(
         else:
             new_cfg = dataclasses.replace(auto_cfg, rfs=trial_params[0])
             trainer = init_rf_trainer(new_cfg, loaders, device, log_dir)
-            model = init_les_model(new_cfg, loaders)
+            model = init_rf_model(new_cfg, loaders)
             logs, weights = trainer.fit(model)
 
         for split_name, loader in loaders.items():

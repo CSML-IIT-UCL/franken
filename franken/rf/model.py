@@ -141,7 +141,6 @@ class FrankenPotential(torch.nn.Module):
             # Import lazily: LESFrankenPotential inherits from this class.
             from franken.rf.les_model import LESFrankenPotential
 
-            print("Loading of the checkpoint as a LESFrankenPotential model !")
             cls = LESFrankenPotential
         return cls._from_checkpoint(
             ckpt,
@@ -182,8 +181,13 @@ class FrankenPotential(torch.nn.Module):
                     f"The checkpoint contains {ckpt['multi_weights'].shape[0]}, select which one to load by specifying rf_weight_id"
                 )
             assert rf_weight_id < ckpt["multi_weights"].shape[0]
-            model.rf.weights.copy_(
-                ckpt["multi_weights"][rf_weight_id].reshape_as(model.rf.weights)
+            # model.rf.weights.copy_(
+            #     ckpt["multi_weights"][rf_weight_id].reshape_as(model.rf.weights)
+            # )
+            model.rf.weights = torch.nn.Parameter(
+                ckpt["multi_weights"][rf_weight_id]
+                .reshape_as(model.rf.weights)
+                .to(model.rf.weights)
             )
 
         if map_location is not None:
@@ -222,8 +226,7 @@ class FrankenPotential(torch.nn.Module):
         return {
             franken.data.base.FORCES_TARGET_KEY: -force_fm,
             franken.data.base.STRESS_TARGET_KEY: stress_fm,
-            franken.data.base.ENERGY_TARGET_KEY: energy_fm,
-        }
+        } | energy_fm
 
     @torch.jit.unused
     @torch.no_grad
@@ -244,10 +247,7 @@ class FrankenPotential(torch.nn.Module):
             jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
             self.jac_cache[cache_key] = jacfn
         force_fm, energy_fm = jacfn(*args)
-        return {
-            franken.data.base.FORCES_TARGET_KEY: -force_fm,
-            franken.data.base.ENERGY_TARGET_KEY: energy_fm,
-        }
+        return {franken.data.base.FORCES_TARGET_KEY: -force_fm} | energy_fm
 
     def _fwd_ad_forces_stress(
         self, data: Configuration, fmaps_func: bool, weights: torch.Tensor | None = None
@@ -266,12 +266,17 @@ class FrankenPotential(torch.nn.Module):
                 data.atom_pos, displacement, data, weights=weights
             )
         forces, stress = _forces_stress_bwdad_helper(
-            energies=energy, displacement=displacement, data=data, is_training=False
+            energies=energy[franken.data.base.ENERGY_TARGET_KEY],
+            displacement=displacement,
+            data=data,
+            is_training=False,
         )
         return {
             franken.data.base.FORCES_TARGET_KEY: forces.detach(),
             franken.data.base.STRESS_TARGET_KEY: stress.detach(),
-            franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
+            franken.data.base.ENERGY_TARGET_KEY: energy[
+                franken.data.base.ENERGY_TARGET_KEY
+            ].detach(),
         }
 
     def _fwd_ad_forces(
@@ -282,10 +287,14 @@ class FrankenPotential(torch.nn.Module):
             _, energy = self._feature_map_aux(data.atom_pos, None, data)
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights=weights)
-        forces = _forces_bwdad_helper(energy, data, is_training=False)
+        forces = _forces_bwdad_helper(
+            energy[franken.data.base.ENERGY_TARGET_KEY], data, is_training=False
+        )
         return {
             franken.data.base.FORCES_TARGET_KEY: forces.detach(),
-            franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
+            franken.data.base.ENERGY_TARGET_KEY: energy[
+                franken.data.base.ENERGY_TARGET_KEY
+            ].detach(),
         }
 
     def descriptors(
@@ -328,7 +337,9 @@ class FrankenPotential(torch.nn.Module):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
         random_features = self.rfs_from_descriptor(gnn_descriptors, data)
         # the differentiable output is summed over structures
-        return random_features.sum(0), random_features
+        return random_features.sum(0), {
+            franken.data.base.ENERGY_TARGET_KEY: random_features
+        }
 
     @torch.jit.unused
     def grad_feature_map(
@@ -367,7 +378,7 @@ class FrankenPotential(torch.nn.Module):
             )
         else:
             _, energy_fm = self._feature_map_aux(data.atom_pos, None, data)
-            out = {franken.data.base.ENERGY_TARGET_KEY: energy_fm}
+            out = cast(dict[TargetType, torch.Tensor], energy_fm)
         # Fix shapes
         if franken.data.base.ENERGY_TARGET_KEY in out:
             # Sys, F -> F, Sys
@@ -395,11 +406,13 @@ class FrankenPotential(torch.nn.Module):
             weights = self.rf.weights
         # weights: [num weights(M), num features(F)]
         _, feature_map = self._feature_map_aux(atom_pos, displacement, data)
-        feature_map = feature_map.to(dtype=weights.dtype)  # [N, F]
+        feature_map = feature_map[franken.data.base.ENERGY_TARGET_KEY].to(
+            dtype=weights.dtype
+        )  # [N, F]
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         energies = torch.matmul(feature_map, weights.T).T  # [M, N]
         energies = natoms[None, :] * energies
-        return energies.sum(1), energies
+        return energies.sum(1), {franken.data.base.ENERGY_TARGET_KEY: energies}
 
     def _predict(
         self,
@@ -433,7 +446,7 @@ class FrankenPotential(torch.nn.Module):
                 raise ValueError(f"Differentiation mode {mode} is invalid.")
         else:
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
-            return {franken.data.base.ENERGY_TARGET_KEY: energy}
+            return energy
 
     def _get_jacobian_chunk_size(
         self, func, func_inputs, argnums: int | tuple[int, int] = 0
@@ -599,6 +612,20 @@ class FrankenPotential(torch.nn.Module):
             add_energy_shift=add_energy_shift,
         )
         return {k: v.squeeze(0) for k, v in out.items()}
+
+    @torch.jit.export
+    def supported_targets(self) -> list[str]:
+        """Returns the list of target keys which are supported by the model.
+
+        Requesting a target which is unsupported from the ``forward`` or ``predict``
+        methods will simply not return any result for that target, likely leading
+        to downstream errors.
+        """
+        return [
+            franken.data.base.ENERGY_TARGET_KEY,
+            franken.data.base.FORCES_TARGET_KEY,
+            franken.data.base.STRESS_TARGET_KEY,
+        ]
 
 
 def prep_with_displacement(
