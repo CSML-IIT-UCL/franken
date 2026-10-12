@@ -31,7 +31,7 @@ from franken.config import (
 )
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
-from plot_training_history import plot_training_history
+# from plot_training_history import plot_training_history
 
 
 State = Literal["CC", "CP", "PP"]
@@ -103,10 +103,7 @@ def train_model(
         solver=solver,
         backbone=backbone,
         rfs=rfs,
-        les=(les_config or LESConfig(
-            hidden_dim=(64, 32), les_output_scale=1.0, dl=3,
-            activation="silu", is_periodic=True,
-        )) if use_les else None,
+        les=les_config if use_les else None,
         best_model_selection=["energy_MAE", "forces_MAE"],
         eval_splits=["val"],
         run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
@@ -117,8 +114,8 @@ def train_model(
     )
     run_dir = franken.autotune.autotune(config)
     assert isinstance(run_dir, Path)
-    if use_les:
-        plot_training_history(run_dir / "training_history.json")
+    # if use_les:
+    #     plot_training_history(run_dir / "training_history.json")
     return run_dir / "best_ckpt.pt"
 
 
@@ -217,40 +214,42 @@ if __name__ == "__main__":
     # )
 
     les_config = LESConfig(
-        hidden_dim=(64, 32), les_output_scale=1.0, dl=3,
-        activation="silu", is_periodic=True,
+        hidden_dim=(64, 32), 
+        les_output_scale=1.0, 
+        # dl=3,
+        N_max=20,
         optimizer="lbfgs",
         mode="variable_projection",
-        num_cycles=50,
-        epochs_per_cycle=20,
+        num_cycles=10,
         batch_size=None,
         lbfgs_learning_rate=1.0,
-        restore_best=True,
+        lbfgs_max_iter=[10, 20, 40, 80],
+        lbfgs_history_size=[20, 80]
     )
 
     # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
     for dset in datasets[:1]:
-        train_model(
-            dset,
-            SolverConfig(
-                l2_penalty=np.logspace(-11, -6, 6).tolist(),
-                force_weight=1e-2, #np.logspace(-2, 3, 6).tolist(),
-            ),
-            backbone,
-            rfs,
-            use_les=False,
-        )
-        evaluate_and_plot(dset, use_les=False)
+        # train_model(
+        #     dset,
+        #     SolverConfig(
+        #         l2_penalty=[1e-8, 1e-6],
+        #         force_weight=[1.0, 0.1],
+        #     ),
+        #     backbone,
+        #     rfs,
+        #     use_les=False,
+        # )
+        # evaluate_and_plot(dset, use_les=False)
 
-        sr_run = newest_run(SCRIPT_DIR / f"franken_outputs/dimer_{dset.id}")
-        with (sr_run / "best.json").open() as file:
-            best_solver = json.load(file)["hyperparameters"]["solver"]
+        # sr_run = newest_run(SCRIPT_DIR / f"franken_outputs/dimer_{dset.id}")
+        # with (sr_run / "best.json").open() as file:
+        #     best_solver = json.load(file)["hyperparameters"]["solver"]
         train_model(
             dset,
             SolverConfig(
-                l2_penalty=best_solver["l2_penalty"],
-                energy_weight=best_solver["energy_weight"],
-                force_weight=best_solver["forces_weight"],
+                l2_penalty=[1e-8, 1e-6],
+                energy_weight=1.0,
+                force_weight=[1.0, 0.1],
             ),
             backbone,
             rfs,
