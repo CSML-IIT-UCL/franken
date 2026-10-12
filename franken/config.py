@@ -287,7 +287,7 @@ class LESConfig:
     """Number of alternating RFF/LES cycles."""
     epochs_per_cycle: HPSearchConfig | list[int] | int = 50
     """Adam passes through the complete training set per LES stage."""
-    batch_size: HPSearchConfig | list[int] | int | None = None
+    batch_size: int | None = None
     """Configurations per Adam update; None accumulates the full training set."""
     learning_rate: HPSearchConfig | list[float] | float = 1e-4
     """Adam learning rate."""

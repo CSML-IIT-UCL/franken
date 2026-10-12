@@ -107,24 +107,33 @@ class FrankenCalculator(Calculator):
         data = cpu_data.to(self.device)
 
         targets = [ENERGY_TARGET_KEY]
-        if "forces" in properties:
+        if (
+            "forces" in properties
+            and FORCES_TARGET_KEY in self.franken.supported_targets()
+        ):
             targets.append(FORCES_TARGET_KEY)
-        if "stress" in properties:
+        if (
+            "stress" in properties
+            and STRESS_TARGET_KEY in self.franken.supported_targets()
+        ):
             targets.append(STRESS_TARGET_KEY)
-        if "charges" in properties:
+        if (
+            "charges" in properties
+            and LES_CHARGES_TARGET_KEY in self.franken.supported_targets()
+        ):
             targets.append(LES_CHARGES_TARGET_KEY)
         results = self.franken(targets, data)
 
         self.results["energy"] = results[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
-        if "forces" in properties:
+        if FORCES_TARGET_KEY in results and "forces" in properties:
             self.results["forces"] = (
                 results[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
             )
-        if "stress" in properties:
+        if STRESS_TARGET_KEY in results and "stress" in properties:
             self.results["stress"] = (
                 results[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
             )
-        if "charges" in properties:
+        if LES_CHARGES_TARGET_KEY in results and "charges" in properties:
             self.results["charges"] = (
                 results[LES_CHARGES_TARGET_KEY].squeeze(0).numpy(force=True)
             )

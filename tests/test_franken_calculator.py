@@ -126,7 +126,7 @@ def test_calculator_in_md(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)  # random number gen on CPU for consistency
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_langevin_md(calculator)
     md.run(2)
@@ -146,7 +146,7 @@ def test_calculator_in_npt_md(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)  # random number gen on CPU for consistency
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_npt_md(calculator)
     md.run(2)
@@ -168,7 +168,7 @@ def test_calculator_jitscript(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     jit_model = torch.jit.script(model)
     calculator = FrankenCalculator(
         jit_model, device=device, forces_mode="torch.autograd", gnn_config=gnn_cfg
@@ -197,7 +197,7 @@ def test_calculator_compile(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     model = torch.compile(model)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_langevin_md(calculator)
