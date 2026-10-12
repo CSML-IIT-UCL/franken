@@ -23,23 +23,22 @@ useful for when there is a single (or few) outputs and many inputs
 
 def forces_bwdad(
     data: Configuration,
-    fn: Callable,
+    fn: Callable[..., tuple[torch.Tensor, dict[str, torch.Tensor]]],
     is_training: bool = False,
     **extra_args: torch.Tensor,
 ):
     data.atom_pos.requires_grad_(True)
     with torch.enable_grad():
-        _, energy = fn(data.atom_pos, displacement=None, data=data, **extra_args)
+        _, out_d = fn(data.atom_pos, displacement=None, data=data, **extra_args)
         forces = _forces_bwdad_helper(
-            energies=energy, data=data, is_training=is_training
+            energies=out_d[franken.data.base.ENERGY_TARGET_KEY],
+            data=data,
+            is_training=is_training,
         )
+    out_d[franken.data.base.FORCES_TARGET_KEY] = forces
     if not is_training:
-        forces = forces.detach()
-        energy = energy.detach()
-    return {
-        franken.data.base.FORCES_TARGET_KEY: forces,
-        franken.data.base.ENERGY_TARGET_KEY: energy,
-    }
+        out_d = {k: v.detach() for k, v in out_d.items()}
+    return out_d
 
 
 def _forces_bwdad_helper(
@@ -68,7 +67,7 @@ def _forces_bwdad_helper(
 
 def forces_stress_bwdad(
     data: Configuration,
-    fn: Callable,
+    fn: Callable[..., tuple[torch.Tensor, dict[str, torch.Tensor]]],
     is_training: bool = False,
     **extra_args: torch.Tensor,
 ):
@@ -80,24 +79,18 @@ def forces_stress_bwdad(
     ).requires_grad_(True)
     data.atom_pos.requires_grad_(True)
     with torch.enable_grad():
-        _, energy = fn(
-            data.atom_pos, displacement=displacement, data=data, **extra_args
-        )
+        _, out_d = fn(data.atom_pos, displacement=displacement, data=data, **extra_args)
         forces, stress = _forces_stress_bwdad_helper(
-            energies=energy,
+            energies=out_d[franken.data.base.ENERGY_TARGET_KEY],
             displacement=displacement,
             data=data,
             is_training=is_training,
         )
+    out_d[franken.data.base.FORCES_TARGET_KEY] = forces
+    out_d[franken.data.base.STRESS_TARGET_KEY] = stress
     if not is_training:
-        stress = stress.detach()
-        forces = forces.detach()
-        energy = energy.detach()
-    return {
-        franken.data.base.FORCES_TARGET_KEY: forces,
-        franken.data.base.STRESS_TARGET_KEY: stress,
-        franken.data.base.ENERGY_TARGET_KEY: energy,
-    }
+        out_d = {k: v.detach() for k, v in out_d.items()}
+    return out_d
 
 
 def _forces_stress_bwdad_helper(

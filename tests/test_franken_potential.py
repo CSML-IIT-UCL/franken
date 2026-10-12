@@ -203,7 +203,7 @@ def test_multiweight_save_load_functionality(rf_cfg, device, scale_by_Z):
                 garbage_collection_cuda()
 
             multi_weights = torch.randn(
-                17, model.rf.total_random_features, device=device, dtype=torch.float64
+                17, model.rf.total_random_features, device=device
             )
 
             # Step 2: Save the model to the temporary directory
@@ -217,7 +217,7 @@ def test_multiweight_save_load_functionality(rf_cfg, device, scale_by_Z):
                 rf_weight_id=10,
             )
 
-            model.rf.weights = multi_weights[10].reshape_as(model.rf.weights).clone()
+            model.rf.weights = torch.nn.Parameter(multi_weights[10].reshape_as(model.rf.weights))
 
             # Step 4: Compare rf.state_dict between the original and loaded models
             assert are_dicts_close(
@@ -259,9 +259,9 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
                 dtype=model.rf.weights.dtype,
                 device=model.rf.weights.device,
             )
-            model.rf.weights = dummy_multiweights
+            model.rf.weights = torch.nn.Parameter(dummy_multiweights)
         else:
-            model.rf.weights.copy_(torch.randn(model.rf.weights.shape))
+            model.rf.weights = torch.nn.Parameter(torch.randn(model.rf.weights.shape))
 
         model.gnn.franken_val()
         model_func = deepcopy(model)

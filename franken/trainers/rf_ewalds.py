@@ -4,7 +4,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, Mapping, Sequence
+from typing import Literal, Mapping, Sequence, cast
 
 import torch
 import torch.utils.data
@@ -139,11 +139,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return local_log
 
     def eval_summary(
-        self, 
-        log: LogEntry, 
-        cycle: int, 
-        splits: Sequence[DataSplit], 
-        title="", 
+        self,
+        log: LogEntry,
+        cycle: int,
+        splits: Sequence[DataSplit],
+        title="",
         prev_metrics: dict | None = None,
     ) -> str:
         def _get_first_available_metric(
@@ -156,10 +156,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     pass
             return None, None
 
-        lines = [
-             "=" * 60,
-             f"[Cycle {cycle:3}] {title.upper()}"
-        ]
+        lines = ["=" * 60, f"[Cycle {cycle:3}] {title.upper()}"]
         for split in splits:
             entries = []
             for tgt in all_target_keys():
@@ -175,7 +172,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     if key in prev_metrics:
                         delta = error - prev_metrics[key]
                         delta_str = f" ({delta:+.2f})"
-                entries.append(f"{metric_name}={error:.2f} {TARGET_UNITS[tgt]}{delta_str}")
+                entries.append(
+                    f"{metric_name}={error:.2f} {TARGET_UNITS[tgt]}{delta_str}"
+                )
             split_name = "VAL" if split == DataSplit.VAL else split.name
             lines.append(f"{split_name:<6}: " + " | ".join(entries))
         lines.append("=" * 60)
@@ -211,7 +210,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 cycle=cycle + 1,
                 splits=splits,
                 title=f"after {step.upper()}",
-                prev_metrics=self._get_previous_metrics(step)
+                prev_metrics=self._get_previous_metrics(step),
             )
             logger.info(summary)
 
@@ -259,10 +258,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
-        rf_weights = self.solve(
-            covs=covs,
-            coeffs=coeffs,
-        )
+        rf_weights = self.solve(covs=covs, coeffs=coeffs)
         # weights from [n_rf] to [1, n_rf]
         rf_weights = rf_weights.unsqueeze(0)
         return rf_weights
@@ -293,9 +289,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     if self.fmaps
                     else model.grad_feature_map(data, list(self.training_targets))
                 )
-                les_predictions = model.predict_les(
-                    data, list(self.training_targets), is_training=True
-                )
+                les_predictions = model.predict_les(data, list(self.training_targets))
                 predictions = {}
                 for target in self.training_targets:
                     short_range = (
@@ -309,7 +303,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 predictions = model.predict(
                     targets=list(self.training_targets),
                     data=data,
-                    is_training=True,
                     add_energy_shift=False,
                 )
             # Match the RFF normal equations: all feature maps and targets
@@ -421,10 +414,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     def _prepare_projection(self, covs: dict[TargetType, Tensor]) -> Tensor:
         l2_penalty = self.l2_penalty
         target_weights = self.rel_tgt_weight
-        matrix: torch.Tensor
-        matrix = sum(
-            target_weights[t] * covs[t] for t in self.training_targets
-        )  # type: ignore
+        matrix: torch.Tensor = cast(
+            Tensor, sum(target_weights[t] * covs[t] for t in self.training_targets)
+        )
         matrix.diagonal().add_(l2_penalty)
         return torch.linalg.cholesky(matrix)
 
@@ -434,10 +426,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         model: LESFrankenPotential,
         proj_mat: Tensor,
         normalization: dict[TargetType, Tensor] | None,
-    ):
+    ) -> None:
         target_weights = self.rel_tgt_weight
         coeffs = self.residual_coeffs(model, self.train_dataloader, normalization)
-        rhs = sum(target_weights[t] * coeffs[t] for t in self.training_targets)
+        rhs: Tensor = cast(
+            Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
+        )
         solution = torch.cholesky_solve(rhs[:, None], proj_mat).T
         model.rf.weights.copy_(solution)
 
@@ -455,6 +449,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 The fitting logs, together with the learned weights.
         """
         self.patch_e3nn()
+        model.train()
 
         if dist_utils.get_world_size() != 1:
             raise NotImplementedError(
@@ -503,9 +498,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return log_collection, model.rf.weights.detach()
 
     @no_jit()
-    def evaluate(
+    def evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
-        model: FrankenPotential,
+        model: LESFrankenPotential,
         dataloader: torch.utils.data.DataLoader,
         log_collection: LogCollection,
         all_weights: torch.Tensor | None,
@@ -599,9 +594,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             assert data.natoms.numel() == 1, "Batched training is not supported"
             targets: Target = targets.to(device=self.device)
 
-            les_preds = model.predict_les(
-                data, self.training_targets, is_training=False  # type: ignore
-            )
+            model.eval()
+            les_preds = model.predict_les(data, self.training_targets)
+            model.train()
             target_fmaps = (
                 {t: self.fmaps[t][i] for t in self.training_targets}
                 if self.fmaps

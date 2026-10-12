@@ -1,4 +1,4 @@
-"""Franken model"""
+"""Franken latent Ewalds summation model"""
 
 import logging
 import os
@@ -19,12 +19,6 @@ from franken.data import Configuration
 import franken.data.base
 from franken.rf.model import FrankenPotential
 from franken.utils.derivatives import forces_bwdad, forces_stress_bwdad
-from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    STRESS_TARGET_KEY,
-    LES_CHARGES_TARGET_KEY,
-)
 
 logger = logging.getLogger("franken")
 
@@ -168,24 +162,31 @@ class LESFrankenPotential(FrankenPotential):
         else:
             return model
 
-    def _get_les_energy(
+    def _get_les_outputs(
         self,
         atom_pos: torch.Tensor,
         descriptors: torch.Tensor,
         data: Configuration,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
         cell = data.cell
-        if cell is not None:
-            cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
-        energy = self.les(
+        if cell is not None and cell.dim() == 2:
+            cell = cell.unsqueeze(0)
+        les_out_internal = self.les(
             positions=atom_pos,
             cell=cell,
             desc=descriptors,
             batch=data.batch_ids,
-        )["E_lr"]
-
-        assert energy is not None
-        return energy.reshape(1, -1)
+        )
+        # epsilon_0 = 0.00552635  # e^2 eV^-1 A^-1
+        q_normalisation_factor = 1  # (2 * epsilon_0) ** 0.5
+        les_out = {
+            franken.data.base.ENERGY_TARGET_KEY: les_out_internal["E_lr"].reshape(
+                1, -1
+            ),
+            franken.data.base.LES_CHARGES_TARGET_KEY: les_out_internal["latent_charges"]
+            * q_normalisation_factor,
+        }
+        return les_out
 
     def _energy_aux(
         self,
@@ -204,10 +205,10 @@ class LESFrankenPotential(FrankenPotential):
         natoms = data.natoms.to(dtype=weights.dtype).view(-1)  # [N]
         rff_energies = torch.matmul(random_features, weights.T).T  # [M, N]
         rff_energies = natoms[None, :] * rff_energies
-        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
-        energies = rff_energies + les_energies
-
-        return energies.sum(1), energies
+        les_out = self._get_les_outputs(atom_pos, gnn_descriptors, data)
+        tot_energy = rff_energies + les_out[franken.data.base.ENERGY_TARGET_KEY]
+        les_out[franken.data.base.ENERGY_TARGET_KEY] = tot_energy
+        return tot_energy.sum(1), les_out
 
     def _les_energy_aux(
         self,
@@ -216,172 +217,70 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ):
         gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_energies = self._get_les_energy(atom_pos, gnn_descriptors, data)
-        return les_energies.sum(1), les_energies
-
-    def _get_les_charges(
-        self,
-        atom_pos: torch.Tensor,
-        descriptors: torch.Tensor,
-        data: Configuration,
-    ) -> torch.Tensor:
-        # check on cell (TODO check if it also handles the non-periodic case)
-        cell = data.cell
-        assert cell is not None
-        cell = cell.unsqueeze(0) if cell.dim() == 2 else cell
-
-        les_charges = self.les(
-            positions=atom_pos,
-            cell=cell,
-            desc=descriptors,
-            batch=data.batch_ids,
-        )["latent_charges"]
-        assert les_charges is not None
-
-        # Convert the normalized latent charges into physical units.
-        # Check if this normalization is required
-        epsilon_0 = 0.00552635  # e^2 eV^-1 A^-1
-        q_normalisation_factor = 1  # (2 * epsilon_0) ** 0.5
-        les_charges = les_charges * q_normalisation_factor
-
-        # TODO: probably we want to propagate other things in addtion to latent charges e.g. latent_dipoles etc...
-        return les_charges
-
-    def _les_charges_aux(
-        self,
-        atom_pos: torch.Tensor,
-        displacement: torch.Tensor | None,
-        data: Configuration,
-    ):
-        gnn_descriptors = self.descriptors(atom_pos, displacement, data)
-        les_charges = self._get_les_charges(atom_pos, gnn_descriptors, data)
-        return les_charges
+        les_outputs = self._get_les_outputs(atom_pos, gnn_descriptors, data)
+        return les_outputs[franken.data.base.ENERGY_TARGET_KEY].sum(1), les_outputs
 
     def _predict(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         weights: torch.Tensor | None,
         data: Configuration,
         targets: list[str],
-        is_training: bool,
+        mode: str,
     ) -> dict[str, torch.Tensor]:
+        if mode != "torch.autograd":
+            raise RuntimeError(
+                f"LESFrankenPotential only supports 'torch.autograd' differential mode. Found {mode}"
+            )
         if weights is None:
             weights = self.rf.weights
-        compute_force = FORCES_TARGET_KEY in targets
-        compute_stress = STRESS_TARGET_KEY in targets
-        compute_charges = LES_CHARGES_TARGET_KEY in targets
-
-        results = {}
-
+        compute_force = franken.data.base.FORCES_TARGET_KEY in targets
+        compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
-            results.update(
-                forces_stress_bwdad(
-                    data, fn=self._energy_aux, is_training=is_training, weights=weights
-                )
+            return forces_stress_bwdad(
+                data, fn=self._energy_aux, is_training=self.training, weights=weights
             )
         elif compute_force:
-            results.update(
-                forces_bwdad(
-                    data, fn=self._energy_aux, is_training=is_training, weights=weights
-                )
+            return forces_bwdad(
+                data, fn=self._energy_aux, is_training=self.training, weights=weights
             )
         else:
-            _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
-            results[ENERGY_TARGET_KEY] = energy
-
-        # TODO: probably we want to expose other things in addtion to latent charges e.g. latent_dipoles etc...
-        if compute_charges:
-            # note: this calls the les module twice
-            results[franken.data.base.LES_CHARGES_TARGET_KEY] = self._les_charges_aux(
-                data.atom_pos,
-                None,
-                data,
-            )
-        return results
+            _, results = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
+            return results
 
     def predict_les(
         self,
         data: Configuration,
         targets: list[str],
-        is_training: bool = False,
     ) -> dict[str, torch.Tensor]:
+        """Predict using **only** the LES module.
+
+        The random-features contribution is not computed.
+        """
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress:
             return forces_stress_bwdad(
-                data, fn=self._les_energy_aux, is_training=is_training
+                data, fn=self._les_energy_aux, is_training=self.training
             )
         elif compute_force:
-            return forces_bwdad(data, fn=self._les_energy_aux, is_training=is_training)
-        else:
-            _, energy = self._les_energy_aux(data.atom_pos, None, data)  # [M, N]
-            return {franken.data.base.ENERGY_TARGET_KEY: energy}
-
-    def predict(
-        self,
-        targets: list[str],
-        data: Configuration,
-        weights: torch.Tensor | None = None,
-        differential_mode: str = "torch.autograd",
-        add_energy_shift: bool = True,
-        is_training: bool = False,
-    ) -> dict[str, torch.Tensor]:
-        """Infer energy, forces and other quantities for an atomic system with a learned RF model.
-
-        The parameter `weights` can be used to specified the model's coefficients. Otherwise the ones stored in
-        :attr:`FrankenPotential.rf.weights` will be used instead.
-
-        Args:
-            targets: the target quantities to compute. For example, :code:`"energy"`, :code:`"forces"`
-                or :code:`"stress"`. To see all available quantities, check :attr:`"franken.data.base.TargetType"`.
-            weights: weights of the random feature model. Defaults to None, in which case
-                the weights set in :attr:`FrankenPotential.rf` will be used instead.
-            add_energy_shift: whether to add the energy shift to the energy.
-
-        Returns:
-            A dictionary mapping requested targets to the computed values.
-            Each requested target has a first dimension which depends on the number of models present
-            in the current weights. The second dimension depends on the number of separate systems present
-            in the data. Further dimensions depend on the specific target. For example,
-            forces have size `[num_models, num_systems * num_atoms_per_system, 3]`; stress tensors instead
-            have size `[num_models, num_systems, 3, 3]` and energy tensors have size `[num_models, num_systems]`.
-
-        Note:
-            The `"torch.func"` strategy for differentiation is not supported for torch-jitted models.
-            Use `"torch.autograd"` if the model has been processed by :code:`torch.jit.script`.
-        """
-        natoms = torch.atleast_1d(data.natoms)
-        out = self._predict(weights, data, targets, is_training=is_training)
-
-        if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in targets:
-            out[franken.data.base.ENERGY_TARGET_KEY] = out[
-                franken.data.base.ENERGY_TARGET_KEY
-            ] + self.energy_shift(
-                data.atomic_numbers,
-                batch_ids=data.batch_ids,
-                num_systems=int(natoms.numel()),
+            return forces_bwdad(
+                data, fn=self._les_energy_aux, is_training=self.training
             )
-        return out  # ([M, N], [M, A, 3])
+        else:
+            _, results = self._les_energy_aux(data.atom_pos, None, data)  # [M, N]
+            return results
 
-    def forward(
-        self,
-        targets: list[str],
-        data: Configuration,
-        weights: torch.Tensor | None = None,
-        add_energy_shift: bool = True,
-    ) -> dict[str, torch.Tensor]:
-        """
-        See docstring of :meth:`~franken.rf.model.FrankenPotential.predict`.
+    @torch.jit.export
+    def supported_targets(self) -> list[str]:
+        """Returns the list of target keys which are supported by the model.
 
-        This function defaults to using the 'torch.autograd' strategy which allows the model
-        to be jit-compiled.
+        Requesting a target which is unsupported from the ``forward`` or ``predict``
+        methods will simply not return any result for that target, likely leading
+        to downstream errors.
         """
-        out = self.predict(
-            targets=targets,
-            data=data,
-            weights=weights,
-            differential_mode=(
-                "torch.autograd" if not self.force_func_grad else "torch.func"
-            ),
-            add_energy_shift=add_energy_shift,
-        )
-        return {k: v.squeeze(0) for k, v in out.items()}
+        return [
+            franken.data.base.ENERGY_TARGET_KEY,
+            franken.data.base.FORCES_TARGET_KEY,
+            franken.data.base.STRESS_TARGET_KEY,
+            franken.data.base.LES_CHARGES_TARGET_KEY,
+        ]

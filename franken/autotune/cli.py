@@ -503,7 +503,12 @@ def get_arg_groups():
             Argument.from_dataclass(LESConfig, "dl", "dl"),
             Argument.from_dataclass(LESConfig, "sigma", "sigma"),
             Argument.from_dataclass(LESConfig, "les_output_scale", "les-output-scale"),
-            Argument.from_dataclass(LESConfig, "add_linear_nn", "add-linear-nn"),
+            Argument.from_dataclass(
+                LESConfig,
+                "add_linear_nn",
+                "add-linear-nn",
+                opposite_full_name="no-linear-nn",
+            ),
             Argument.from_dataclass(LESConfig, "N_max", "n-max"),
             Argument.from_dataclass(LESConfig, "optimizer", "optimizer"),
             Argument.from_dataclass(
@@ -524,8 +529,6 @@ def get_arg_groups():
                 LESConfig,
                 "batch_size",
                 "batch-size",
-                metavar="HYPERPARAMETER",
-                type=HPSearchConfig.from_str,
             ),
             Argument.from_dataclass(
                 LESConfig,
@@ -550,7 +553,7 @@ def get_arg_groups():
             ),
             Argument.from_dataclass(
                 LESConfig,
-                "lbfgslearning_rate",
+                "lbfgs_learning_rate",
                 "lbfgs-learning-rate",
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
