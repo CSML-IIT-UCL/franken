@@ -124,7 +124,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             "lbfgs_tolerance_grad": self.lbfgs_tolerance_grad,
             "lbfgs_tolerance_change": self.lbfgs_tolerance_change,
             "mode": self.mode,
-        } | {f"{k}_relative_weight": v for k, v in self.rel_tgt_weight.items()}
+        } | {f"{k}_weight": v[0] for k, v in self.target_weight.items()}
+        # NOTE: the LES HPs will be duplicated (present both here and in the solver
+        # due to the LESConfig containing them).
         hp_groups = model.hyperparameters | {"solver": solver_hps}
         hyperparameters = []
         for group_name, hps in hp_groups.items():

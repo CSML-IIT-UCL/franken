@@ -40,7 +40,7 @@ from franken.trainers import (
     RandomFeaturesTrainer,
 )
 from franken.trainers.log_utils import DataSplit, LogEntry
-from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
+from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 import franken.utils.distributed as dist_utils
 from franken.backbones.utils import CacheDir
 from franken.data import FrankenAtomsDataset

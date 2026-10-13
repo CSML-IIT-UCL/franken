@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import torch
 
 from franken.trainers.log_utils import DataSplit, LogEntry
-from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
+from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 from franken.config import LESConfig
 
 
