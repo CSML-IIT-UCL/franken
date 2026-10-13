@@ -10,7 +10,7 @@ from franken.autotune.cli import parse_cli
 from franken.config import LESConfig
 from franken.data.base import Configuration, Target
 from franken.trainers.log_utils import DataSplit, LogEntry
-from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
+from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 
 
 class ToyModel(torch.nn.Module):

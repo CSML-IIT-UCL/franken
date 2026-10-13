@@ -6,14 +6,6 @@ from typing import Literal, Mapping, Optional, Union
 
 import torch
 
-try:
-    from les import Les
-except ImportError as exc:
-    raise ImportError(
-        "LESFrankenPotential requires the external LES package. "
-        "Install it with pip install 'franken[les]'."
-    ) from exc
-
 from franken.config import BackboneConfig, LESConfig, RFConfig
 from franken.data import Configuration
 import franken.data.base
@@ -35,6 +27,13 @@ class LESFrankenPotential(FrankenPotential):
         num_species: int = 1,
         atomic_energies: Optional[Mapping[int, torch.Tensor | float]] = None,
     ):
+        try:
+            from les import Les
+        except ImportError as exc:
+            raise ImportError(
+                "LESFrankenPotential requires the external LES package. "
+                "Install it with pip install 'franken[les]'."
+            ) from exc
         super(LESFrankenPotential, self).__init__(
             gnn_config=gnn_config,
             rf_config=rf_config,

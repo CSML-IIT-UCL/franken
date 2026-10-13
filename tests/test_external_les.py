@@ -13,7 +13,7 @@ from franken.config import (
 from franken.data.base import Configuration, Target
 from franken.rf.les_model import LESFrankenPotential
 from franken.rf.model import FrankenPotential
-from franken.trainers.rf_ewalds import RandomFeaturesEwaldsTrainer
+from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 
 
 class ToyBackbone(torch.nn.Module):
