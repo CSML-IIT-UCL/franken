@@ -1,6 +1,7 @@
 import abc
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -185,3 +186,9 @@ class BaseTrainer(abc.ABC):
                 f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
                 f"to {self.log_dir / 'best_ckpt.pt'}"
             )
+            history_file = self.log_dir / "training_history.json"
+            if history_file.exists():
+                shutil.copy2(
+                            history_file,
+                            self.log_dir / "best_training_history.json",
+                )
