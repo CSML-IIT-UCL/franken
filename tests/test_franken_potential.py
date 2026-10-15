@@ -65,67 +65,62 @@ def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
     return data
 
 
+
+
+
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
+@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("scale_by_Z", [True, False])
-def test_save_load_functionality(rf_cfg, device, scale_by_Z):
+def test_save_load_functionality(rf_cfg, device, scale_by_Z, gnn_cfg, tmp_path):
     """Test for checking save and load methods of FrankenPotential"""
-    for gnn_cfg in DEFAULT_GNN_CONFIGS:
-        temp_dir = None
-        try:
-            # Step 1: Create a temporary directory for saving the model
-            temp_dir = create_temp_dir()
+    data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
+    dataset = FrankenAtomsDataset(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_cfg,
+    )
 
-            data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
-            dataset = FrankenAtomsDataset(
-                data_path=data_path,
-                split="train",
-                gnn_config=gnn_cfg,
+    model = FrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        scale_by_Z=scale_by_Z,
+        num_species=dataset.num_species,
+    ).to(device)
+
+    with torch.no_grad():
+        gnn_features_stats = Statistics()
+        for data, _ in dataset:  # type: ignore
+            data = data.to(device=device)
+            gnn_features = model.gnn.descriptors(data)
+            gnn_features_stats.update(
+                gnn_features, atomic_numbers=data.atomic_numbers
             )
 
-            model = FrankenPotential(
-                gnn_config=gnn_cfg,
-                rf_config=rf_cfg,
-                scale_by_Z=scale_by_Z,
-                num_species=dataset.num_species,
-            ).to(device)
+        model.input_scaler.set_from_statistics(gnn_features_stats)
+        garbage_collection_cuda()
 
-            with torch.no_grad():
-                gnn_features_stats = Statistics()
-                for data, _ in dataset:  # type: ignore
-                    data = data.to(device=device)
-                    gnn_features = model.gnn.descriptors(data)
-                    gnn_features_stats.update(
-                        gnn_features, atomic_numbers=data.atomic_numbers
-                    )
+    # Step 2: Save the model to the temporary directory
+    model_save_path = tmp_path / "model_checkpoint.pth"
+    model.save(model_save_path)
 
-                model.input_scaler.set_from_statistics(gnn_features_stats)
-                garbage_collection_cuda()
+    # Step 3: Load the model from the saved checkpoint
+    loaded_model = FrankenPotential.load(model_save_path, map_location=device)
 
-            # Step 2: Save the model to the temporary directory
-            model_save_path = os.path.join(temp_dir, "model_checkpoint.pth")
-            model.save(model_save_path)
+    # Step 4: Compare rf.state_dict between the original and loaded models
+    assert are_dicts_close(
+        model.rf.state_dict(), loaded_model.rf.state_dict(), verbose=True
+    ), "The rf.state_dict() of the loaded model does not match the original model."
+    assert are_dicts_close(
+        model.input_scaler.state_dict(),
+        loaded_model.input_scaler.state_dict(),
+        verbose=True,
+    ), "The input_scaler.state_dict() of the loaded model does not match the original model."
 
-            # Step 3: Load the model from the saved checkpoint
-            loaded_model = FrankenPotential.load(model_save_path, map_location=device)
-
-            # Step 4: Compare rf.state_dict between the original and loaded models
-            assert are_dicts_close(
-                model.rf.state_dict(), loaded_model.rf.state_dict(), verbose=True
-            ), "The rf.state_dict() of the loaded model does not match the original model."
-            assert are_dicts_close(
-                model.input_scaler.state_dict(),
-                loaded_model.input_scaler.state_dict(),
-                verbose=True,
-            ), "The input_scaler.state_dict() of the loaded model does not match the original model."
-
-            # Step 5: Compare the hyperparameters between the original and loaded models
-            assert (
-                model.hyperparameters == loaded_model.hyperparameters
-            ), "The hyperparameters of the loaded model do not match the original model."
-        finally:
-            if temp_dir is not None:
-                cleanup_dir(temp_dir)
+    # Step 5: Compare the hyperparameters between the original and loaded models
+    assert (
+        model.hyperparameters == loaded_model.hyperparameters
+    ), "The hyperparameters of the loaded model do not match the original model."
 
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)

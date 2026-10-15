@@ -1,5 +1,8 @@
 """Small optimizer tests, independent of downloaded backbone checkpoints."""
 
+import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -595,3 +598,74 @@ def test_cli_training_options():
     )
     assert projected.les.mode == "variable_projection"
     assert projected.les.activation == "silu"
+
+
+class TestLESTrainingHistory():
+    def make_trainer(self, log_dir):
+        trainer = object.__new__(RandomFeaturesEwaldsTrainer)
+        trainer.log_dir = log_dir
+        trainer.training_history = []
+        trainer.les_config = LESConfig(restore_best=False)
+        trainer.train_dataloader = Mock(name="train_loader")
+        trainer.val_dataloader = Mock(name="validation_loader")
+        trainer.create_log_entry = Mock(
+            side_effect=lambda *args: LogEntry("model123", 0, 0, 0)
+        )
+        trainer.eval_summary = Mock(return_value="evaluation")
+
+        def evaluate(model, loader, log_collection, all_weights):
+            split = (
+                DataSplit.TRAIN
+                if loader is trainer.train_dataloader
+                else DataSplit.VALIDATION
+            )
+            for name, value in (("energy_RMSE", 1.5), ("forces_RMSE", 20.0)):
+                log_collection[0].add_metric(name, value, split)
+            return log_collection
+
+        trainer.evaluate = Mock(side_effect=evaluate)
+        return trainer
+
+    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=0)
+    def test_records_both_stages_and_splits_with_current_weights(self, rank):
+        with tempfile.TemporaryDirectory() as tmp:
+            trainer = self.make_trainer(Path(tmp) / "run")
+            model = Mock()
+            weights = torch.tensor([[2.0]])
+            path = Path(tmp) / "run" / "training_history.json"
+            trainer._print_eval({}, model, weights, 0, step="rff")
+            first = json.loads(path.read_text())
+            assert len(first) == 1 
+            for call in trainer.evaluate.call_args_list:
+                self.assertIs(call.kwargs["all_weights"], weights)
+            trainer._print_eval({}, model, None, 0, step="les")
+            trainer._print_eval({}, model, weights, 1, step="rff")
+            saved = json.loads(path.read_text())
+            assert saved == trainer.training_history
+            assert (
+                [(row["cycle"], row["step"]) for row in saved]
+                == [(1, "rff"), (1, "les"), (2, "rff")]
+            )
+            for row in saved:
+                for split in ("train", "validation"):
+                    assert row["metrics"][split]["energy_RMSE"] == 1.5
+                    assert row["metrics"][split]["forces_RMSE"] == 20.0
+            assert not path.with_suffix(".json.tmp").exists()
+
+    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=0)
+    def test_without_validation_or_log_directory(self, rank):
+        trainer = self.make_trainer(None)
+        trainer.val_dataloader = None
+        trainer._print_eval({}, Mock(), None, 0, step="joint")
+        assert trainer.evaluate.call_count == 1
+        assert trainer.training_history[0]["step"] == "joint"
+        assert set(trainer.training_history[0]["metrics"]) == {"train"}
+
+    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=1)
+    def test_other_ranks_evaluate_without_writing(self, rank):
+        with tempfile.TemporaryDirectory() as tmp:
+            trainer = self.make_trainer(Path(tmp))
+            trainer._print_eval({}, Mock(), None, 0, step="les")
+            assert trainer.evaluate.call_count == 2
+            assert trainer.training_history == []
+            assert list(Path(tmp).iterdir()) == []
