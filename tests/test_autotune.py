@@ -7,11 +7,10 @@ import numpy as np
 import pytest
 
 from franken.trainers.log_utils import LogCollection
-from franken.config import AutotuneConfig, DatasetConfig, GaussianRFConfig, HPSearchConfig, MaceBackboneConfig, MultiscaleGaussianRFConfig, SolverConfig
+from franken.config import AutotuneConfig, DatasetConfig, GaussianRFConfig, HPSearchConfig, LESConfig, MultiscaleGaussianRFConfig, SolverConfig
 from franken.autotune.cli import parse_cli
-from franken.autotune.script import get_dataset_paths, init_loaders, run_autotune
+from franken.autotune.script import create_outer_hpsearch_grid, get_dataset_paths, init_loaders, run_autotune
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, TargetType
-from franken.trainers.rf_trainer import RandomFeaturesTrainer
 from franken.datasets.registry import DATASET_REGISTRY
 
 from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
@@ -120,3 +119,10 @@ def test_explicit_dataset_paths_override_registered_dataset_paths(registry):
     assert val_path == Path("/tmp/custom-val.xyz")
     assert test_path is None
     registry.get_path.assert_not_called()
+
+    
+class TestHPGrid:
+    def test_tuple_param_not_in_grid(self):
+        cfg = LESConfig(hidden_dim=(32, 16, 8))
+        param_grid = list(create_outer_hpsearch_grid((cfg, )))
+        assert len(param_grid) == 1
