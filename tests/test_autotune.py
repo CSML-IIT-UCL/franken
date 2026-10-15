@@ -70,39 +70,93 @@ def test_integration(gnn_cfg, device, atomic_energies):
             cleanup_dir(str(temp_dir))
 
 
-def test_parse_cli():
-    cfg = parse_cli([
-        "--train-path",
-        "/tmp/train.xyz",
-        "--val-path",
-        "/tmp/val.xyz",
-        "--backbone",
-        "mace",
-        "--mace.path-or-id",
-        "mace_mp/small",
-        "--rf",
-        "gaussian",
-        "--gaussian.num-rf",
-        "128",
-        "--gaussian.length-scale",
-        "[1.,2.]",
-        "--train-targets",
-        "energy",
-        "forces",
-        "stress",
-        "--stress-weight",
-        "(0.1,0.9,2,linear)",
-        "--metrics",
-        "energy_MAE",
-        "forces_MAE",
-        "stress_MAE",
-        "--run-dir",
-        ".",
-    ])
+class TestCLI:
+    def test_parse_cli(self):
+        cfg = parse_cli([
+            "--train-path",
+            "/tmp/train.xyz",
+            "--val-path",
+            "/tmp/val.xyz",
+            "--backbone",
+            "mace",
+            "--mace.path-or-id",
+            "mace_mp/small",
+            "--rf",
+            "gaussian",
+            "--gaussian.num-rf",
+            "128",
+            "--gaussian.length-scale",
+            "[1.,2.]",
+            "--train-targets",
+            "energy",
+            "forces",
+            "stress",
+            "--stress-weight",
+            "(0.1,0.9,2,linear)",
+            "--metrics",
+            "energy_MAE",
+            "forces_MAE",
+            "stress_MAE",
+            "--run-dir",
+            ".",
+        ])
 
-    assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
-    assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
-    assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
+        assert cfg.les is None
+        assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+        assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
+        assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
+
+    def test_les(self):
+        config = parse_cli(
+            [
+                "--train-path",
+                "/tmp/train.xyz",
+                "--backbone",
+                "mace",
+                "--mace.path-or-id",
+                "mace_mp/small",
+                "--rf",
+                "gaussian",
+                "--gaussian.num-rf",
+                "8",
+                "--les",
+                "--les.sigma",
+                "0.8",
+                "--les.hidden-dim",
+                "(64, 32)",
+                "--les.dl",
+                "2.5",
+                "--les.n-max",
+                "12",
+                "--les.num-cycles",
+                "7",
+            ]
+        )
+        assert config.les is not None
+        assert config.les.sigma == 0.8
+        assert config.les.hidden_dim == (64, 32)
+        assert config.les.dl == 2.5
+        assert config.les.N_max == 12
+        assert isinstance(config.les.num_cycles, HPSearchConfig)
+        assert config.les.num_cycles.get_vals() == [7]
+        assert not hasattr(config, "les_training")
+
+    def test_no_les(self):
+        config = parse_cli(
+            [
+                "--train-path",
+                "/tmp/train.xyz",
+                "--backbone",
+                "mace",
+                "--mace.path-or-id",
+                "mace_mp/small",
+                "--rf",
+                "gaussian",
+                "--gaussian.num-rf",
+                "8",
+            ]
+        )
+        assert config.les is None
 
 
 class TestHPGrid:
