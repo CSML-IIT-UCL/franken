@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import time
+import typing
 import warnings
 from pathlib import Path
 from typing_extensions import TypeVarTuple, Unpack
@@ -185,6 +186,13 @@ def hps_from_config(cfg: DataclassInstance) -> dict[str, Sequence[Any]]:
     hp_iterators = {}
     for field in dataclasses.fields(cfg):
         hp_def = getattr(cfg, field.name)
+        # Skip if field is a list but not a hp-search object.
+        if (
+            field.type != HPSearchConfig
+            and HPSearchConfig not in typing.get_args(field.type)
+            and typing.get_origin(field.type) in {tuple, list}
+        ):
+            continue
         if isinstance(hp_def, HPSearchConfig):
             hp_iterators[field.name] = hp_def.get_vals()
         elif isinstance(hp_def, (list, tuple)):
@@ -244,11 +252,11 @@ def create_solver_hpsearch_grid(
 ) -> tuple[list[float], dict[TargetType, list[float]]]:
     solver_hps = hps_from_config(cfg)
     weight_dict: dict[TargetType, list[float]] = {
-        ENERGY_TARGET_KEY: solver_hps["energy_weight"],
-        FORCES_TARGET_KEY: solver_hps["force_weight"],
-        STRESS_TARGET_KEY: solver_hps["stress_weight"],
+        ENERGY_TARGET_KEY: cast(list[float], solver_hps["energy_weight"]),
+        FORCES_TARGET_KEY: cast(list[float], solver_hps["force_weight"]),
+        STRESS_TARGET_KEY: cast(list[float], solver_hps["stress_weight"]),
     }
-    return solver_hps["l2_penalty"], weight_dict
+    return cast(list[float], solver_hps["l2_penalty"]), weight_dict
 
 
 def param_grid_desc(cfg: tuple[Unpack[Ts]]) -> str:
@@ -479,6 +487,14 @@ def init_les_trainer(
     if not isinstance(les_cfg.lbfgs_tolerance_change, (int, float)):
         raise ValueError(
             f"lbfgs_tolerance_change must be a single float for LES trainer. Found {les_cfg.lbfgs_tolerance_change}"
+        )
+    if not isinstance(les_cfg.epochs_per_cycle, (int)):
+        raise ValueError(
+            f"epochs_per_cycle must be a single int for LES trainer. Found {les_cfg.epochs_per_cycle}"
+        )
+    if not isinstance(les_cfg.learning_rate, (int, float)):
+        raise ValueError(
+            f"learning_rate must be a single float for LES trainer. Found {les_cfg.learning_rate}"
         )
 
     trainer = RandomFeaturesEwaldsTrainer(
