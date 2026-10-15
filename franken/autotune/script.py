@@ -11,6 +11,7 @@ from typing import (
     Any,
     Iterator,
     NamedTuple,
+    Sequence,
     cast,
 )
 from uuid import uuid4
@@ -180,7 +181,7 @@ def hp_summary_str(
     return hp_summary
 
 
-def hps_from_config(cfg: DataclassInstance):
+def hps_from_config(cfg: DataclassInstance) -> dict[str, Sequence[Any]]:
     hp_iterators = {}
     for field in dataclasses.fields(cfg):
         hp_def = getattr(cfg, field.name)
@@ -250,6 +251,18 @@ def create_solver_hpsearch_grid(
     return solver_hps["l2_penalty"], weight_dict
 
 
+def param_grid_desc(cfg: tuple[Unpack[Ts]]) -> str:
+    cfgs: tuple[Any, ...] = cfg  # element types are opaque inside the body
+    s = ""
+    for c in cfgs:
+        s += str(type(c)) + "\n"
+        hps = hps_from_config(c)
+        for k, v in hps.items():
+            v_s = "[" + ", ".join([f"{val}" for val in v]) + "]"
+            s += f"\t{k:<15} = {v_s}\n"
+    return s
+
+
 def run_autotune(
     auto_cfg: AutotuneConfig,
     loaders: dict[str, torch.utils.data.DataLoader],
@@ -268,11 +281,14 @@ def run_autotune(
         param_grid = list(
             create_outer_hpsearch_grid((auto_cfg.rfs, auto_cfg.les, auto_cfg.solver))
         )
+        pgrid_desc = param_grid_desc((auto_cfg.rfs, auto_cfg.les, auto_cfg.solver))
     else:
         param_grid = list(create_outer_hpsearch_grid((auto_cfg.rfs,)))
+        pgrid_desc = param_grid_desc((auto_cfg.rfs,))
     print(
-        f"Autotuning {'LES ' if is_les else ''} Franken with {len(param_grid)} parameters."
+        f"Autotuning {'LES ' if is_les else ''} Franken with {len(param_grid)} hyper-parameters."
     )
+    print(pgrid_desc)
     for trial_id, trial_params in param_grid:
         logger.debug(f"Autotune iteration {trial_id} with parameters {trial_params}")
         if is_les:
