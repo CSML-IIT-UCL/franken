@@ -168,7 +168,9 @@ class LESFrankenPotential(FrankenPotential):
         data: Configuration,
     ) -> dict[str, torch.Tensor]:
         cell = data.cell
-        if cell is not None and cell.dim() == 2:
+        if cell is None:
+            cell = torch.zeros(len(data.natoms), 3, 3)
+        if cell.dim() == 2:
             cell = cell.unsqueeze(0)
         les_out_internal = self.les(
             positions=atom_pos,
