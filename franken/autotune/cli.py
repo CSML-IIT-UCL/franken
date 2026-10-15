@@ -492,7 +492,7 @@ def get_arg_groups():
         ],
         help_text="Choose the random-feature approximation.",
     )
-    les_group = ArgumentGroup(
+    les_group = MutuallyExclusiveArgumentGroup(
         "les",
         "LES options",
         desc="Configure the Latent Ewald Summation model",
