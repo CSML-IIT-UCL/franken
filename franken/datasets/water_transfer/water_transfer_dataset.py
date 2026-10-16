@@ -12,6 +12,7 @@ class WaterTransferRegisteredDataset(BaseRegisteredDataset):
         "water-transfer": {
             "train": "water-transfer/train-0-100.xyz",
             "val": "water-transfer/val-100-450.xyz",
+            "test": "water-transfer/test-last-350.xyz",
         },
     }
 
@@ -27,7 +28,7 @@ class WaterTransferRegisteredDataset(BaseRegisteredDataset):
                 "water", "train", base_path, download=download
             )
             path.parent.mkdir(exist_ok=True, parents=True)
-            frame_slice = {"train": ":100", "val": "100:450"}[split]
+            frame_slice = {"train": ":100", "val": "100:450", "test": "-350:"}[split]
             frames = ase.io.read(source_path, index=frame_slice, format="extxyz")
             ase.io.write(path, frames, format="extxyz")
         return path
