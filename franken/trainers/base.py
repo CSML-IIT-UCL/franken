@@ -229,6 +229,6 @@ class BaseTrainer(abc.ABC):
             history_file = self.log_dir / "training_history.json"
             if history_file.exists():
                 shutil.copy2(
-                            history_file,
-                            self.log_dir / "best_training_history.json",
+                    history_file,
+                    self.log_dir / "best_training_history.json",
                 )
