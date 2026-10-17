@@ -32,6 +32,7 @@ from franken.config import (
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from plot_training_history import plot_training_history
+from plot_HPGridSearch import plot_HPGridSearch 
 
 
 State = Literal["CC", "CP", "PP"]
@@ -220,11 +221,11 @@ if __name__ == "__main__":
         N_max=20,
         optimizer="lbfgs",
         mode="variable_projection",
-        num_cycles=10,
+        num_cycles=15,
         batch_size=None,
         lbfgs_learning_rate=1.0,
-        lbfgs_max_iter=[10, 20, 40, 80],
-        lbfgs_history_size=[20, 80]
+        lbfgs_max_iter=20,#[10, 20, 40, 80],
+        lbfgs_history_size=20,#[20, 80]
     )
 
     # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
@@ -257,3 +258,9 @@ if __name__ == "__main__":
             les_config=les_config,
         )
         evaluate_and_plot(dset, use_les=True)
+
+        kind = "les"
+        run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
+        hyperparameter_1 = "forces_relative_weight"
+        hyperparameter_2 = "l2_penalty"
+        plot_HPGridSearch(run,hyperparameter_1,hyperparameter_2,kind)
