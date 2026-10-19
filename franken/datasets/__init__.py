@@ -6,5 +6,6 @@ from .TM23 import tm23_dataset  # noqa: F401
 from .PtH2O import pth2o_dataset  # noqa: F401
 from .test import test_dataset  # noqa: F401
 from .dimers import dimers_dataset  # noqa: F401
+from .electrolyte import electrolyte_dataset  # noqa: F401
 
 __all__ = ("DATASET_REGISTRY",)
