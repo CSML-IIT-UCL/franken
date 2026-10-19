@@ -92,37 +92,12 @@ By default, `feature_map` returns one pooled row per structure. With
 `per_atom=True`, it instead returns rows of shape
 `[total_atoms, total_feature_dim]` in the same feature space as the fitted weights.
 For each structure, the mean of these normalized contributions equals its
-pooled feature map. Their sum gives the total-energy feature map:
+pooled feature map, which depend also if a species pooling is used. Their sum gives the total-energy feature map:
 
 $$
 \Phi = \frac{1}{N}\sum_i \phi_i,\qquad
 E = N w^\mathrm{T}\Phi = \sum_i w^\mathrm{T}\phi_i.
 $$
 
-Without species pooling, contributions are identical to the raw atomic rows.
-With $S$ species, an atom of species $s$ contributes to its species block with
-weight $N/(S N_s)$, where $N_s$ is its species count in that structure. If the
-chemical mixing ratio $\kappa$ is specified, contributions concatenate the
-ordinary atomic row weighted by $1-\kappa$ and the species blocks weighted by
-$\kappa$. Counts are computed separately for every structure in a batch. Species
-blocks follow sorted atomic numbers; as with ordinary pooling, the atomic
-numbers supplied to a call must collectively contain the configured number of
-species. Missing species within an individual structure have zero blocks.
+Note that, without a species-based pooling, contributions are identical to the raw atomic rows.
 
-These expanded contributions can be used with fitted weights or a GP factor in
-the pooled model's feature space. Raw rows are suitable for comparing atomic
-environments. Under species normalization, contributions depend on composition;
-the energy identity above does not imply additivity between structures of
-different compositions.
-
-### Biased Gaussian features
-
-`BiasedOrthogonalRFF` replaces the last coordinate of every raw atomic row with
-`sqrt(bias)` **before** species pooling and chemical mixing. The constant feature
-therefore follows the same normalization as all other features, and raw rows,
-normalized contributions, and pooled maps use a single consistent pipeline.
-
-This changes species-aware predictions relative to the previous implementation,
-which overwrote only the final coordinate after pooling. Existing species-aware
-biased-Gaussian checkpoints must be retrained for this convention. Ordinary
-Gaussian heads and biased heads without species pooling retain their convention.
