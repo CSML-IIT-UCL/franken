@@ -202,7 +202,7 @@ if __name__ == "__main__":
         N_max=20,
         optimizer="lbfgs",
         mode="variable_projection",
-        num_cycles=15,
+        num_cycles=5,
         batch_size=None,
         lbfgs_learning_rate=1.0,
         lbfgs_max_iter=20,  # [10, 20, 40, 80],
@@ -241,6 +241,6 @@ if __name__ == "__main__":
 
         kind = "les"
         run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
-        hyperparameter_1 = "forces_relative_weight"
+        hyperparameter_1 = "forces_weight"
         hyperparameter_2 = "l2_penalty"
         plot_HPGridSearch(run, hyperparameter_1, hyperparameter_2, kind)
