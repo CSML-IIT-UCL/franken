@@ -335,14 +335,14 @@ class FrankenPotential(torch.nn.Module):
         return random_features.sum(0), random_features
 
     @torch.jit.unused
-    @torch.no_grad
     def atomic_feature_map(self, data: Configuration) -> torch.Tensor:
         """Return raw atomic RF rows after the backbone and input scaler.
 
         Rows follow input atom order and have shape
         ``[total_atoms, atomic_feature_dim]``. No species expansion, composition
-        weighting, or pooling is applied. This inference helper does not track
-        gradients and is not exported to TorchScript.
+        weighting, or pooling is applied. Gradients flow through the backbone,
+        input scaler, and RF head. Use ``torch.no_grad()`` for inference. This
+        helper is not exported to TorchScript.
         """
         gnn_descriptors = self.gnn.descriptors(data)
         normalized_descriptors = self.input_scaler(
