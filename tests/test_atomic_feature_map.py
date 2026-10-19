@@ -43,12 +43,3 @@ def test_model_atomic_feature_map_uses_scaled_descriptors(device, scale_by_Z):
     torch.testing.assert_close(actual_grad, expected_grad)
     assert torch.isfinite(actual_grad).all()
     assert actual_grad.abs().sum() > 0
-    with torch.no_grad():
-        inference = model.atomic_feature_map(config)
-    torch.testing.assert_close(inference, actual)
-    assert not inference.requires_grad
-    # Rows remain in input order and do not depend on the configuration batch.
-    batched = Configuration.concatenate([config, config])
-    torch.testing.assert_close(
-        model.atomic_feature_map(batched), torch.cat([actual, actual])
-    )

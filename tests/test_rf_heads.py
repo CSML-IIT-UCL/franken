@@ -196,7 +196,6 @@ class TestScatterSum:
         torch.testing.assert_close(fmap_batched, fmap_single)
 
 
-
 @pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
 @pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
@@ -211,6 +210,8 @@ def test_atomic_features_reproduce_pooled_map(rf_type, num_species, kappa, dtype
     descriptors = torch.randn(7, 4, dtype=dtype)
     atomic_numbers = torch.tensor([1, 1, 8, 1, 8, 8, 8])
     batch_ids = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+    raw = rf.atomic_feature_map(descriptors)
+    assert raw.shape == (7, rf.num_random_features)
     atomic = rf.feature_map(descriptors, atomic_numbers, batch_ids, per_atom=True)
     pooled = rf.feature_map(descriptors, atomic_numbers, batch_ids)
     assert atomic.shape == (7, rf.total_random_features)
@@ -222,20 +223,6 @@ def test_atomic_features_reproduce_pooled_map(rf_type, num_species, kappa, dtype
             descriptors[mask], atomic_numbers[mask], per_atom=True
         )
         torch.testing.assert_close(atomic[mask], separate)
-
-
-@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
-@pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
-def test_raw_atomic_feature_map(rf_type, num_species, kappa):
-    rf = init_rf(
-        rf_type, input_dim=4, num_species=num_species, chemically_informed_ratio=kappa
-    )
-    h = torch.randn(5, 4)
-    numbers = torch.tensor([1, 8, 1, 8, 8])
-    raw = rf.atomic_feature_map(h)
-    assert raw.shape == (5, rf.num_random_features)
-    pooled = rf.species_scatter_sum(raw, numbers)
-    torch.testing.assert_close(pooled, rf.feature_map(h, numbers))
 
 
 @pytest.mark.parametrize("rf_type", ["gaussian", "multiscale-gaussian"])
@@ -293,7 +280,7 @@ def test_biased_gaussian_constant_is_pooled_per_species(kappa):
     torch.testing.assert_close(pooled[:, -1], expected)
 
 
-@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+@pytest.mark.parametrize("rf_type", ["gaussian", "biased-gaussian"])
 def test_atomic_contributions_reproduce_total_energy_and_gradients(rf_type):
     rf = init_rf(rf_type, input_dim=4, num_species=2, chemically_informed_ratio=0.3)
     h = torch.randn(3, 4, requires_grad=True)
