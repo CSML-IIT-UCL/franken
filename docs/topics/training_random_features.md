@@ -66,38 +66,3 @@ achieved accuracy comparable to an optimally tuned single-scale model while redu
 the tuning effort. See the
 [Franken paper](https://doi.org/10.1038/s41524-025-01779-z) for the derivation and
 benchmark results.
-
-## Atomic and pooled feature maps
-
-RF heads expose two atomic representations:
-
-```python
-# h contains backbone descriptors after the model's input scaling.
-raw = model.rf.atomic_feature_map(h)
-pooled = model.rf.feature_map(h, atomic_numbers=numbers, batch_ids=batch_ids)
-contributions = model.rf.feature_map(
-    h, atomic_numbers=numbers, batch_ids=batch_ids, per_atom=True
-)
-
-# Run the backbone and input scaler automatically (inference only).
-raw = model.atomic_feature_map(configuration)
-```
-
-`atomic_feature_map` returns raw RF rows of shape `[total_atoms, atomic_feature_dim]`,
-in input atom order, before species expansion, composition weighting, or pooling.
-The head-level method supports gradients. The model-level convenience method
-runs without gradient tracking and is not exported to TorchScript.
-
-By default, `feature_map` returns one pooled row per structure. With
-`per_atom=True`, it instead returns rows of shape
-`[total_atoms, total_feature_dim]` in the same feature space as the fitted weights.
-For each structure, the mean of these normalized contributions equals its
-pooled feature map, which depend also if a species pooling is used. Their sum gives the total-energy feature map:
-
-$$
-\Phi = \frac{1}{N}\sum_i \phi_i,\qquad
-E = N w^\mathrm{T}\Phi = \sum_i w^\mathrm{T}\phi_i.
-$$
-
-Note that, without a species-based pooling, contributions are identical to the raw atomic rows.
-
