@@ -66,3 +66,63 @@ achieved accuracy comparable to an optimally tuned single-scale model while redu
 the tuning effort. See the
 [Franken paper](https://doi.org/10.1038/s41524-025-01779-z) for the derivation and
 benchmark results.
+
+## Atomic and pooled feature maps
+
+RF heads expose two atomic representations:
+
+```python
+# h contains backbone descriptors after the model's input scaling.
+raw = model.rf.atomic_feature_map(h)
+pooled = model.rf.feature_map(h, atomic_numbers=numbers, batch_ids=batch_ids)
+contributions = model.rf.feature_map(
+    h, atomic_numbers=numbers, batch_ids=batch_ids, per_atom=True
+)
+
+# Run the backbone and input scaler automatically (inference only).
+raw = model.atomic_feature_map(configuration)
+```
+
+`atomic_feature_map` returns raw RF rows of shape `[total_atoms, atomic_feature_dim]`,
+in input atom order, before species expansion, composition weighting, or pooling.
+The head-level method supports gradients. The model-level convenience method
+runs without gradient tracking and is not exported to TorchScript.
+
+By default, `feature_map` returns one pooled row per structure. With
+`per_atom=True`, it instead returns rows of shape
+`[total_atoms, total_feature_dim]` in the same feature space as the fitted weights.
+For each structure, the mean of these normalized contributions equals its
+pooled feature map. Their sum gives the total-energy feature map:
+
+$$
+\Phi = \frac{1}{N}\sum_i \phi_i,\qquad
+E = N w^\mathrm{T}\Phi = \sum_i w^\mathrm{T}\phi_i.
+$$
+
+Without species pooling, contributions are identical to the raw atomic rows.
+With $S$ species, an atom of species $s$ contributes to its species block with
+weight $N/(S N_s)$, where $N_s$ is its species count in that structure. If the
+chemical mixing ratio $\kappa$ is specified, contributions concatenate the
+ordinary atomic row weighted by $1-\kappa$ and the species blocks weighted by
+$\kappa$. Counts are computed separately for every structure in a batch. Species
+blocks follow sorted atomic numbers; as with ordinary pooling, the atomic
+numbers supplied to a call must collectively contain the configured number of
+species. Missing species within an individual structure have zero blocks.
+
+These expanded contributions can be used with fitted weights or a GP factor in
+the pooled model's feature space. Raw rows are suitable for comparing atomic
+environments. Under species normalization, contributions depend on composition;
+the energy identity above does not imply additivity between structures of
+different compositions.
+
+### Biased Gaussian features
+
+`BiasedOrthogonalRFF` replaces the last coordinate of every raw atomic row with
+`sqrt(bias)` **before** species pooling and chemical mixing. The constant feature
+therefore follows the same normalization as all other features, and raw rows,
+normalized contributions, and pooled maps use a single consistent pipeline.
+
+This changes species-aware predictions relative to the previous implementation,
+which overwrote only the final coordinate after pooling. Existing species-aware
+biased-Gaussian checkpoints must be retrained for this convention. Ordinary
+Gaussian heads and biased heads without species pooling retain their convention.

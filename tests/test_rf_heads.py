@@ -196,5 +196,131 @@ class TestScatterSum:
         torch.testing.assert_close(fmap_batched, fmap_single)
 
 
-if __name__ == "__main__":
-    pytest.main()
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+@pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_atomic_features_reproduce_pooled_map(rf_type, num_species, kappa, dtype):
+    rf = init_rf(
+        rf_type,
+        input_dim=4,
+        **({"num_random_features": 8} if rf_type != "linear" else {}),
+        num_species=num_species,
+        chemically_informed_ratio=kappa,
+    )
+    descriptors = torch.randn(7, 4, dtype=dtype)
+    atomic_numbers = torch.tensor([1, 1, 8, 1, 8, 8, 8])
+    batch_ids = torch.tensor([0, 0, 0, 1, 1, 1, 1])
+    atomic = rf.feature_map(descriptors, atomic_numbers, batch_ids, per_atom=True)
+    pooled = rf.feature_map(descriptors, atomic_numbers, batch_ids)
+    assert atomic.shape == (7, rf.total_random_features)
+    assert atomic.dtype == dtype
+    for i in range(2):
+        mask = batch_ids == i
+        torch.testing.assert_close(atomic[mask].mean(0), pooled[i])
+        separate = rf.feature_map(
+            descriptors[mask], atomic_numbers[mask], per_atom=True
+        )
+        torch.testing.assert_close(atomic[mask], separate)
+
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+@pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
+def test_raw_atomic_feature_map(rf_type, num_species, kappa):
+    rf = init_rf(
+        rf_type, input_dim=4, num_species=num_species, chemically_informed_ratio=kappa
+    )
+    h = torch.randn(5, 4)
+    numbers = torch.tensor([1, 8, 1, 8, 8])
+    raw = rf.atomic_feature_map(h)
+    assert raw.shape == (5, rf.num_random_features)
+    pooled = rf.species_scatter_sum(raw, numbers)
+    torch.testing.assert_close(pooled, rf.feature_map(h, numbers))
+
+
+@pytest.mark.parametrize("rf_type", ["gaussian", "multiscale-gaussian"])
+def test_atomic_features_without_offset(rf_type):
+    rf = init_rf(
+        rf_type, input_dim=4, num_random_features=8, use_offset=False, num_species=2
+    )
+    h = torch.randn(5, 4)
+    numbers = torch.tensor([1, 8, 1, 8, 8])
+    raw = rf.atomic_feature_map(h)
+    pooled = rf.feature_map(h, numbers)
+    atomic = rf.feature_map(h, numbers, per_atom=True)
+    assert raw.shape == (5, 16)
+    assert pooled.shape == (1, 32)
+    torch.testing.assert_close(atomic.mean(0), pooled[0])
+
+
+class _ScriptFeatureMap(torch.nn.Module):
+    def __init__(self, head):
+        super().__init__()
+        self.head = head
+
+    def forward(self, descriptors: torch.Tensor, numbers: torch.Tensor):
+        return self.head.feature_map(descriptors, atomic_numbers=numbers)
+
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+def test_feature_map_remains_scriptable(rf_type):
+    head = init_rf(rf_type, input_dim=4, num_species=2)
+    wrapper = _ScriptFeatureMap(head)
+    scripted = torch.jit.script(wrapper)
+    h = torch.randn(5, 4)
+    numbers = torch.tensor([1, 8, 1, 8, 8])
+    torch.testing.assert_close(scripted(h, numbers), wrapper(h, numbers))
+
+
+@pytest.mark.parametrize("kappa", [None, 0.3, 0.0, 1.0])
+def test_biased_gaussian_constant_is_pooled_per_species(kappa):
+    rf = BiasedOrthogonalRFF(
+        input_dim=4,
+        num_random_features=8,
+        num_species=2,
+        chemically_informed_ratio=kappa,
+        bias=4.0,
+    )
+    h = torch.randn(3, 4)
+    numbers = torch.tensor([1, 1, 8])
+    raw = rf.atomic_feature_map(h)
+    torch.testing.assert_close(raw[:, -1], torch.full((3,), 2.0))
+    pooled = rf.feature_map(h, numbers).reshape(-1, 8)
+    if kappa is None:
+        expected = torch.tensor([1.0, 1.0])
+    else:
+        expected = torch.tensor([2 * (1 - kappa), kappa, kappa])
+    torch.testing.assert_close(pooled[:, -1], expected)
+
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+def test_atomic_contributions_reproduce_total_energy_and_gradients(rf_type):
+    rf = init_rf(rf_type, input_dim=4, num_species=2, chemically_informed_ratio=0.3)
+    h = torch.randn(3, 4, requires_grad=True)
+    numbers = torch.tensor([1, 1, 8])
+    weights = torch.randn(rf.total_random_features)
+    atomic = rf.feature_map(h, numbers, per_atom=True)
+    pooled = rf.feature_map(h, numbers)
+    energy_atomic = (atomic @ weights).sum()
+    energy_pooled = len(h) * (pooled @ weights).sum()
+    torch.testing.assert_close(energy_atomic, energy_pooled)
+    torch.testing.assert_close(
+        torch.autograd.grad(energy_atomic, h)[0],
+        torch.autograd.grad(energy_pooled, h)[0],
+    )
+
+
+@pytest.mark.parametrize("kappa", [None, 0.3])
+def test_atomic_contributions_allow_missing_species_within_batch(kappa):
+    rf = Linear(input_dim=2, num_species=2, chemically_informed_ratio=kappa)
+    h = torch.tensor([[2.0, 4.0], [6.0, 8.0], [10.0, 12.0]])
+    numbers = torch.tensor([1, 1, 8])
+    batch_ids = torch.tensor([0, 0, 1])
+    contributions = rf.feature_map(h, numbers, batch_ids, per_atom=True)
+    pooled = rf.feature_map(h, numbers, batch_ids)
+    torch.testing.assert_close(contributions[:2].mean(0), pooled[0])
+    torch.testing.assert_close(contributions[2], pooled[1])
+    species_blocks = contributions.reshape(3, -1, 3)
+    offset = 0 if kappa is None else 1
+    torch.testing.assert_close(species_blocks[:2, offset + 1], torch.zeros(2, 3))
+    torch.testing.assert_close(species_blocks[2, offset], torch.zeros(3))
