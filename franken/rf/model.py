@@ -327,7 +327,6 @@ class FrankenPotential(torch.nn.Module):
         )
         random_features = self.rf.feature_map(
             normalized_descriptors,
-            atomic_numbers=data.atomic_numbers,
             batch_ids=data.batch_ids,
         )
         data.atom_pos = old_atom_pos
@@ -339,10 +338,10 @@ class FrankenPotential(torch.nn.Module):
         """Return raw atomic RF rows after the backbone and input scaler.
 
         Rows follow input atom order and have shape
-        ``[total_atoms, atomic_feature_dim]``. No species expansion, composition
-        weighting, or pooling is applied. Gradients flow through the backbone,
-        input scaler, and RF head. Use ``torch.no_grad()`` for inference. This
-        helper is not exported to TorchScript.
+        ``[total_atoms, total_random_features]``. No pooling is applied.
+        Gradients flow through the backbone, input scaler, and RF head. Use
+        ``torch.no_grad()`` for inference. This helper is not exported to
+        TorchScript.
         """
         gnn_descriptors = self.gnn.descriptors(data)
         normalized_descriptors = self.input_scaler(
