@@ -107,8 +107,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self._shuffle_rng = torch.Generator().manual_seed(seed)
 
     def create_log_entry(self, model):
-        model_hash = hashlib.md5(str(model.hyperparameters).encode())
-        model_hash = model_hash.hexdigest()
         solver_hps = {
             "dtype": self.buffer_dt,
             "l2_penalty": self.l2_penalty,
@@ -128,6 +126,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         # NOTE: the LES HPs will be duplicated (present both here and in the solver
         # due to the LESConfig containing them).
         hp_groups = model.hyperparameters | {"solver": solver_hps}
+        # Note: LES fits each solver configuration as a separate model (weight ID 0).
+        # Include solver settings so best-model comparison distinguishes trials.
+        model_hash = hashlib.md5(str(hp_groups).encode()).hexdigest()
         hyperparameters = []
         for group_name, hps in hp_groups.items():
             hyperparameters.append(HyperParameterGroup.from_dict(group_name, hps))

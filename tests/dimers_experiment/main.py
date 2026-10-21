@@ -6,7 +6,6 @@ projection: the short-range RFF solution is updated at every LES trial point.
 
 from dataclasses import dataclass
 from datetime import datetime
-from itertools import groupby
 import json
 from pathlib import Path
 import re
@@ -15,7 +14,6 @@ from typing import Literal
 import ase
 from ase.io import read, write
 from matplotlib import pyplot as plt
-import numpy as np
 
 import franken.autotune
 import franken.data.base
@@ -29,17 +27,19 @@ from franken.config import (
     RFConfig,
     SolverConfig,
 )
+from franken.backbones.utils import CacheDir
+from franken.datasets import DATASET_REGISTRY
 from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from plot_training_history import plot_training_history
-from plot_HPGridSearch import plot_HPGridSearch 
+from plot_HPGridSearch import plot_HPGridSearch
 
 
 State = Literal["CC", "CP", "PP"]
 ENERGY = franken.data.base.ENERGY_TARGET_KEY
 FORCES = franken.data.base.FORCES_TARGET_KEY
 SCRIPT_DIR = Path(__file__).parent
-DATA_PATH = SCRIPT_DIR.parent.parent / "franken/datasets/dimers/bio_dimers.xyz"
+DATASET_NAME = "dimers_CC_0"
 
 
 @dataclass
@@ -51,40 +51,21 @@ class DimersDataset:
     data: list[ase.Atoms]
     distances: list[float]
 
-    def split(self) -> tuple[list[ase.Atoms], list[ase.Atoms]]:
-        """Use short-distance structures for training and distant ones for validation."""
-        return self.data[:10], self.data[10:]
 
-
-def get_datasets(allowed_states: set[State], dimers: list[ase.Atoms]):
-    """Yield one dataset for each contiguous dimer-id group in the source file."""
-    selected = (dimer for dimer in dimers if dimer.info["label"] in allowed_states)
-    for dimer_id, group in groupby(
-        selected, key=lambda dimer: int(dimer.info["dimer_id"])
-    ):
-        data = list(group)
-        first = data[0]
-        yield DimersDataset(
-            label=first.info["label"],
-            id=dimer_id,
-            energy_a=first.info["energyA"],
-            energy_b=first.info["energyB"],
-            data=data,
-            distances=[dimer.info["distance"] for dimer in data],
-        )
-
-
-def dataset_config(dset: DimersDataset, name: str) -> DatasetConfig:
-    folder = SCRIPT_DIR / f"dimer_{dset.id}_dataset"
-    folder.mkdir(exist_ok=True)
-    train, validation = dset.split()
-    train_path, validation_path = folder / "train.xyz", folder / "test.xyz"
-    write(train_path, train)
-    write(validation_path, validation)
-    return DatasetConfig(
-        name=name,
-        train_path=str(train_path),
-        val_path=str(validation_path),
+def load_dataset() -> DimersDataset:
+    """Load the registered train/validation splits for the first CC scan."""
+    data = []
+    for split in ("train", "val"):
+        path = DATASET_REGISTRY.get_path(DATASET_NAME, split, CacheDir.get())
+        data.extend(read(path, index=":"))
+    first = data[0]
+    return DimersDataset(
+        label=first.info["label"],
+        id=int(first.info["dimer_id"]),
+        energy_a=first.info["energyA"],
+        energy_b=first.info["energyB"],
+        data=data,
+        distances=[atoms.info["distance"] for atoms in data],
     )
 
 
@@ -100,7 +81,7 @@ def train_model(
     """Run the short-range fit or the alternating RFF + LES fit."""
     kind = "les" if use_les else "franken"
     config = AutotuneConfig(
-        dataset=dataset_config(dset, f"dimer_{kind}_{dset.id}"),
+        dataset=DatasetConfig(name=DATASET_NAME),
         solver=solver,
         backbone=backbone,
         rfs=rfs,
@@ -136,6 +117,7 @@ def newest_run(folder: Path) -> Path:
 def predict(dset: DimersDataset, checkpoint: Path):
     """Predict energy and forces for every separation in a dimer scan."""
     eval_path = SCRIPT_DIR / f"dimer_{dset.id}_dataset/all.xyz"
+    eval_path.parent.mkdir(parents=True, exist_ok=True)
     write(eval_path, dset.data)
     # The new loader detects regular and LES checkpoints automatically.
     model = FrankenPotential.load(checkpoint)
@@ -194,8 +176,7 @@ def evaluate_and_plot(dset: DimersDataset, *, use_les: bool) -> None:
 
 
 if __name__ == "__main__":
-    # Download from https://archive.materialscloud.org/records/405an-d8183
-    datasets = list(get_datasets({"CC"}, read(DATA_PATH, index=":")))
+    datasets = [load_dataset()]
     print(f"Loaded {len(datasets)} datasets")
 
     backbone = MaceBackboneConfig("mace_mp/small")
@@ -215,21 +196,20 @@ if __name__ == "__main__":
     # )
 
     les_config = LESConfig(
-        hidden_dim=(64, 32), 
-        les_output_scale=1.0, 
+        hidden_dim=(64, 32),
+        les_output_scale=1.0,
         # dl=3,
         N_max=20,
         optimizer="lbfgs",
         mode="variable_projection",
-        num_cycles=15,
+        num_cycles=5,
         batch_size=None,
         lbfgs_learning_rate=1.0,
-        lbfgs_max_iter=20,#[10, 20, 40, 80],
-        lbfgs_history_size=20,#[20, 80]
+        lbfgs_max_iter=20,  # [10, 20, 40, 80],
+        lbfgs_history_size=20,  # [20, 80]
     )
 
-    # Retain [:1] for the current dimer-0 experiment; remove it for all CC dimers.
-    for dset in datasets[:1]:
+    for dset in datasets:
         # train_model(
         #     dset,
         #     SolverConfig(
@@ -261,6 +241,6 @@ if __name__ == "__main__":
 
         kind = "les"
         run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
-        hyperparameter_1 = "forces_relative_weight"
+        hyperparameter_1 = "forces_weight"
         hyperparameter_2 = "l2_penalty"
-        plot_HPGridSearch(run,hyperparameter_1,hyperparameter_2,kind)
+        plot_HPGridSearch(run, hyperparameter_1, hyperparameter_2, kind)
