@@ -503,6 +503,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return log_collection, model.rf.weights.detach()
 
     @no_jit()
+    @torch.no_grad()
     def evaluate(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         model: LESFrankenPotential,
@@ -510,70 +511,75 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         log_collection: LogCollection,
         all_weights: torch.Tensor | None,
     ) -> LogCollection:
-        self.patch_e3nn()
-        assert isinstance(dataloader.dataset, FrankenAtomsDataset)
-        tot_dset_size = len(dataloader.dataset)
-        metric_objects: list[BaseMetric] = self.get_metrics()
-        split_name = dataloader.dataset.split
+        was_training = model.training
+        model.eval()
         try:
-            split = DataSplit[split_name.upper()]
-        except KeyError:
-            logger.warning(f"Unrecognized split '{split_name}' in dataloader")
-            split = DataSplit.UNDEFINED
+            self.patch_e3nn()
+            assert isinstance(dataloader.dataset, FrankenAtomsDataset)
+            tot_dset_size = len(dataloader.dataset)
+            metric_objects: list[BaseMetric] = self.get_metrics()
+            split_name = dataloader.dataset.split
+            try:
+                split = DataSplit[split_name.upper()]
+            except KeyError:
+                logger.warning(f"Unrecognized split '{split_name}' in dataloader")
+                split = DataSplit.UNDEFINED
 
-        progress_bar = throughput(
-            dataloader,
-            desc=f"{split.name.lower()} evaluation",
-            total=tot_dset_size,
-            device=self.device,
-        )
-        model.gnn.franken_val()
-        for i, (data, targets) in enumerate(progress_bar):
-            data = data.to(device=self.device)
-            targets = targets.to(device=self.device)
-            if all_weights is None or all_weights.shape[0] <= 100:
-                forces_mode = "torch.autograd"
-            else:
-                forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
-            predictions = model.predict(
-                targets=self.training_targets,  # type: ignore
-                data=data,
-                weights=all_weights,
-                differential_mode=forces_mode,
-                add_energy_shift=(False if split == DataSplit.TRAIN else True),
+            progress_bar = throughput(
+                dataloader,
+                desc=f"{split.name.lower()} evaluation",
+                total=tot_dset_size,
+                device=self.device,
             )
-            for tt, val in predictions.items():
-                if torch.any(torch.isnan(val)):
-                    logger.warning(
-                        f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
-                    )
-            for metric in metric_objects:
-                metric.update(Target.from_types(predictions), targets, data)  # type: ignore
-
-        num_models = (
-            all_weights.shape[0]
-            if all_weights is not None
-            else model.rf.weights.shape[0]
-        )
-
-        # list with one element for each model trained
-        for metric in metric_objects:
-            metric_values = metric.compute()
-            for metric_name, metric_value in metric_values:
-                assert metric_value.shape == (
-                    num_models,
-                ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
-                for model_idx in range(metric_value.shape[0]):
-                    log_entry = log_collection[model_idx]
-                    try:
-                        log_entry.add_metric(
-                            name=metric_name,
-                            value=metric_value[model_idx].item(),
-                            split=split,
+            model.gnn.franken_val()
+            for i, (data, targets) in enumerate(progress_bar):
+                data = data.to(device=self.device)
+                targets = targets.to(device=self.device)
+                if all_weights is None or all_weights.shape[0] <= 100:
+                    forces_mode = "torch.autograd"
+                else:
+                    forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
+                predictions = model.predict(
+                    targets=self.training_targets,  # type: ignore
+                    data=data,
+                    weights=all_weights,
+                    differential_mode=forces_mode,
+                    add_energy_shift=(False if split == DataSplit.TRAIN else True),
+                )
+                for tt, val in predictions.items():
+                    if torch.any(torch.isnan(val)):
+                        logger.warning(
+                            f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                         )
-                    except ValueError as e:
-                        logger.warning(f"Could not add metric: {str(e)}")
-        return log_collection
+                for metric in metric_objects:
+                    metric.update(Target.from_types(predictions), targets, data)  # type: ignore
+
+            num_models = (
+                all_weights.shape[0]
+                if all_weights is not None
+                else model.rf.weights.shape[0]
+            )
+
+            # list with one element for each model trained
+            for metric in metric_objects:
+                metric_values = metric.compute()
+                for metric_name, metric_value in metric_values:
+                    assert metric_value.shape == (
+                        num_models,
+                    ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
+                    for model_idx in range(metric_value.shape[0]):
+                        log_entry = log_collection[model_idx]
+                        try:
+                            log_entry.add_metric(
+                                name=metric_name,
+                                value=metric_value[model_idx].item(),
+                                split=split,
+                            )
+                        except ValueError as e:
+                            logger.warning(f"Could not add metric: {str(e)}")
+            return log_collection
+        finally:
+            model.train(was_training)
 
     @no_jit()
     @torch.no_grad()
