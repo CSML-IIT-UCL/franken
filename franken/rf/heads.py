@@ -27,37 +27,18 @@ class RandomFeaturesHead(torch.nn.Module):
     Args:
         input_dim (int): Dimension of the input features.
         num_random_features (int): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
     """
 
     def __init__(
         self,
         input_dim: int,
         num_random_features: int = 2**10,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
     ):
         super(RandomFeaturesHead, self).__init__()
         self.input_dim = input_dim
-        self.num_random_features = num_random_features
-        self.num_species = num_species
-        self.chemically_informed_ratio = chemically_informed_ratio
+        self._num_random_features = num_random_features
 
-        self._per_species_multiplier = 0
-        if self.num_species is not None:
-            assert self.num_species > 0
-            self._per_species_multiplier += self.num_species
-            if self.chemically_informed_ratio is not None:
-                self._per_species_multiplier += 1
-        else:
-            self._per_species_multiplier += 1
-        self.total_random_features = (
-            self._per_species_multiplier * self.num_random_features
-        )
+        self.total_random_features = self._num_random_features
 
         # Register weights buffer
         self.weights: torch.Tensor
@@ -66,128 +47,53 @@ class RandomFeaturesHead(torch.nn.Module):
     def species_scatter_sum(
         self,
         Z: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
         batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
     ) -> torch.Tensor:
-        r"""Average features across all atoms in one or more configurations.
+        """Average atomic feature rows within each configuration.
 
-        Depending on the configuration of random features, this function will either perform
-        a simple average, or will use a chemically-informed averaging method where features
-        are averaged within each atomic type and concatenated across atomic types.
-
-        Returns a per-system feature map of shape ``[n_systems, total_feature_dim]``.
-        With ``per_atom=True``, returns atomic contributions shaped
-        ``[total_atoms, total_feature_dim]`` whose mean reproduces the pooled map.
+        Returns a map of shape ``[n_systems, total_random_features]``. Without
+        ``batch_ids``, all rows belong to one configuration.
         """
-        # Z: [Atoms(A), Features(F)]
-        # Out: [Systems(N), Features(F)[*(1+Species(S))]]
-        n_systems = 1
-        if batch_ids is not None:
-            batch_ids = batch_ids.to(dtype=torch.long)
-            n_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
-        dt = Z.dtype
-        dev = Z.device
-        n_species = self.num_species
-        n_rf = self.num_random_features
-
-        if per_atom:
-            if n_species is None:
-                return Z
-            assert atomic_numbers is not None
-            species_map, species_ids = torch.unique(
-                atomic_numbers, sorted=True, return_inverse=True
-            )
-            assert len(species_map) == n_species
-            atom_batch_ids = (
-                torch.zeros(Z.shape[0], dtype=torch.long, device=dev)
-                if batch_ids is None
-                else batch_ids
-            )
-            species_counts = torch.bincount(
-                atom_batch_ids * n_species + species_ids,
-                minlength=n_systems * n_species,
-            ).to(dtype=dt)
-            atom_counts = torch.bincount(atom_batch_ids, minlength=n_systems).to(
-                dtype=dt
-            )
-            # Weight each atomic contribution so averaging them reproduces the
-            # trained species means, including configurations with unequal composition.
-            scale = atom_counts[atom_batch_ids] / (
-                n_species * species_counts[atom_batch_ids * n_species + species_ids]
-            )
-            atomic_features = torch.zeros(
-                (Z.shape[0], n_species, Z.shape[1]), dtype=dt, device=dev
-            )
-            atomic_features.scatter_(
-                1,
-                species_ids[:, None, None].expand(-1, 1, Z.shape[1]),
-                (Z * scale[:, None]).unsqueeze(1),
-            )
-            if self.chemically_informed_ratio is not None:
-                kappa = self.chemically_informed_ratio
-                assert 0 <= kappa <= 1
-                atomic_features = torch.cat(
-                    ((1 - kappa) * Z.unsqueeze(1), kappa * atomic_features), dim=1
-                )
-            return atomic_features.reshape(Z.shape[0], -1)
-
+        if batch_ids is None:
+            return Z.mean(0, keepdim=True)
+        batch_ids = batch_ids.to(dtype=torch.long)
+        n_systems = int(batch_ids.max().item()) + 1 if batch_ids.numel() > 0 else 0
         if n_systems <= 1:
-            global_mean = Z.mean(0, keepdim=True)
-        else:
-            assert batch_ids is not None
-            out = torch.zeros((n_systems, Z.shape[1]), dtype=dt, device=dev)
-            out = out.index_add(0, batch_ids, Z)
-            counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=dt)
-            global_mean = out / counts.clamp_min(1).unsqueeze(-1)
-
-        if n_species is not None:  # will return [N, S * F]
-            assert (
-                atomic_numbers is not None
-            ), "atomic_number should be specified when self.num_species is not None"
-            species_map, scatter_idxs = torch.unique(
-                atomic_numbers, sorted=True, return_inverse=True
-            )
-            assert (
-                len(species_map) == n_species
-            ), f"The provided atomic numbers {species_map}, are of a different number than self.num_species {n_species}"
-
-            if n_systems > 1:
-                assert batch_ids is not None
-                # batched scatter indices
-                scatter_idxs = batch_ids * n_species + scatter_idxs  # [A]
-
-            # Scatter ids must be of the same size as Z for scatter_reduce_
-            scatter_idxs = scatter_idxs.unsqueeze(-1).expand_as(Z)
-            out = (
-                torch.zeros(
-                    (n_systems * n_species, n_rf), dtype=dt, device=dev
-                ).scatter_reduce_(0, scatter_idxs, Z, "mean", include_self=False)
-            ) / n_species  # [N*S, F]
-            chem_informed_features = out.view(n_systems, n_species, n_rf)  # [N, S, F]
-
-            if self.chemically_informed_ratio is not None:
-                kappa = self.chemically_informed_ratio
-                assert (
-                    0 <= kappa <= 1
-                ), "The ratio of chemically informed feature feature map should be bounded between 0 and 1"
-                chem_informed_features = torch.cat(
-                    (
-                        (1 - kappa) * global_mean.unsqueeze(1),
-                        kappa * chem_informed_features,
-                    ),
-                    dim=1,
-                )
-            return chem_informed_features.reshape(n_systems, -1)  # [N, S*F]
-        return global_mean  # [N, F]
+            return Z.mean(0, keepdim=True)
+        out = torch.zeros((n_systems, Z.shape[1]), dtype=Z.dtype, device=Z.device)
+        out = out.index_add(0, batch_ids, Z)
+        counts = torch.bincount(batch_ids, minlength=n_systems).to(dtype=Z.dtype)
+        return out / counts.clamp_min(1).unsqueeze(-1)
 
     def init_args(self):
-        """Returns the arguments needed to re-initialize this class."""
-        return {
-            "num_random_features": self.num_random_features,
-            "num_species": self.num_species,
-            "chemically_informed_ratio": self.chemically_informed_ratio,
-        }
+        """Return the arguments needed to re-initialize this class."""
+        return {"num_random_features": self._num_random_features}
+
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
+        raise NotImplementedError
+
+    def feature_map(
+        self,
+        h: torch.Tensor,
+        batch_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute atomic RF rows and average them within each configuration.
+
+        Args:
+            h: Scaled atomic descriptors of shape ``[total_atoms, input_dim]``.
+            batch_ids: Configuration ID for each atom. If omitted, all atoms
+                belong to one configuration.
+
+        Returns:
+            Pooled RF rows of shape ``[n_systems, total_random_features]``.
+        """
+        return self.species_scatter_sum(self.atomic_feature_map(h), batch_ids=batch_ids)
 
 
 class OrthogonalRFF(RandomFeaturesHead):
@@ -205,11 +111,6 @@ class OrthogonalRFF(RandomFeaturesHead):
     Args:
         input_dim (int): Dimensionality of the input features.
         num_random_features (int): The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
         use_offset (bool): A flag indicating whether to use an offset in
             the random feature generation. Using an offset reduces the number of
             random features by half but increases variance. Defaults to :code:`True`.
@@ -225,8 +126,6 @@ class OrthogonalRFF(RandomFeaturesHead):
         self,
         input_dim: int,
         num_random_features: int = 2**10,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
         use_offset: bool = True,
         length_scale: float = 1.0,
         rng_seed=None,
@@ -235,20 +134,18 @@ class OrthogonalRFF(RandomFeaturesHead):
         super(OrthogonalRFF, self).__init__(
             input_dim,
             num_random_features,
-            num_species=num_species,
-            chemically_informed_ratio=chemically_informed_ratio,
         )
         self.rng_seed = rng_seed
         random_generator = get_seeded_generator(self.rng_seed)
 
         W = self._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
@@ -291,21 +188,17 @@ class OrthogonalRFF(RandomFeaturesHead):
         W = W[:num_random_features, :]
         return W
 
-    def feature_map(
-        self,
-        h: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
-        batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
-    ) -> torch.Tensor:
-        """Computes the random-feature map for a given configuration :code:`h`
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
-            atomic_numbers (torch.Tensor):
-                atomic numbers for a single configuration ~[natoms]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
+        return self._gaussian_features(h)
+
+    def _gaussian_features(self, h: torch.Tensor) -> torch.Tensor:
+        """Private method that enable TorchScript-compatible reuse by BiasedOrthogonalRFF."""
         length_scale = self.length_scale
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -315,15 +208,12 @@ class OrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
-
-        return self.species_scatter_sum(
-            Z, atomic_numbers=atomic_numbers, batch_ids=batch_ids, per_atom=per_atom
-        )  # Sum over the single species
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
+        return Z
 
     def init_args(self):
         return super().init_args() | {
@@ -334,12 +224,15 @@ class OrthogonalRFF(RandomFeaturesHead):
 
 
 class BiasedOrthogonalRFF(OrthogonalRFF):
+    """Gaussian RFs with the final atomic coordinate replaced by ``sqrt(bias)``.
+
+    The constant is inserted in each atomic row before pooling.
+    """
+
     def __init__(
         self,
         input_dim: int,
         num_random_features: int = 2**10,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
         use_offset: bool = True,
         length_scale: float = 1.0,
         bias: float = 1.0,
@@ -348,30 +241,23 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
         super(BiasedOrthogonalRFF, self).__init__(
             input_dim,
             num_random_features,
-            num_species=num_species,
-            chemically_informed_ratio=chemically_informed_ratio,
             use_offset=use_offset,
             length_scale=length_scale,
             rng_seed=rng_seed,
         )
         self.register_buffer("bias", torch.tensor(bias))
 
-    def feature_map(
-        self,
-        h: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
-        batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
-    ) -> torch.Tensor:
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling. In this case, the last column of the feature map is replaced by a constant coordinate ``sqrt(bias)``.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
         self.bias = self.bias.to(dtype=h.dtype)
-        # unbiased_features ~ [num_random_features - 1]
-        features = super().feature_map(
-            h, atomic_numbers=atomic_numbers, batch_ids=batch_ids, per_atom=per_atom
-        )
-        if features.ndim == 1:
-            features[-1] = torch.sqrt(self.bias)
-        else:
-            features[:, -1] = torch.sqrt(self.bias)
+        features = self._gaussian_features(h)
+        # Insert the constant in each atomic row before pooling.
+        features[:, -1] = torch.sqrt(self.bias)
         return features
 
     def init_args(self):
@@ -398,11 +284,6 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
     Args:
         input_dim: Dimensionality of the input features.
         num_random_features: The number of random features to use in the feature mapping. Defaults to :math:`2^{10} = 1024`.
-        num_species: The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio: The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
         use_offset: A flag indicating whether to use an offset in
             the random feature generation. Using an offset reduces the number of
             random features by half but increases variance. Defaults to :code:`True`.
@@ -420,8 +301,6 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         self,
         input_dim: int,
         num_random_features: int = 2**10,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
         use_offset: bool = True,
         length_scale_low: float = 1.0,
         length_scale_high: float = 10.0,
@@ -431,8 +310,6 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         super(MultiScaleOrthogonalRFF, self).__init__(
             input_dim,
             num_random_features,
-            num_species=num_species,
-            chemically_informed_ratio=chemically_informed_ratio,
         )
         self.rng_seed = rng_seed
         random_generator = get_seeded_generator(self.rng_seed)
@@ -443,44 +320,36 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         self.length_scale_num = length_scale_num
 
         W = OrthogonalRFF._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
 
-        _num_repeats = ceil(self.num_random_features / self.length_scale_num)
+        _num_repeats = ceil(self._num_random_features / self.length_scale_num)
         _length_scale = torch.repeat_interleave(
             torch.linspace(
                 self.length_scale_low, self.length_scale_high, self.length_scale_num
             ),
             _num_repeats,
         )
-        self.register_buffer("length_scale", _length_scale[: self.num_random_features])
+        self.register_buffer("length_scale", _length_scale[: self._num_random_features])
 
         self.use_offset = use_offset
         if not self.use_offset:
             self.total_random_features = self.total_random_features * 2
 
-    def feature_map(
-        self,
-        h: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
-        batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
-    ) -> torch.Tensor:
-        """Computes the random-feature map for a given configuration :code:`h`
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
-            atomic_numbers (torch.Tensor):
-                atomic numbers for a single configuration ~[natoms]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -493,15 +362,12 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
-
-        return self.species_scatter_sum(
-            Z, atomic_numbers=atomic_numbers, batch_ids=batch_ids, per_atom=per_atom
-        )  # Sum over the single species
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
+        return Z
 
     def init_args(self):
         return super().init_args() | {
@@ -525,11 +391,6 @@ class Linear(RandomFeaturesHead):
 
     Args:
         input_dim (int): The dimensionality of the input features.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
         bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
         length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
     """
@@ -537,8 +398,6 @@ class Linear(RandomFeaturesHead):
     def __init__(
         self,
         input_dim: int,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
         bias: float = 0.0,
         length_scale: float = 1.0,
     ):
@@ -547,27 +406,17 @@ class Linear(RandomFeaturesHead):
             input_dim,
             # Add a constant bias feature
             input_dim + 1,
-            num_species=num_species,
-            chemically_informed_ratio=chemically_informed_ratio,
         )
 
         self.register_buffer("bias", torch.tensor(bias))
         self.register_buffer("length_scale", torch.tensor(length_scale))
 
-    def feature_map(
-        self,
-        h: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
-        batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
-    ) -> torch.Tensor:
-        """Computes the random-feature map for a given configuration :code:`h`
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
-            atomic_numbers (torch.Tensor):
-                atomic numbers for a single configuration ~[natoms]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = h / length_scale
@@ -578,13 +427,7 @@ class Linear(RandomFeaturesHead):
             .to(dtype=h.dtype)
         )
         scaled_descriptors = torch.cat([scaled_descriptors, bias_feature], dim=1)
-
-        return self.species_scatter_sum(
-            scaled_descriptors,
-            atomic_numbers=atomic_numbers,
-            batch_ids=batch_ids,
-            per_atom=per_atom,
-        )
+        return scaled_descriptors
 
     def init_args(self):
         _super_init = super().init_args()
@@ -607,11 +450,6 @@ class TensorSketch(RandomFeaturesHead):
     Args:
         input_dim (int): The dimensionality of the input features.
         num_random_features (int): The number of random features to use in the sketching process. Defaults to :math:`2^{10} = 1024`.
-        num_species (int | None): The number of chemical species for
-            which the kernel is computed. This parameter is relevant for systems
-            with multiple chemical species. Defaults to :code:`None`.
-        chemically_informed_ratio (float | None): The relative weight of chemically-informed kernels with respect to the all-species kernel. Ignored if
-            :code:`num_species` is None. Defaults to :code:`None`.
         degree (int): Degree :math:`d` of the polynomial kernel to sketch. Defaults to 2.
         bias (float): The bias term :math:`b` added to the kernel function. This allows for shifting the kernel values, which can be useful for certain applications. Defaults to 0.0.
         length_scale (float): The length scale parameter :math:`\ell` that controls the smoothness of the kernel function. It affects how quickly the kernel values decay with distance. Defaults to 1.0.
@@ -622,8 +460,6 @@ class TensorSketch(RandomFeaturesHead):
         self,
         input_dim: int,
         num_random_features: int = 2**10,
-        num_species: int | None = None,
-        chemically_informed_ratio: float | None = None,
         degree=2,
         bias: float = 0.0,
         length_scale: float = 1.0,
@@ -633,8 +469,6 @@ class TensorSketch(RandomFeaturesHead):
         super(TensorSketch, self).__init__(
             input_dim,
             num_random_features,
-            num_species=num_species,
-            chemically_informed_ratio=chemically_informed_ratio,
         )
         self.rng_seed = rng_seed
         self.register_buffer("degree", torch.tensor(degree))
@@ -655,7 +489,7 @@ class TensorSketch(RandomFeaturesHead):
     def _sample_hash_fns(self, generator: torch.Generator | None):
         i_hash = torch.randint(
             low=0,
-            high=self.num_random_features,
+            high=self._num_random_features,
             size=(self.input_dim,),
             generator=generator,
         )
@@ -668,24 +502,16 @@ class TensorSketch(RandomFeaturesHead):
         count_sketch = torch.sparse_coo_tensor(
             indices,
             s_hash,
-            torch.Size([self.num_random_features, self.input_dim]),
+            torch.Size([self._num_random_features, self.input_dim]),
         ).to_dense()
         return count_sketch
 
-    def feature_map(
-        self,
-        h: torch.Tensor,
-        atomic_numbers: torch.Tensor | None = None,
-        batch_ids: torch.Tensor | None = None,
-        per_atom: bool = False,
-    ) -> torch.Tensor:
-        """Computes the random-feature map for a given configuration :code:`h`
+    def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
-            atomic_numbers (torch.Tensor):
-                atomic numbers for a single configuration ~[natoms]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = (h + torch.sqrt(torch.abs(self.bias))) / length_scale
@@ -695,15 +521,10 @@ class TensorSketch(RandomFeaturesHead):
         Z = torch.einsum(
             "af, dFf -> adF", scaled_descriptors, self.count_sketches
         )  # ~[atoms, degree, random_features]
-        Z = torch.fft.rfft(Z, n=self.num_random_features)
+        Z = torch.fft.rfft(Z, n=self._num_random_features)
         Z = Z.prod(1)  # ~[atoms, random_features]
-        Z = torch.fft.irfft(Z, n=self.num_random_features)
-        return self.species_scatter_sum(
-            Z,
-            atomic_numbers=atomic_numbers,
-            batch_ids=batch_ids,
-            per_atom=per_atom,
-        )
+        Z = torch.fft.irfft(Z, n=self._num_random_features)
+        return Z
 
     def init_args(self):
         return super().init_args() | {
