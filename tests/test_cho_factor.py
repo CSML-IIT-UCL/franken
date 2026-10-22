@@ -101,7 +101,8 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
         ):
             logs, weights = trainer.fit(model)
             assert solve.call_count == 4
-            assert model._cho_factor is None
+            assert model._cholesky_factor is None
+            assert model._l2_penalty is None
             for i, log in enumerate(logs):
                 log.add_metric("energy_MAE", 0.0 if i == 1 else 1.0, DataSplit.TRAIN)
             selected = logs[1]
@@ -114,27 +115,33 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
             )
 
             trainer.serialize_logs(model, logs, weights, ["energy_MAE"])
+            expected_penalty = hp["l2_penalty"] if save_cho_factor else None
+            assert model._l2_penalty == expected_penalty
             assert solve.call_count == 4 + save_cho_factor
             assert trainer._covs_cache is None
             assert trainer._coeffs_cache is None
+            checkpoint = torch.load(tmp_path / "best_ckpt.pt", weights_only=False)
+            assert ("cholesky_factor" in checkpoint) == save_cho_factor
+            assert ("l2_penalty" in checkpoint) == save_cho_factor
             if save_cho_factor:
-                assert model._cho_factor.shape == (10,)
-                factor = model.get_cho_factor()
+                assert model._cholesky_factor.shape == (10,)
+                factor = model.get_cholesky_factor()
                 torch.testing.assert_close(factor, factor.triu())
                 torch.testing.assert_close(factor.T @ factor, expected)
             else:
-                assert model.get_cho_factor() is None
+                assert model.get_cholesky_factor() is None
             torch.testing.assert_close(model.rf.weights, weights[1].reshape(1, -1))
             loaded = FrankenPotential.load(
                 tmp_path / "best_ckpt.pt", map_location=device
             )
+            assert loaded._l2_penalty == expected_penalty
             if save_cho_factor:
-                torch.testing.assert_close(loaded._cho_factor, model._cho_factor)
+                torch.testing.assert_close(loaded._cholesky_factor, model._cholesky_factor)
                 loaded.double().cpu()
-                assert loaded._cho_factor.dtype == torch.float64
-                assert loaded._cho_factor.device.type == "cpu"
+                assert loaded._cholesky_factor.dtype == torch.float64
+                assert loaded._cholesky_factor.device.type == "cpu"
             else:
-                assert loaded.get_cho_factor() is None
+                assert loaded.get_cholesky_factor() is None
 
             # Repeating serialization for the same winner does not solve again.
             trainer.serialize_best_model(model, weights, ["energy_MAE"])
@@ -155,7 +162,8 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
             assert solve.call_count == 8 + save_cho_factor
             assert trainer._covs_cache is None
             assert trainer._coeffs_cache is None
-            assert other_model._cho_factor is None
+            assert other_model._cholesky_factor is None
+            assert other_model._l2_penalty is None
             assert (tmp_path / "best_ckpt.pt").read_bytes() == previous_checkpoint
 
 
@@ -163,25 +171,31 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
 def test_factor_checkpoint_compatibility(tmp_path, device):
     with mocked_gnn(device, torch.float32):
         model = make_model(device)
-        assert model.get_cho_factor() is None
-        model._cho_factor = pack_upper(torch.eye(4, device=device, dtype=torch.float64))
+        assert model.get_cholesky_factor() is None
+        assert model._l2_penalty is None
+        model._l2_penalty = 0.25
+        model._cholesky_factor = pack_upper(torch.eye(4, device=device, dtype=torch.float64))
         model.save(tmp_path / "new.pt")
         checkpoint = torch.load(tmp_path / "new.pt", weights_only=False)
-        assert checkpoint["_cho_factor"].shape == (10,)
-        assert "_cho_factor" not in model.state_dict()
-        checkpoint.pop("_cho_factor")
+        assert checkpoint["cholesky_factor"].shape == (10,)
+        assert checkpoint["l2_penalty"] == 0.25
+        assert "_cholesky_factor" not in model.state_dict()
+        checkpoint.pop("cholesky_factor")
+        checkpoint.pop("l2_penalty")
         torch.save(checkpoint, tmp_path / "old.pt")
         old_model = FrankenPotential.load(tmp_path / "old.pt", map_location=device)
-        assert old_model._cho_factor is None
-        assert old_model.get_cho_factor() is None
+        assert old_model._cholesky_factor is None
+        assert old_model._l2_penalty is None
+        assert old_model.get_cholesky_factor() is None
 
         model.save(tmp_path / "multi.pt", multi_weights=torch.ones(2, 4, device=device))
         multi = FrankenPotential.load(
             tmp_path / "multi.pt", rf_weight_id=1, map_location=device
         )
-        assert multi._cho_factor is None
+        assert multi._cholesky_factor is None
+        assert multi._l2_penalty is None
 
-        checkpoint["_cho_factor"] = torch.zeros(9)
+        checkpoint["cholesky_factor"] = torch.zeros(9)
         torch.save(checkpoint, tmp_path / "invalid.pt")
         with pytest.raises(ValueError, match="invalid size"):
             FrankenPotential.load(tmp_path / "invalid.pt")

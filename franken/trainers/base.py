@@ -126,19 +126,21 @@ class BaseTrainer(abc.ABC):
             return solution, pack_upper(L).detach()
         return solution
 
-    def _best_cho_factor(self, model: FrankenPotential, best_model: LogEntry):
-        """Repeat the winning solve for the latest fitted model, capturing its packed factor."""
+    def _best_cho_factor(
+        self, model: FrankenPotential, best_model: LogEntry
+    ) -> tuple[torch.Tensor | None, float | None]:
+        """Repeat the winning solve, returning its packed factor and regularization penalty."""
         if not self.save_cho_factor:
-            return None
+            return None, None
         if self._covs_cache is None and self._coeffs_cache is None:
-            return None  # Manual serialization without a preceding fit.
+            return None, None  # Manual serialization without a preceding fit.
         solver_hps = best_model.to_dict()["hyperparameters"]["solver"]
         solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
         covs, coeffs = self._restore_covs_and_coeffs(model.rf.total_random_features)
         _, factor = self.solve(
             covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
         )
-        return factor
+        return factor, solver_hps["l2_penalty"]
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
@@ -270,7 +272,9 @@ class BaseTrainer(abc.ABC):
 
             if should_save:
                 logger.debug(f"Identified new best model: {best_model}")
-                model._cho_factor = self._best_cho_factor(model, best_model)
+                model._cholesky_factor, model._l2_penalty = self._best_cho_factor(
+                    model, best_model
+                )
                 weights = all_weights[best_model.checkpoint_rf_weight_id]
                 model.rf.weights = weights.reshape_as(model.rf.weights)
                 model.save(self.log_dir / "best_ckpt.pt")
