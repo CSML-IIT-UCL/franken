@@ -32,11 +32,11 @@ class BaseTrainer(abc.ABC):
         save_every_model: bool = True,
         device: Union[torch.device, str, int] = "cpu",
         dtype: Union[str, torch.dtype] = torch.float32,
-        save_cho_factor: bool = True,
+        save_cholesky_factor: bool = True,
     ):
         self.log_dir = log_dir
         self.save_every_model = save_every_model
-        self.save_cho_factor = save_cho_factor
+        self.save_cholesky_factor = save_cholesky_factor
         self.train_dataloader = train_dataloader
         self.statistics_ = None
         if isinstance(dtype, str):
@@ -92,7 +92,7 @@ class BaseTrainer(abc.ABC):
         cov: torch.Tensor,
         rhs: torch.Tensor,
         penalty: float,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         r"""Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
 
@@ -109,11 +109,11 @@ class BaseTrainer(abc.ABC):
             cov (Tensor): covariance of the linear system
             rhs (Tensor): right hand side (one or more) of the linear system
             penalty (float): Tikhonov l2 penalty
-            return_cho_factor (bool): Also return the packed upper Cholesky factor.
+            return_cholesky_factor (bool): Also return the packed upper Cholesky factor.
 
         Returns:
             The ridge regression coefficients, or (coefficients, packed factor)
-            when return_cho_factor is True.
+            when return_cholesky_factor is True.
         """
         # Add diagonal without copies
         cov.diagonal().add_(penalty)
@@ -122,15 +122,15 @@ class BaseTrainer(abc.ABC):
         rhs_shape = rhs.shape
         solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True)
         solution = solution.view(rhs_shape)
-        if return_cho_factor:
+        if return_cholesky_factor:
             return solution, pack_upper(L).detach()
         return solution
 
-    def _best_cho_factor(
+    def _best_cholesky_factor(
         self, model: FrankenPotential, best_model: LogEntry
     ) -> tuple[torch.Tensor | None, float | None]:
         """Repeat the winning solve, returning its packed factor and regularization penalty."""
-        if not self.save_cho_factor:
+        if not self.save_cholesky_factor:
             return None, None
         if self._covs_cache is None and self._coeffs_cache is None:
             return None, None  # Manual serialization without a preceding fit.
@@ -138,7 +138,7 @@ class BaseTrainer(abc.ABC):
         solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
         covs, coeffs = self._restore_covs_and_coeffs(model.rf.total_random_features)
         _, factor = self.solve(
-            covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
+            covs=covs, coeffs=coeffs, return_cholesky_factor=True, **solver_hps
         )
         return factor, solver_hps["l2_penalty"]
 
@@ -272,7 +272,7 @@ class BaseTrainer(abc.ABC):
 
             if should_save:
                 logger.debug(f"Identified new best model: {best_model}")
-                model._cholesky_factor, model._l2_penalty = self._best_cho_factor(
+                model._cholesky_factor, model._l2_penalty = self._best_cholesky_factor(
                     model, best_model
                 )
                 weights = all_weights[best_model.checkpoint_rf_weight_id]

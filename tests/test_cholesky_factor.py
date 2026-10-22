@@ -63,8 +63,8 @@ def test_covs_and_coeffs_cache_roundtrip_with_three_targets(device):
 @pytest.mark.parametrize(
     "trainer_cls", [RandomFeaturesTrainer, LowMemRandomFeaturesTrainer]
 )
-@pytest.mark.parametrize("save_cho_factor", [True, False])
-def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
+@pytest.mark.parametrize("save_cholesky_factor", [True, False])
+def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cholesky_factor):
     trainer = trainer_cls(
         train_dataloader=None,
         training_targets=["energy", "forces"],
@@ -74,7 +74,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
         log_dir=tmp_path,
         device=device,
         dtype=dtype,
-        save_cho_factor=save_cho_factor,
+        save_cholesky_factor=save_cholesky_factor,
     )
     a = torch.randn(4, 4, device=device, dtype=dtype)
     b = torch.randn(4, 4, device=device, dtype=dtype)
@@ -115,15 +115,15 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
             )
 
             trainer.serialize_logs(model, logs, weights, ["energy_MAE"])
-            expected_penalty = hp["l2_penalty"] if save_cho_factor else None
+            expected_penalty = hp["l2_penalty"] if save_cholesky_factor else None
             assert model._l2_penalty == expected_penalty
-            assert solve.call_count == 4 + save_cho_factor
+            assert solve.call_count == 4 + save_cholesky_factor
             assert trainer._covs_cache is None
             assert trainer._coeffs_cache is None
             checkpoint = torch.load(tmp_path / "best_ckpt.pt", weights_only=False)
-            assert ("cholesky_factor" in checkpoint) == save_cho_factor
-            assert ("l2_penalty" in checkpoint) == save_cho_factor
-            if save_cho_factor:
+            assert ("cholesky_factor" in checkpoint) == save_cholesky_factor
+            assert ("l2_penalty" in checkpoint) == save_cholesky_factor
+            if save_cholesky_factor:
                 assert model._cholesky_factor.shape == (10,)
                 factor = model.get_cholesky_factor()
                 torch.testing.assert_close(factor, factor.triu())
@@ -135,7 +135,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
                 tmp_path / "best_ckpt.pt", map_location=device
             )
             assert loaded._l2_penalty == expected_penalty
-            if save_cho_factor:
+            if save_cholesky_factor:
                 torch.testing.assert_close(loaded._cholesky_factor, model._cholesky_factor)
                 loaded.double().cpu()
                 assert loaded._cholesky_factor.dtype == torch.float64
@@ -145,7 +145,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
 
             # Repeating serialization for the same winner does not solve again.
             trainer.serialize_best_model(model, weights, ["energy_MAE"])
-            assert solve.call_count == 4 + save_cho_factor
+            assert solve.call_count == 4 + save_cholesky_factor
 
             # A later losing RF trial leaves the previous best checkpoint intact.
             previous_checkpoint = (tmp_path / "best_ckpt.pt").read_bytes()
@@ -159,7 +159,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cho_factor):
             trainer.serialize_logs(
                 other_model, other_logs, other_weights, ["energy_MAE"]
             )
-            assert solve.call_count == 8 + save_cho_factor
+            assert solve.call_count == 8 + save_cholesky_factor
             assert trainer._covs_cache is None
             assert trainer._coeffs_cache is None
             assert other_model._cholesky_factor is None

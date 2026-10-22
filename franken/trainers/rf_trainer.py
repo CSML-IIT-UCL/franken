@@ -67,7 +67,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
             the ``evaluate()`` path on training data. Defaults to True.
-        save_cho_factor (bool):
+        save_cholesky_factor (bool):
             Whether to include the best model's packed Cholesky factor in its checkpoint.
             Covariances and coefficients are cached on CPU between fitting and best-model
             serialization. Defaults to True.
@@ -94,13 +94,13 @@ class RandomFeaturesTrainer(BaseTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
-        save_cho_factor: bool = True,
+        save_cholesky_factor: bool = True,
     ):
         super().__init__(
             train_dataloader,
             log_dir=log_dir,
             save_every_model=save_every_model,
-            save_cho_factor=save_cho_factor,
+            save_cholesky_factor=save_cholesky_factor,
             device=device,
             dtype=dtype,
         )
@@ -223,7 +223,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             )
 
         if (
-            self.save_cho_factor
+            self.save_cholesky_factor
             and self.log_dir is not None
             and dist_utils.get_rank() == 0
         ):
@@ -434,7 +434,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         covs: dict[TargetType, Tensor],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
         **weights,
     ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
@@ -451,7 +451,9 @@ class RandomFeaturesTrainer(BaseTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return self.psd_solve(solve_cov, solve_coeff, l2_penalty, return_cho_factor)
+        return self.psd_solve(
+            solve_cov, solve_coeff, l2_penalty, return_cholesky_factor
+        )
 
 
 def process_tgt_weights(
