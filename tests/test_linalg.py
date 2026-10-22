@@ -254,8 +254,8 @@ class TestPSDSolvers:
     @SKIP_NO_CUDA
     @FAIL_NO_CUPY_MARK
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    @pytest.mark.parametrize("return_cho_factor", [False, True])
-    def test_lowmem_cuda(self, dtype, return_cho_factor):
+    @pytest.mark.parametrize("return_cholesky_factor", [False, True])
+    def test_lowmem_cuda(self, dtype, return_cholesky_factor):
         A = self.A("cuda", dtype)
         B = self.B("cuda", dtype)
         penalty = 1e-5
@@ -265,8 +265,8 @@ class TestPSDSolvers:
         # To make sure only upper part of A is accessed set the lower to zero
         A = torch.triu(A)
         Acopy = torch.clone(A)
-        result = self.trainer().psd_solve(A, B, penalty, return_cho_factor)
-        if return_cho_factor:
+        result = self.trainer().psd_solve(A, B, penalty, return_cholesky_factor)
+        if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
             torch.testing.assert_close(factor.T @ factor, expected_cov)
@@ -279,15 +279,15 @@ class TestPSDSolvers:
         # correctness
         torch.testing.assert_close(result, expected)
 
-    @pytest.mark.parametrize("return_cho_factor", [False, True])
-    def test_lowmem_cpu(self, return_cho_factor):
+    @pytest.mark.parametrize("return_cholesky_factor", [False, True])
+    def test_lowmem_cpu(self, return_cholesky_factor):
         A = self.A("cpu", torch.float32)
         B = self.B("cpu", torch.float32)
         penalty = 1e-5
         expected_cov = A + torch.eye(self.mat_size, device=A.device, dtype=A.dtype) * penalty
         expected = self.expected(A, B, penalty)
-        result = self.trainer().psd_solve(A, B, penalty, return_cho_factor)
-        if return_cho_factor:
+        result = self.trainer().psd_solve(A, B, penalty, return_cholesky_factor)
+        if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
             torch.testing.assert_close(factor.T @ factor, expected_cov)
@@ -295,8 +295,8 @@ class TestPSDSolvers:
 
     @pytest.mark.parametrize("device", DEVICES)
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-    @pytest.mark.parametrize("return_cho_factor", [False, True])
-    def test_naive(self, device, dtype, return_cho_factor):
+    @pytest.mark.parametrize("return_cholesky_factor", [False, True])
+    def test_naive(self, device, dtype, return_cholesky_factor):
         A = self.A(device, dtype)
         B = self.B(device, dtype)
         penalty = 1e-5
@@ -307,8 +307,8 @@ class TestPSDSolvers:
         A = torch.triu(A)
         Acopy = torch.clone(A)
         Bcopy = torch.clone(B)
-        result = BaseTrainer.psd_solve(self.trainer(), A, B, penalty, return_cho_factor)
-        if return_cho_factor:
+        result = BaseTrainer.psd_solve(self.trainer(), A, B, penalty, return_cholesky_factor)
+        if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
             torch.testing.assert_close(factor.T @ factor, expected_cov)
@@ -418,7 +418,7 @@ def test_lowmem_factor_orientation(n, column_contiguous):
         cov,
         torch.ones(n, device="cuda", dtype=torch.float64),
         0.1,
-        return_cho_factor=True,
+        return_cholesky_factor=True,
     )
     factor = unpack_upper(packed, n)
     torch.testing.assert_close(
