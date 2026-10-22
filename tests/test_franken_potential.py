@@ -602,9 +602,8 @@ def test_gp_uncertainty_batched(device, dtype, targets):
     a = torch.randn(8, 8, device=device, dtype=dtype)
     penalty = 0.3
     system = a @ a.T + torch.eye(8, device=device, dtype=dtype) * penalty
-    model._cho_factor = pack_upper(
-        torch.linalg.cholesky(system, upper=True) / penalty**0.5
-    )
+    model._cholesky_factor = pack_upper(torch.linalg.cholesky(system, upper=True))
+    model._l2_penalty = penalty
     configs = [random_cfg(n, torch.float32, device) for n in [3, 5]]
     batch = Configuration.concatenate(configs)
 
@@ -660,7 +659,8 @@ def test_gp_uncertainty_energy_skips_force_jacobian():
             rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
             scale_by_Z=False,
         )
-    model._cho_factor = pack_upper(torch.eye(8))
+    model._cholesky_factor = pack_upper(torch.eye(8))
+    model._l2_penalty = 1.0
     config = random_cfg(3, torch.float32, "cpu")
     with patch.object(
         model, "_compute_forces", side_effect=AssertionError("unexpected Jacobian")
@@ -695,7 +695,8 @@ def test_gp_uncertainty_energy_shift_and_weights():
             rf_config=GaussianRFConfig(num_random_features=8, length_scale=1.0),
             scale_by_Z=False,
         )
-    model._cho_factor = pack_upper(torch.eye(8))
+    model._cholesky_factor = pack_upper(torch.eye(8))
+    model._l2_penalty = 1.0
     config = random_cfg(3, torch.float32, "cpu")
     model.energy_shift.set_from_atomic_energies({int(config.atomic_numbers[0]): 2.0})
     weights = torch.randn(2, 8)
@@ -725,7 +726,8 @@ def test_gp_uncertainty_prior_ratio_limits_and_zero_features():
         )
     # G/lambda has eigenvalues 0, 3, 8, 99, so posterior/prior standard
     # deviations along those directions are 1, 1/2, 1/3, 1/10.
-    model._cho_factor = pack_upper(torch.diag(torch.tensor([1.0, 2.0, 3.0, 10.0])))
+    model._cholesky_factor = pack_upper(torch.diag(torch.tensor([1.0, 2.0, 3.0, 10.0])))
+    model._l2_penalty = 1.0
     config = random_cfg(2, torch.float32, "cpu")
     fmaps = {
         "energy": torch.tensor([[0.0], [1.0], [0.0], [0.0]]),
@@ -749,7 +751,8 @@ def test_energy_uncertainty_per_atom(device):
             scale_by_Z=False,
             jac_chunk_size=2,
         ).to(device)
-    model._cho_factor = pack_upper(torch.diag(torch.linspace(1, 4, 8, device=device)))
+    model._cholesky_factor = pack_upper(torch.diag(torch.linspace(1, 4, 8, device=device)))
+    model._l2_penalty = 1.0
     configs = [random_cfg(n, torch.float32, device) for n in [3, 5]]
     batch = Configuration.concatenate(configs)
     out = model.predict(
@@ -766,13 +769,8 @@ def test_energy_uncertainty_per_atom(device):
     descriptors = model.input_scaler(
         model.gnn.descriptors(batch), atomic_numbers=batch.atomic_numbers
     )
-    atomic = model.rf.feature_map(
-        descriptors,
-        atomic_numbers=batch.atomic_numbers,
-        batch_ids=batch.batch_ids,
-        per_atom=True,
-    ).T
-    factor = model.get_cho_factor()
+    atomic = model.rf.atomic_feature_map(descriptors).T
+    factor = model.get_cholesky_factor()
     covariance = factor.T @ factor
     variance = (atomic * torch.linalg.solve(covariance, atomic)).sum(0)
     expected = variance.sqrt() / atomic.norm(dim=0)
