@@ -16,7 +16,7 @@ from franken.utils.linalg.cov import (
     rank1_update,
     rankk_update,
 )
-from franken.utils.linalg.tri import pack_upper, triangular_lerp
+from franken.utils.linalg.tri import pack_upper, triangular_lerp, unpack_upper
 from franken.utils.misc import no_jit, throughput
 
 try:
@@ -53,6 +53,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
+        save_cholesky_factor: bool = True,
     ):
         if len(training_targets) != 2:
             raise ValueError(
@@ -72,6 +73,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             dtype=dtype,
             save_fmaps=save_fmaps,
             metrics=metrics,
+            save_cholesky_factor=save_cholesky_factor,
         )
 
     def psd_solve(
@@ -79,7 +81,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         cov: torch.Tensor,
         rhs: torch.Tensor,
         penalty: float,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         r"""Solve ridge regression with the low-memory CUDA solver when available.
 
@@ -96,11 +98,11 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             cov (Tensor): covariance of the linear system
             rhs (Tensor): right hand side (one or more) of the linear system
             penalty (float): Tikhonov l2 penalty
-            return_cho_factor (bool): Also return the packed upper Cholesky factor.
+            return_cholesky_factor (bool): Also return the packed upper Cholesky factor.
 
         Returns:
             The ridge regression coefficients, or (coefficients, packed factor)
-            when return_cho_factor is True.
+            when return_cholesky_factor is True.
         """
         if cupy is None or cov.device.type != "cuda":
             if cov.device.type == "cuda":
@@ -108,7 +110,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
                     "low-memory solver cannot be used because `cupy` is not available. "
                     "Install `cupy` if you encounter memory problems."
                 )
-            return super().psd_solve(cov, rhs, penalty, return_cho_factor)
+            return super().psd_solve(cov, rhs, penalty, return_cholesky_factor)
 
         assert cusolver is not None and cublas is not None and cupy is not None
         assert cov.device.type == "cuda"
@@ -199,10 +201,42 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             )
 
         solution = torch.as_tensor(rhs).reshape(rhs_shape)
-        if return_cho_factor:
+        if return_cholesky_factor:
             # Restore the input orientation: its upper triangle now holds the factor.
             return solution, pack_upper(cov.T if transpose else cov).detach()
         return solution
+
+    def _offload_covs_and_coeffs(self, covs, coeffs):
+        """Cache both covariance triangles, their diagonals, and coefficients on CPU."""
+        covariance = next(iter(covs.values()))[0].detach().to("cpu")
+        packed_upper = pack_upper(covariance)
+        packed_lower = pack_upper(covariance.T)
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: (packed_upper, packed_lower, diagonal.detach().to("cpu"), upper)
+                for target, (_, diagonal, upper) in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
+        )
+
+    def _restore_covs_and_coeffs(self, n_features: int):
+        """Restore the shared covariance layout and coefficients on the trainer device."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        packed_upper, packed_lower, _, _ = next(iter(self._covs_cache.values()))
+        covariance = unpack_upper(packed_upper, n_features).to(self.device)
+        covariance.add_(unpack_upper(packed_lower, n_features).T.to(self.device))
+        covariance.diagonal().zero_()
+        return (
+            {
+                target: (covariance, diagonal.to(self.device), upper)
+                for target, (_, _, diagonal, upper) in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
 
     @no_jit()
     @torch.no_grad()
@@ -302,7 +336,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         covs: dict[TargetType, tuple[Tensor, Tensor, bool]],
         coeffs: dict[TargetType, Tensor],
         l2_penalty: float = 1e-6,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
         **weights,
     ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
@@ -340,4 +374,4 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         )
         lerped_cov.diagonal().copy_(lerped_diag)
         rhs = torch.lerp(coeff_upper, coeff_lower, weight_lower)
-        return self.psd_solve(lerped_cov, rhs, l2_penalty, return_cho_factor)
+        return self.psd_solve(lerped_cov, rhs, l2_penalty, return_cholesky_factor)
