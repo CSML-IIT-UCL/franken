@@ -11,6 +11,7 @@ from franken.data.base import (
     FORCES_TARGET_KEY,
     STRESS_TARGET_KEY,
 )
+from franken.rf.extrapolation import ExtrapolationGrade
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
 
@@ -23,7 +24,7 @@ class FrankenCalculator(Calculator):
             Lists properties which can be asked from this calculator, notably "energy", "forces", "stress".
     """
 
-    implemented_properties = ["energy", "forces", "stress"]
+    implemented_properties = ["energy", "forces", "stress", "extrapolation_grade"]
     default_parameters = {}
     nolabel = True  # ??
 
@@ -33,6 +34,7 @@ class FrankenCalculator(Calculator):
         device=None,
         rf_weight_id: int | None = None,
         gnn_config: BackboneConfig | None = None,
+        extrapolation_grade: ExtrapolationGrade | str | Path | None = None,
         **calc_kwargs,
     ):
         """Initialize FrankenCalculator class from a franken model.
@@ -48,6 +50,8 @@ class FrankenCalculator(Calculator):
                 Normal behavior is to automatically detect the GNN from the loaded franken model.
                 This may not be always possible, in particular if the provided model is JIT scripted.
                 In those cases passing the correct `gnn_config` is needed.
+            extrapolation_grade : Optional extrapolation scorer or path to one.
+                Required when requesting the ``"extrapolation_grade"`` property.
         """
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
@@ -86,6 +90,15 @@ class FrankenCalculator(Calculator):
         self.device = (
             device if device is not None else next(self.franken.parameters()).device
         )
+        if isinstance(extrapolation_grade, (str, Path)):
+            extrapolation_grade = ExtrapolationGrade.load(
+                extrapolation_grade, map_location=self.device
+            )
+        self.extrapolation_grade = (
+            extrapolation_grade.to(self.device)
+            if extrapolation_grade is not None
+            else None
+        )
 
     def calculate(
         self,
@@ -95,6 +108,10 @@ class FrankenCalculator(Calculator):
     ):
         if properties is None:
             properties = self.implemented_properties
+            if self.extrapolation_grade is None:
+                properties = [
+                    prop for prop in properties if prop != "extrapolation_grade"
+                ]
 
         super().calculate(atoms, properties, system_changes)
 
@@ -122,6 +139,16 @@ class FrankenCalculator(Calculator):
             self.results["stress"] = (
                 computed[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
             )
+        if "extrapolation_grade" in properties:
+            if self.extrapolation_grade is None:
+                raise RuntimeError(
+                    "An active set is required to compute extrapolation_grade."
+                )
+            grade, atomic_grade = self.extrapolation_grade.grade_model_configuration(
+                self.franken, data, return_atomic=True
+            )
+            self.results["extrapolation_grade"] = grade.numpy(force=True)
+            self.results["atomic_extrapolation"] = atomic_grade.numpy(force=True)
 
 
 def calculator_throughput(
