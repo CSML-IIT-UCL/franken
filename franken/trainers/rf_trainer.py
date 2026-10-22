@@ -126,7 +126,8 @@ class RandomFeaturesTrainer(BaseTrainer):
                 "The previous fit still has cached covariances and coefficients. "
                 "Serialize it or call _purge_covs_and_coeffs_cache() before fitting again."
             )
-        model._cho_factor = None
+        model._cholesky_factor = None
+        model._l2_penalty = None
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
