@@ -36,9 +36,9 @@ class RandomFeaturesHead(torch.nn.Module):
     ):
         super(RandomFeaturesHead, self).__init__()
         self.input_dim = input_dim
-        self.num_random_features = num_random_features
+        self._num_random_features = num_random_features
 
-        self.total_random_features = self.num_random_features
+        self.total_random_features = self._num_random_features
 
         # Register weights buffer
         self.weights: torch.Tensor
@@ -67,10 +67,15 @@ class RandomFeaturesHead(torch.nn.Module):
 
     def init_args(self):
         """Return the arguments needed to re-initialize this class."""
-        return {"num_random_features": self.num_random_features}
+        return {"num_random_features": self._num_random_features}
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Return unpooled RF rows of shape ``[total_atoms, total_random_features]``."""
+        """Compute per-atom random-feature rows before pooling.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
         raise NotImplementedError
 
     def feature_map(
@@ -134,13 +139,13 @@ class OrthogonalRFF(RandomFeaturesHead):
         random_generator = get_seeded_generator(self.rng_seed)
 
         W = self._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
@@ -184,16 +189,16 @@ class OrthogonalRFF(RandomFeaturesHead):
         return W
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute atomic RF rows before pooling."""
-        return self._gaussian_features(h)
-
-    def _gaussian_features(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute unbiased Gaussian RF rows.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                scaled atomic descriptors ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
+        return self._gaussian_features(h)
+
+    def _gaussian_features(self, h: torch.Tensor) -> torch.Tensor:
+        """Private method that enable TorchScript-compatible reuse by BiasedOrthogonalRFF."""
         length_scale = self.length_scale
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -203,11 +208,11 @@ class OrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
         return Z
 
     def init_args(self):
@@ -243,7 +248,12 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
         self.register_buffer("bias", torch.tensor(bias))
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute atomic Gaussian RF rows with a constant final coordinate."""
+        """Compute per-atom random-feature rows before pooling. In this case, the last column of the feature map is replaced by a constant coordinate ``sqrt(bias)``.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
         self.bias = self.bias.to(dtype=h.dtype)
         features = self._gaussian_features(h)
         # Insert the constant in each atomic row before pooling.
@@ -310,36 +320,36 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         self.length_scale_num = length_scale_num
 
         W = OrthogonalRFF._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
 
-        _num_repeats = ceil(self.num_random_features / self.length_scale_num)
+        _num_repeats = ceil(self._num_random_features / self.length_scale_num)
         _length_scale = torch.repeat_interleave(
             torch.linspace(
                 self.length_scale_low, self.length_scale_high, self.length_scale_num
             ),
             _num_repeats,
         )
-        self.register_buffer("length_scale", _length_scale[: self.num_random_features])
+        self.register_buffer("length_scale", _length_scale[: self._num_random_features])
 
         self.use_offset = use_offset
         if not self.use_offset:
             self.total_random_features = self.total_random_features * 2
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom random-feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -352,11 +362,11 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
         return Z
 
     def init_args(self):
@@ -402,11 +412,11 @@ class Linear(RandomFeaturesHead):
         self.register_buffer("length_scale", torch.tensor(length_scale))
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom linear-kernel feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = h / length_scale
@@ -479,7 +489,7 @@ class TensorSketch(RandomFeaturesHead):
     def _sample_hash_fns(self, generator: torch.Generator | None):
         i_hash = torch.randint(
             low=0,
-            high=self.num_random_features,
+            high=self._num_random_features,
             size=(self.input_dim,),
             generator=generator,
         )
@@ -492,16 +502,16 @@ class TensorSketch(RandomFeaturesHead):
         count_sketch = torch.sparse_coo_tensor(
             indices,
             s_hash,
-            torch.Size([self.num_random_features, self.input_dim]),
+            torch.Size([self._num_random_features, self.input_dim]),
         ).to_dense()
         return count_sketch
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom random-feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = (h + torch.sqrt(torch.abs(self.bias))) / length_scale
@@ -511,9 +521,9 @@ class TensorSketch(RandomFeaturesHead):
         Z = torch.einsum(
             "af, dFf -> adF", scaled_descriptors, self.count_sketches
         )  # ~[atoms, degree, random_features]
-        Z = torch.fft.rfft(Z, n=self.num_random_features)
+        Z = torch.fft.rfft(Z, n=self._num_random_features)
         Z = Z.prod(1)  # ~[atoms, random_features]
-        Z = torch.fft.irfft(Z, n=self.num_random_features)
+        Z = torch.fft.irfft(Z, n=self._num_random_features)
         return Z
 
     def init_args(self):
