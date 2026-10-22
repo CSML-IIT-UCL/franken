@@ -84,7 +84,8 @@ def test_integration(gnn_cfg, device, atomic_energies):
             cleanup_dir(str(temp_dir))
 
 
-def test_parse_cli_supports_stress_weight_and_metrics():
+@pytest.mark.parametrize("save_cholesky_factor", [True, False])
+def test_parse_cli_supports_stress_weight_and_metrics(save_cholesky_factor):
     cfg = parse_cli([
         "--train-path",
         "/tmp/train.xyz",
@@ -112,8 +113,10 @@ def test_parse_cli_supports_stress_weight_and_metrics():
         "stress_MAE",
         "--run-dir",
         ".",
+        *([] if save_cholesky_factor else ["--no-save-cholesky-factor"]),
     ])
 
+    assert cfg.save_cholesky_factor == save_cholesky_factor
     assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
     assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
     assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")

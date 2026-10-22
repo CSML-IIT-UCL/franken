@@ -502,6 +502,13 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "save_every_model"),
     )
     parser.add_argument(
+        "--no-save-cholesky-factor",
+        dest="save_cholesky_factor",
+        action="store_false",
+        default=True,
+        help="Do not save the best model's Cholesky factor in its checkpoint.",
+    )
+    parser.add_argument(
         "--dtype",
         choices=["float32", "float64"],
         default="float64",
@@ -610,6 +617,7 @@ def parse_cli(argv):
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
+        save_cholesky_factor=args.save_cholesky_factor,
         dtype=args.dtype,
         save_fmaps=args.save_fmaps,
         metrics=args.metrics,
