@@ -36,9 +36,9 @@ class RandomFeaturesHead(torch.nn.Module):
     ):
         super(RandomFeaturesHead, self).__init__()
         self.input_dim = input_dim
-        self.num_random_features = num_random_features
+        self._num_random_features = num_random_features
 
-        self.total_random_features = self.num_random_features
+        self.total_random_features = self._num_random_features
 
         # Register weights buffer
         self.weights: torch.Tensor
@@ -67,7 +67,7 @@ class RandomFeaturesHead(torch.nn.Module):
 
     def init_args(self):
         """Return the arguments needed to re-initialize this class."""
-        return {"num_random_features": self.num_random_features}
+        return {"num_random_features": self._num_random_features}
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
         """Compute per-atom random-feature rows before pooling.
@@ -139,13 +139,13 @@ class OrthogonalRFF(RandomFeaturesHead):
         random_generator = get_seeded_generator(self.rng_seed)
 
         W = self._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
@@ -208,11 +208,11 @@ class OrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
         return Z
 
     def init_args(self):
@@ -320,25 +320,25 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         self.length_scale_num = length_scale_num
 
         W = OrthogonalRFF._sample_orf_matrix(
-            input_dim, self.num_random_features, random_generator, self.rng_seed
+            input_dim, self._num_random_features, random_generator, self.rng_seed
         )
 
         self.register_buffer("rff_matrix", W)
         self.register_buffer(
             "random_offset",
-            torch.rand(self.num_random_features, generator=random_generator)
+            torch.rand(self._num_random_features, generator=random_generator)
             * 2
             * np.pi,
         )
 
-        _num_repeats = ceil(self.num_random_features / self.length_scale_num)
+        _num_repeats = ceil(self._num_random_features / self.length_scale_num)
         _length_scale = torch.repeat_interleave(
             torch.linspace(
                 self.length_scale_low, self.length_scale_high, self.length_scale_num
             ),
             _num_repeats,
         )
-        self.register_buffer("length_scale", _length_scale[: self.num_random_features])
+        self.register_buffer("length_scale", _length_scale[: self._num_random_features])
 
         self.use_offset = use_offset
         if not self.use_offset:
@@ -362,11 +362,11 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
         Z = torch.einsum("af, Ff -> aF", h, self.rff_matrix / length_scale)
         if self.use_offset:
             b = self.random_offset.unsqueeze(0)
-            Z = torch.cos(Z + b) / sqrt(0.5 * self.num_random_features)
+            Z = torch.cos(Z + b) / sqrt(0.5 * self._num_random_features)
         else:
             _s = torch.sin(Z)
             _c = torch.cos(Z)
-            Z = torch.cat((_s, _c), dim=-1) / sqrt(self.num_random_features)
+            Z = torch.cat((_s, _c), dim=-1) / sqrt(self._num_random_features)
         return Z
 
     def init_args(self):
@@ -489,7 +489,7 @@ class TensorSketch(RandomFeaturesHead):
     def _sample_hash_fns(self, generator: torch.Generator | None):
         i_hash = torch.randint(
             low=0,
-            high=self.num_random_features,
+            high=self._num_random_features,
             size=(self.input_dim,),
             generator=generator,
         )
@@ -502,7 +502,7 @@ class TensorSketch(RandomFeaturesHead):
         count_sketch = torch.sparse_coo_tensor(
             indices,
             s_hash,
-            torch.Size([self.num_random_features, self.input_dim]),
+            torch.Size([self._num_random_features, self.input_dim]),
         ).to_dense()
         return count_sketch
 
@@ -521,9 +521,9 @@ class TensorSketch(RandomFeaturesHead):
         Z = torch.einsum(
             "af, dFf -> adF", scaled_descriptors, self.count_sketches
         )  # ~[atoms, degree, random_features]
-        Z = torch.fft.rfft(Z, n=self.num_random_features)
+        Z = torch.fft.rfft(Z, n=self._num_random_features)
         Z = Z.prod(1)  # ~[atoms, random_features]
-        Z = torch.fft.irfft(Z, n=self.num_random_features)
+        Z = torch.fft.irfft(Z, n=self._num_random_features)
         return Z
 
     def init_args(self):

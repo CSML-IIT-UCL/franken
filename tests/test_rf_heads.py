@@ -62,8 +62,6 @@ class TestFeatureSizes:
         rf_no_offset = init_rf(
             "gaussian", input_dim=32, use_offset=False, num_random_features=128
         )
-        assert rf_offset.num_random_features == 128
-        assert rf_no_offset.num_random_features == 128
         assert rf_offset.total_random_features == 128
         assert rf_no_offset.total_random_features == 256
         assert rf_offset.rff_matrix.shape == (128, 32)
