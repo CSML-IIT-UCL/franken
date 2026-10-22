@@ -42,8 +42,7 @@ class TestDtype:
             input_dim=64,
         )
         data = torch.randn(10, 64, dtype=dt)
-        atomic_nums = torch.randint(1, 100, (10,))
-        fmap = rf.feature_map(data, atomic_numbers=atomic_nums)
+        fmap = rf.feature_map(data)
         assert fmap.dtype == dt
         for buf_name, buf in rf.named_buffers():
             if buf_name == "weights":
@@ -71,44 +70,6 @@ class TestFeatureSizes:
         assert rf_no_offset.rff_matrix.shape == (128, 32)
         assert rf_offset.random_offset.shape == (128,)
 
-    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
-    def test_per_species_kernel_nonlin1(self, rf_type):
-        rf = init_rf(
-            rf_type,
-            input_dim=32,
-            num_random_features=128,
-            num_species=4,
-            chemically_informed_ratio=None,
-        )
-        assert rf.num_random_features == 128
-        assert rf.total_random_features == 128 * 4
-
-    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
-    def test_per_species_kernel_nonlin2(self, rf_type):
-        rf = init_rf(
-            rf_type,
-            input_dim=32,
-            num_random_features=128,
-            num_species=4,
-            chemically_informed_ratio=0.4,
-        )
-        assert rf.num_random_features == 128
-        assert rf.total_random_features == 128 * (4 + 1)
-
-    def test_per_species_kernel_lin1(self):
-        rf = init_rf(
-            "linear", input_dim=32, num_species=4, chemically_informed_ratio=None
-        )
-        assert rf.num_random_features == 33
-        assert rf.total_random_features == 33 * 4
-
-    def test_per_species_kernel_lin2(self):
-        rf = init_rf(
-            "linear", input_dim=32, num_species=4, chemically_informed_ratio=0.4
-        )
-        assert rf.num_random_features == 33
-        assert rf.total_random_features == (33) * (4 + 1)
-
 
 class TestEdgeCaseInputs:
     @pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
@@ -128,100 +89,63 @@ class TestEdgeCaseInputs:
                 init_rf(rf_type, input_dim=32, length_scale_low=-1.1)
 
 
-class TestScatterSum:
-    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
-    def test_batched_simple(self, rf_type):
-        torch.manual_seed(1)
-        rf = init_rf(
-            rf_type,
-            input_dim=32,
-            num_random_features=128,
-            num_species=None,
-            chemically_informed_ratio=None,
-        )
-        dt = torch.float32
-        data = torch.randn(10, 32, dtype=dt)
-        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
-
-        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
-        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
-        fmap_single = torch.cat([
-            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
-            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
-        ])
-        torch.testing.assert_close(fmap_batched, fmap_single)
-
-    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
-    def test_batched_perspecies(self, rf_type):
-        torch.manual_seed(1)
-        rf = init_rf(
-            rf_type,
-            input_dim=8,
-            num_random_features=4,
-            num_species=4,
-            chemically_informed_ratio=None,
-        )
-        dt = torch.float32
-        data = torch.randn(10, 8, dtype=dt)
-        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
-
-        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
-        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
-        fmap_single = torch.cat([
-            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
-            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
-        ])
-        torch.testing.assert_close(fmap_batched, fmap_single)
-
-    @pytest.mark.parametrize("rf_type", ["poly", "gaussian"])
-    def test_batched_chemratio(self, rf_type):
-        torch.manual_seed(1)
-        rf = init_rf(
-            rf_type,
-            input_dim=32,
-            num_random_features=128,
-            num_species=4,
-            chemically_informed_ratio=0.2,
-        )
-        dt = torch.float32
-        data = torch.randn(10, 32, dtype=dt)
-        atomic_nums = torch.tensor([0, 1, 2, 3, 0, 0, 1, 2, 3, 0]).long()
-
-        batch_ids = torch.cat([torch.zeros(5), torch.ones(5)]).long()
-        fmap_batched = rf.feature_map(data, atomic_numbers=atomic_nums, batch_ids=batch_ids)
-        fmap_single = torch.cat([
-            rf.feature_map(data[:5], atomic_numbers=atomic_nums[:5]),
-            rf.feature_map(data[5:], atomic_numbers=atomic_nums[5:])
-        ])
-        torch.testing.assert_close(fmap_batched, fmap_single)
-
-
-if __name__ == "__main__":
-    pytest.main()
-
-
 @pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
-@pytest.mark.parametrize("num_species,kappa", [(None, None), (2, None), (2, 0.3)])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
-def test_atomic_features_reproduce_pooled_map(rf_type, num_species, kappa, dtype):
+def test_atomic_features_reproduce_pooled_map(rf_type, dtype):
     rf = init_rf(
         rf_type,
         input_dim=4,
         **({"num_random_features": 8} if rf_type != "linear" else {}),
-        num_species=num_species,
-        chemically_informed_ratio=kappa,
     )
     descriptors = torch.randn(7, 4, dtype=dtype)
-    atomic_numbers = torch.tensor([1, 1, 8, 1, 8, 8, 8])
     batch_ids = torch.tensor([0, 0, 0, 1, 1, 1, 1])
-    atomic = rf.feature_map(descriptors, atomic_numbers, batch_ids, per_atom=True)
-    pooled = rf.feature_map(descriptors, atomic_numbers, batch_ids)
+    atomic = rf.atomic_feature_map(descriptors)
+    pooled = rf.feature_map(descriptors, batch_ids=batch_ids)
     assert atomic.shape == (7, rf.total_random_features)
     assert atomic.dtype == dtype
+    torch.testing.assert_close(
+        rf.feature_map(descriptors), atomic.mean(0, keepdim=True)
+    )
     for i in range(2):
         mask = batch_ids == i
         torch.testing.assert_close(atomic[mask].mean(0), pooled[i])
-        separate = rf.feature_map(
-            descriptors[mask], atomic_numbers[mask], per_atom=True
+        torch.testing.assert_close(
+            rf.atomic_feature_map(descriptors[mask]), atomic[mask]
         )
-        torch.testing.assert_close(atomic[mask], separate)
+
+
+@pytest.mark.parametrize("rf_type", ["gaussian", "multiscale-gaussian"])
+def test_atomic_features_without_offset(rf_type):
+    rf = init_rf(rf_type, input_dim=4, num_random_features=8, use_offset=False)
+    h = torch.randn(5, 4)
+    raw = rf.atomic_feature_map(h)
+    pooled = rf.feature_map(h)
+    assert raw.shape == (5, 16)
+    assert pooled.shape == (1, 16)
+    torch.testing.assert_close(raw.mean(0), pooled[0])
+
+
+class _ScriptFeatureMap(torch.nn.Module):
+    def __init__(self, head):
+        super().__init__()
+        self.head = head
+
+    def forward(self, descriptors: torch.Tensor, batch_ids: torch.Tensor):
+        return self.head.feature_map(descriptors, batch_ids=batch_ids)
+
+
+@pytest.mark.parametrize("rf_type", RF_PARAMETRIZE)
+def test_feature_map_remains_scriptable(rf_type):
+    wrapper = _ScriptFeatureMap(init_rf(rf_type, input_dim=4))
+    scripted = torch.jit.script(wrapper)
+    h = torch.randn(5, 4)
+    batch_ids = torch.tensor([0, 0, 1, 1, 1])
+    torch.testing.assert_close(scripted(h, batch_ids), wrapper(h, batch_ids))
+
+
+def test_biased_gaussian_constant_is_inserted_before_pooling():
+    rf = BiasedOrthogonalRFF(input_dim=4, num_random_features=8, bias=4.0)
+    h = torch.randn(3, 4)
+    raw = rf.atomic_feature_map(h)
+    torch.testing.assert_close(raw[:, -1], torch.full((3,), 2.0))
+    torch.testing.assert_close(rf.feature_map(h)[:, -1], torch.tensor([2.0]))

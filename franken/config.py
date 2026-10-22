@@ -402,5 +402,5 @@ class AutotuneConfig:
     )
     """Which data labels to train Franken with."""
 
-    save_cho_factor: bool = True
+    save_cholesky_factor: bool = True
     """Whether to save the best model's packed Cholesky factor in its checkpoint."""
