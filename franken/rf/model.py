@@ -91,9 +91,9 @@ class FrankenPotential(torch.nn.Module):
             num_species=num_species, atomic_energies=atomic_energies
         )
         self.force_func_grad = False
-        # Upper-triangular Cholesky factor, packed including the diagonal.
-        # Stored as U / sqrt(lambda) for posterior/prior uncertainty ratios.
-        self.register_buffer("_cho_factor", None, persistent=False)
+        # Upper-triangular Cholesky factor, packed row by row, including the diagonal.
+        self.register_buffer("_cholesky_factor", None, persistent=False)
+        self._l2_penalty: Optional[float] = None
 
     @property
     @torch.jit.unused
@@ -106,11 +106,11 @@ class FrankenPotential(torch.nn.Module):
         return hps
 
     @torch.jit.unused
-    def get_cho_factor(self) -> torch.Tensor | None:
-        """Return the dense upper factor V = U / sqrt(lambda), with V.T @ V = I + G / lambda."""
-        if self._cho_factor is None:
+    def get_cholesky_factor(self) -> torch.Tensor | None:
+        """Return the upper factor U, where A + _l2_penalty * I = U.T @ U, and A is the covariance of training data."""
+        if self._cholesky_factor is None:
             return None
-        return unpack_upper(self._cho_factor, self.rf.total_random_features)
+        return unpack_upper(self._cholesky_factor, self.rf.total_random_features)
 
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
         if multi_weights is not None:
@@ -135,8 +135,9 @@ class FrankenPotential(torch.nn.Module):
                 "config": self.gnn_config.to_ckpt(),
             },
         }
-        if multi_weights is None and self._cho_factor is not None:
-            ckpt["_cho_factor"] = self._cho_factor
+        if multi_weights is None and self._cholesky_factor is not None:
+            ckpt["cholesky_factor"] = self._cholesky_factor
+            ckpt["l2_penalty"] = self._l2_penalty
         torch.save(ckpt, path)
 
     @classmethod
@@ -167,12 +168,13 @@ class FrankenPotential(torch.nn.Module):
         model.input_scaler.load_state_dict(ckpt["input_scaler"]["state_dict"])
         model.energy_shift.load_state_dict(ckpt["energy_shift"])
 
-        factor = ckpt.get("_cho_factor")
+        factor = ckpt.get("cholesky_factor")
         if factor is not None and ckpt["multi_weights"] is None:
             n = model.rf.total_random_features
             if factor.ndim != 1 or factor.numel() != n * (n + 1) // 2:
                 raise ValueError("Checkpoint Cholesky factor has an invalid size")
-            model._cho_factor = factor
+            model._cholesky_factor = factor
+            model._l2_penalty = ckpt.get("l2_penalty")
 
         if ckpt["multi_weights"] is not None:
             if rf_weight_id is None:
@@ -341,12 +343,28 @@ class FrankenPotential(torch.nn.Module):
         )
         random_features = self.rf.feature_map(
             normalized_descriptors,
-            atomic_numbers=data.atomic_numbers,
             batch_ids=data.batch_ids,
         )
         data.atom_pos = old_atom_pos
         # the differentiable output is summed over structures
         return random_features.sum(0), random_features
+
+    @torch.jit.unused
+    def atomic_feature_map(self, data: Configuration) -> torch.Tensor:
+        """Return raw atomic RF rows after the backbone and input scaler.
+
+        Rows follow input atom order and have shape
+        ``[total_atoms, total_random_features]``. No pooling is applied.
+        Gradients flow through the backbone, input scaler, and RF head. Use
+        ``torch.no_grad()`` for inference. This helper is not exported to
+        TorchScript.
+        """
+        gnn_descriptors = self.gnn.descriptors(data)
+        normalized_descriptors = self.input_scaler(
+            gnn_descriptors,
+            atomic_numbers=data.atomic_numbers,
+        )
+        return self.rf.atomic_feature_map(normalized_descriptors)
 
     @torch.jit.unused
     def grad_feature_map(
@@ -410,20 +428,23 @@ class FrankenPotential(torch.nn.Module):
     ) -> dict[str, torch.Tensor]:
         r"""Return posterior/prior standard-deviation ratios in [0, 1].
 
-        For the saved factor V = U / sqrt(lambda), the ratio is
-        ``||V^{-T} phi|| / ||phi||``. Energy and force components use their
+        For the saved unscaled factor U and penalty lambda, the ratio is
+        ``sqrt(lambda) * ||U^{-T} phi|| / ||phi||``. Energy and force components use their
         respective feature vectors; atom-count scaling cancels in the ratio.
         Zero feature vectors contribute no uncertainty and return zero.
         These dimensionless ratios describe how strongly training constrains
         each feature direction, not probabilities of prediction accuracy.
         """
-        factor = self.get_cho_factor()
+        factor = self.get_cholesky_factor()
         assert factor is not None
+        penalty = self._l2_penalty
+        if penalty is None or not 0 < penalty < float("inf"):
+            raise ValueError("GP uncertainty requires a finite positive l2_penalty.")
         out: dict[str, torch.Tensor] = {}
         for target, fmap in fmaps.items():
             features = fmap.to(factor)
             whitened = torch.linalg.solve_triangular(factor.T, features, upper=False)
-            posterior = torch.linalg.vector_norm(whitened, dim=0)
+            posterior = torch.linalg.vector_norm(whitened, dim=0) * penalty**0.5
             prior = torch.linalg.vector_norm(features, dim=0)
             # Avoid 0/0 for zero feature vectors; clamp roundoff at the theoretical bound.
             denominator = torch.where(prior > 0, prior, torch.ones_like(prior))
@@ -541,7 +562,7 @@ class FrankenPotential(torch.nn.Module):
             add_energy_shift: whether to add the energy shift to the energy.
             compute_gp_uncertainty: Include posterior/prior standard-deviation
                 ratios in [0, 1] for energy and/or forces, using a saved
-                prior-normalized training Cholesky factor.
+                training Cholesky factor and its L2 penalty.
                 Computes feature maps once for both predictions and uncertainty.
                 This path uses forward-mode feature Jacobians regardless of
                 ``differential_mode`` and is unavailable in TorchScript.
@@ -590,10 +611,10 @@ class FrankenPotential(torch.nn.Module):
                         raise ValueError(f"Unsupported GP uncertainty target: {target}")
                 if not targets:
                     return {}
-                if self._cho_factor is None:
+                if self._cholesky_factor is None:
                     raise RuntimeError(
                         "GP uncertainty requires a saved Cholesky factor. "
-                        "Train with save_cho_factor=True and load the best-model checkpoint."
+                        "Train with save_cholesky_factor=True and load the best-model checkpoint."
                     )
                 fmaps = self.grad_feature_map(data, targets)
                 fmaps = {target: fmaps[target] for target in targets}
@@ -607,16 +628,7 @@ class FrankenPotential(torch.nn.Module):
                 )
                 if energy_uncertainty_per_atom:
                     with torch.no_grad():
-                        descriptors = self.gnn.descriptors(data)
-                        descriptors = self.input_scaler(
-                            descriptors, atomic_numbers=data.atomic_numbers
-                        )
-                        atomic_fmaps = self.rf.feature_map(
-                            descriptors,
-                            atomic_numbers=data.atomic_numbers,
-                            batch_ids=data.batch_ids,
-                            per_atom=True,
-                        )
+                        atomic_fmaps = self.atomic_feature_map(data)
                         atomic_scores = self._compute_gp_uncertainty_from_fmaps(
                             {franken.data.base.ENERGY_TARGET_KEY: atomic_fmaps.T}
                         )

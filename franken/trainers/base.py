@@ -1,7 +1,6 @@
 import abc
 import json
 import logging
-import math
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -33,11 +32,11 @@ class BaseTrainer(abc.ABC):
         save_every_model: bool = True,
         device: Union[torch.device, str, int] = "cpu",
         dtype: Union[str, torch.dtype] = torch.float32,
-        save_cho_factor: bool = True,
+        save_cholesky_factor: bool = True,
     ):
         self.log_dir = log_dir
         self.save_every_model = save_every_model
-        self.save_cho_factor = save_cho_factor
+        self.save_cholesky_factor = save_cholesky_factor
         self.train_dataloader = train_dataloader
         self.statistics_ = None
         if isinstance(dtype, str):
@@ -93,13 +92,14 @@ class BaseTrainer(abc.ABC):
         cov: torch.Tensor,
         rhs: torch.Tensor,
         penalty: float,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
+        r"""Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
 
-        Multiple right-hand sides are supported. Instead of providing the data
-        matrix (commonly :math:`X` in ridge-regression notation), and labels (commonly :math:`y`),
-        we are given directly :math:`\text{cov} = X^T X` and :math:`\text{rhs} = X^T y`.
+        Multiple right-hand sides are supported.
+        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
+        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
+        and :math:`\text{rhs} = X^{\top} y`.
         Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
 
         To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
@@ -109,44 +109,38 @@ class BaseTrainer(abc.ABC):
             cov (Tensor): covariance of the linear system
             rhs (Tensor): right hand side (one or more) of the linear system
             penalty (float): Tikhonov l2 penalty
-            return_cho_factor (bool): Also return the packed upper Cholesky factor.
+            return_cholesky_factor (bool): Also return the packed upper Cholesky factor.
 
         Returns:
             The ridge regression coefficients, or (coefficients, packed factor)
-            when return_cho_factor is True.
+            when return_cholesky_factor is True.
         """
         # Add diagonal without copies
         cov.diagonal().add_(penalty)
         # Solve with cholesky on GPU
         L = torch.linalg.cholesky(cov, upper=True)
         rhs_shape = rhs.shape
-        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True).view(
-            rhs_shape
-        )
-        if return_cho_factor:
+        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True)
+        solution = solution.view(rhs_shape)
+        if return_cholesky_factor:
             return solution, pack_upper(L).detach()
         return solution
 
-    def _best_cho_factor(self, model: FrankenPotential, best_model: LogEntry):
-        """Repeat the winning solve for the latest fitted model, capturing its packed factor."""
-        if not self.save_cho_factor:
-            return None
+    def _best_cholesky_factor(
+        self, model: FrankenPotential, best_model: LogEntry
+    ) -> tuple[torch.Tensor | None, float | None]:
+        """Repeat the winning solve, returning its packed factor and regularization penalty."""
+        if not self.save_cholesky_factor:
+            return None, None
         if self._covs_cache is None and self._coeffs_cache is None:
-            return None  # Manual serialization without a preceding fit.
+            return None, None  # Manual serialization without a preceding fit.
         solver_hps = best_model.to_dict()["hyperparameters"]["solver"]
         solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
-        penalty = solver_hps.get("l2_penalty", 1e-6)
-        if not math.isfinite(penalty) or penalty <= 0:
-            raise ValueError(
-                "Saving a prior-normalized Cholesky factor requires a finite positive l2_penalty."
-            )
         covs, coeffs = self._restore_covs_and_coeffs(model.rf.total_random_features)
         _, factor = self.solve(
-            covs=covs, coeffs=coeffs, return_cho_factor=True, **solver_hps
+            covs=covs, coeffs=coeffs, return_cholesky_factor=True, **solver_hps
         )
-        # Encoding the ridge in the factor avoids storing lambda separately:
-        # V = U / sqrt(lambda), so ||V^{-T} phi|| / ||phi|| is posterior/prior std.
-        return factor.div_(math.sqrt(penalty))
+        return factor, solver_hps["l2_penalty"]
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
@@ -278,7 +272,9 @@ class BaseTrainer(abc.ABC):
 
             if should_save:
                 logger.debug(f"Identified new best model: {best_model}")
-                model._cho_factor = self._best_cho_factor(model, best_model)
+                model._cholesky_factor, model._l2_penalty = self._best_cholesky_factor(
+                    model, best_model
+                )
                 weights = all_weights[best_model.checkpoint_rf_weight_id]
                 model.rf.weights = weights.reshape_as(model.rf.weights)
                 model.save(self.log_dir / "best_ckpt.pt")

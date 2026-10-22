@@ -1,7 +1,7 @@
 """Compare CUDA solver times; matrix construction and input copies are not timed.
 
 Run from the repository root:
-    python benchmarks/benchmark_psd_solve.py
+    python tests/benchmarks/benchmark_psd_solve.py
 """
 
 import argparse
@@ -14,15 +14,18 @@ from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer, cupy
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 
 
-def time_solver(solver, cov, rhs, warmup, repeats):
+def time_solver(solver, cov, rhs, warmup, repeats, cholesky_factor):
+    is_cuda = cov.device.type == "cuda"
     times = []
     for iteration in range(warmup + repeats):
         # Both solvers mutate their inputs; give each run fresh, identical data.
         solve_cov, solve_rhs = cov.clone(), rhs.clone()
-        torch.cuda.synchronize(cov.device)
+        if is_cuda:
+            torch.cuda.synchronize(cov.device)
         start = perf_counter()
-        solution = solver(solve_cov, solve_rhs, 1e-3)
-        torch.cuda.synchronize(cov.device)
+        solution = solver(solve_cov, solve_rhs, 1e-3, return_cholesky_factor=cholesky_factor)
+        if is_cuda:
+            torch.cuda.synchronize(cov.device)
         elapsed = perf_counter() - start
         if iteration >= warmup:
             times.append(elapsed)
@@ -40,20 +43,25 @@ def main():
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--dtype", choices=["float32", "float64"], default="float32")
+    parser.add_argument("--cholesky-factor", action="store_true")
     args = parser.parse_args()
     if not 0 <= args.min_power <= args.max_power <= 14:
         parser.error("powers must satisfy 0 <= min-power <= max-power <= 14")
     if args.repeats < 1 or args.warmup < 0:
         parser.error("repeats must be positive and warmup nonnegative")
-    if not torch.cuda.is_available() or cupy is None:
-        parser.error("CUDA and CuPy are required to compare both solvers")
+    if cupy is None:
+        print("WARN: CuPy is not available. Low-mem and standard solvers are equivalent.")
 
-    if not 0 <= args.gpu < torch.cuda.device_count():
-        parser.error("gpu must be the index of a visible CUDA device")
-    device = torch.device(f"cuda:{args.gpu}")
-    # PyTorch and CuPy must select the same device, including cuSOLVER allocations.
-    torch.cuda.set_device(device)
-    cupy.cuda.Device(args.gpu).use()
+    if torch.cuda.is_available():
+        if not 0 <= args.gpu < torch.cuda.device_count():
+            parser.error("gpu must be the index of a visible CUDA device")
+        device = torch.device(f"cuda:{args.gpu}")
+        cupy.cuda.Device(args.gpu).use()
+        torch.cuda.set_device(device)
+        print(f"GPU: {torch.cuda.get_device_name(device)} ({device})", flush=True)
+    else:
+        device = torch.device("cpu")
+        print("CPU. Low-mem is equivalent to standard solver.", flush=True)
     generator = torch.Generator(device=device).manual_seed(0)
     dtype = getattr(torch, args.dtype)
     trainer_args = dict(
@@ -66,13 +74,13 @@ def main():
     )
     naive = RandomFeaturesTrainer(**trainer_args).psd_solve
     lowmem = LowMemRandomFeaturesTrainer(**trainer_args).psd_solve
-    print(f"GPU: {torch.cuda.get_device_name(device)} ({device})", flush=True)
+
     print(flush=True)
     print(
-        f"{'Size':>8} {'Naive (ms)':>12} {'Lowmem (ms)':>13} {'Naive/Lowmem':>14}",
+        f"{'Dev':>6} {'Size':>8} {'ChoFactor':>11} {'Naive (ms)':>12} {'Lowmem (ms)':>13} {'Naive/Lowmem':>14}",
         flush=True,
     )
-    print(f"{'-' * 8} {'-' * 12} {'-' * 13} {'-' * 14}", flush=True)
+    print(f"{'-' * 6} {'-' * 8} {'-' * 11} {'-' * 12} {'-' * 13} {'-' * 14}", flush=True)
     with torch.no_grad():
         for power in range(args.min_power, args.max_power + 1):
             n = 2**power
@@ -82,10 +90,11 @@ def main():
             cov = (features @ features.T).div_(n)
             del features
             rhs = torch.randn(n, device=device, dtype=dtype, generator=generator)
-            naive_seconds = time_solver(naive, cov, rhs, args.warmup, args.repeats)
-            lowmem_seconds = time_solver(lowmem, cov, rhs, args.warmup, args.repeats)
+            naive_seconds = time_solver(naive, cov, rhs, args.warmup, args.repeats, args.cholesky_factor)
+            lowmem_seconds = time_solver(lowmem, cov, rhs, args.warmup, args.repeats, args.cholesky_factor)
             print(
-                f"{n:>8,} {naive_seconds * 1000:>12.3f} "
+                f"{str(device):>6} "
+                f"{n:>8,} {str(args.cholesky_factor):>11} {naive_seconds * 1000:>12.3f} "
                 f"{lowmem_seconds * 1000:>13.3f} "
                 f"{naive_seconds / lowmem_seconds:>12.2f}x",
                 flush=True,
