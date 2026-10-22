@@ -70,7 +70,12 @@ class RandomFeaturesHead(torch.nn.Module):
         return {"num_random_features": self.num_random_features}
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Return unpooled RF rows of shape ``[total_atoms, total_random_features]``."""
+        """Compute per-atom random-feature rows before pooling.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
         raise NotImplementedError
 
     def feature_map(
@@ -184,16 +189,16 @@ class OrthogonalRFF(RandomFeaturesHead):
         return W
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute atomic RF rows before pooling."""
-        return self._gaussian_features(h)
-
-    def _gaussian_features(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute unbiased Gaussian RF rows.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                scaled atomic descriptors ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
+        return self._gaussian_features(h)
+
+    def _gaussian_features(self, h: torch.Tensor) -> torch.Tensor:
+        """Private method that enable TorchScript-compatible reuse by BiasedOrthogonalRFF."""
         length_scale = self.length_scale
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -243,7 +248,12 @@ class BiasedOrthogonalRFF(OrthogonalRFF):
         self.register_buffer("bias", torch.tensor(bias))
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Compute atomic Gaussian RF rows with a constant final coordinate."""
+        """Compute per-atom random-feature rows before pooling. In this case, the last column of the feature map is replaced by a constant coordinate ``sqrt(bias)``.
+
+        Args:
+            h (torch.Tensor):
+                descriptors for a single configuration ~[natoms, input_dim].
+        """
         self.bias = self.bias.to(dtype=h.dtype)
         features = self._gaussian_features(h)
         # Insert the constant in each atomic row before pooling.
@@ -335,11 +345,11 @@ class MultiScaleOrthogonalRFF(RandomFeaturesHead):
             self.total_random_features = self.total_random_features * 2
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom random-feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         # Convert dtype of rf matrices to same as h
         self.rff_matrix = self.rff_matrix.to(dtype=h.dtype)
@@ -402,11 +412,11 @@ class Linear(RandomFeaturesHead):
         self.register_buffer("length_scale", torch.tensor(length_scale))
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom linear-kernel feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = h / length_scale
@@ -497,11 +507,11 @@ class TensorSketch(RandomFeaturesHead):
         return count_sketch
 
     def atomic_feature_map(self, h: torch.Tensor) -> torch.Tensor:
-        """Computes per-atom random-feature rows before pooling.
+        """Compute per-atom random-feature rows before pooling.
 
         Args:
             h (torch.Tensor):
-                descriptors for a single configuration ~[natoms, descriptors]
+                descriptors for a single configuration ~[natoms, input_dim].
         """
         length_scale = self.length_scale
         scaled_descriptors = (h + torch.sqrt(torch.abs(self.bias))) / length_scale
