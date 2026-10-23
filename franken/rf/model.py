@@ -156,11 +156,7 @@ class FrankenPotential(torch.nn.Module):
             num_species=ckpt["num_species"],
             **ckpt["input_scaler"]["config"],
         )
-        # Initialize the weights buffers to the correct dtype
-        model.rf.weights = model.rf.weights.to(
-            dtype=ckpt["rf"]["state_dict"]["weights"].dtype
-        )
-        model.rf.load_state_dict(ckpt["rf"]["state_dict"])
+        model.rf.load_state_dict(ckpt["rf"]["state_dict"], assign=True)
         model.input_scaler.load_state_dict(ckpt["input_scaler"]["state_dict"])
         model.energy_shift.load_state_dict(ckpt["energy_shift"])
 
