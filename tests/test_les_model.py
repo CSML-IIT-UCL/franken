@@ -90,7 +90,7 @@ class TestPeriodic:
         # Cannot invert empty cell
         data.cell = None
         with pytest.raises(torch._C._LinAlgError):
-            les_pot.predict_les(data, ["energy", "forces"])
+            les_pot.predict_les(data, [ENERGY_TARGET_KEY, FORCES_TARGET_KEY])
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -132,10 +132,10 @@ def test_force_finite_difference_and_training_gradients(model, constant_charges)
             if isinstance(module, torch.nn.Linear):
                 module.reset_parameters()
     data = configuration(periodic=les_pot.les.is_periodic is not False)
-    result = les_pot.predict_les(data, ["energy", "forces"])
-    assert result["energy"].shape == (1, 1)
-    assert result["forces"].shape == (1, 2, 3)
-    loss = result["energy"].square().sum() + result["forces"].square().sum()
+    result = les_pot.predict_les(data, [ENERGY_TARGET_KEY, FORCES_TARGET_KEY])
+    assert result[ENERGY_TARGET_KEY].shape == (1, 1)
+    assert result[FORCES_TARGET_KEY].shape == (1, 2, 3)
+    loss = result[ENERGY_TARGET_KEY].square().sum() + result[FORCES_TARGET_KEY].square().sum()
     loss.backward()
     gradient = les_pot.les.atomwise.outnet[-1].linear.bias.grad
     assert torch.isfinite(gradient).all() and gradient.abs().sum() > 0
@@ -144,11 +144,11 @@ def test_force_finite_difference_and_training_gradients(model, constant_charges)
     plus[0, 0] += eps
     minus[0, 0] -= eps
     data.atom_pos = plus
-    eplus = les_pot.predict_les(data, ["energy"])["energy"]
+    eplus = les_pot.predict_les(data, [ENERGY_TARGET_KEY])[ENERGY_TARGET_KEY]
     data.atom_pos = minus
-    eminus = les_pot.predict_les(data, ["energy"])["energy"]
+    eminus = les_pot.predict_les(data, [ENERGY_TARGET_KEY])[ENERGY_TARGET_KEY]
     torch.testing.assert_close(
-        result["forces"][0, 0, 0],
+        result[FORCES_TARGET_KEY][0, 0, 0],
         (-(eplus - eminus) / (2 * eps)).squeeze(),
         rtol=1e-5,
         atol=1e-7,
@@ -170,9 +170,9 @@ def test_batch_matches_individual_predictions(model):
         les_pot.predict_les,
         lambda data, targets: les_pot.predict(targets, data),
     ):
-        predictions = predict(batch, ["energy", "forces"])
-        individual = [predict(d, ["energy", "forces"]) for d in (first, second)]
-        for target in ("energy", "forces"):
+        predictions = predict(batch, [ENERGY_TARGET_KEY, FORCES_TARGET_KEY])
+        individual = [predict(d, [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]) for d in (first, second)]
+        for target in (ENERGY_TARGET_KEY, FORCES_TARGET_KEY):
             torch.testing.assert_close(
                 predictions[target], torch.cat([p[target] for p in individual], dim=1)
             )
