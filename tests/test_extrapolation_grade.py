@@ -49,6 +49,7 @@ def test_maxvol_selection_bounds_training_gamma():
     selected = ExtrapolationGrade.select_active_rows(
         rows,
         method="maxvol",
+        qr_tolerance=1e-12,
         maxvol_tolerance=1.01,
         maxvol_iters=100,
     )

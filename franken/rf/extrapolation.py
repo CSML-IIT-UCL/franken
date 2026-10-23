@@ -22,10 +22,10 @@ class ExtrapolationGrade:
     Use :meth:`build_active_set` with a trained model and reference structures,
     or :meth:`build_active_set_from_features` with precomputed atomic features.
     Then call :meth:`grade_model_configuration` to score new structures (or attach
-    it to a ASE FrankenCalculator). 
+    it to a ASE FrankenCalculator).
 
-    By default, it uses the maxvol algorithm to select a square active matrix of 
-    reference atomic features. 
+    By default, it uses the maxvol algorithm to select a square active matrix of
+    reference atomic features.
 
     Each atomic grade is the largest absolute coefficient expressing its feature
     row in the active set. The per-structure extrapolation is computed as the largest atomic one.
@@ -131,8 +131,7 @@ class ExtrapolationGrade:
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
     ) -> "ExtrapolationGrade":
-        """Return a scorer with its tensors converted to ``device`` and ``dtype``.
-        """
+        """Return a scorer with its tensors converted to ``device`` and ``dtype``."""
         return type(self)(
             active_matrices={
                 species: matrix.to(device=device, dtype=dtype)
@@ -220,7 +219,7 @@ class ExtrapolationGrade:
     def _select_active_rows_pivoted_qr(
         rows: torch.Tensor,
         max_rows: int | None = None,
-        tolerance: float = 1e-12,
+        qr_tolerance: float = 1e-12,
         show_progress: bool = False,
     ) -> torch.Tensor:
         """Select linearly informative rows with a greedy pivoted-QR heuristic."""
@@ -254,7 +253,7 @@ class ExtrapolationGrade:
                 scores = torch.where(available, scores, torch.full_like(scores, -1))
                 pivot = int(torch.argmax(scores).item())
                 pivot_score = scores[pivot]
-                if pivot_score <= tolerance:
+                if pivot_score <= qr_tolerance:
                     break
 
                 selected.append(pivot)
@@ -273,7 +272,7 @@ class ExtrapolationGrade:
         rows: torch.Tensor,
         maxvol_tolerance: float = 1.01,
         maxvol_iters: int = 300,
-        init_tolerance: float = 1e-12,
+        qr_tolerance: float = 1e-12,
         show_progress: bool = False,
     ) -> torch.Tensor:
         """Select a square active matrix with the MaxVol row-exchange algorithm."""
@@ -292,14 +291,14 @@ class ExtrapolationGrade:
                 rows,
                 show_progress=show_progress,
                 max_rows=n_rows,
-                tolerance=init_tolerance,
+                qr_tolerance=qr_tolerance,
             )
 
         selected = ExtrapolationGrade._select_active_rows_pivoted_qr(
             rows_work,
             show_progress=show_progress,
             max_rows=n_features,
-            tolerance=init_tolerance,
+            qr_tolerance=qr_tolerance,
         )
         if selected.numel() < n_features:
             return selected
@@ -341,7 +340,7 @@ class ExtrapolationGrade:
         rows: torch.Tensor,
         max_rows: int | None = None,
         method: str = "pivoted-qr",
-        tolerance: float = 1e-12,
+        qr_tolerance: float = 1e-12,
         maxvol_tolerance: float = 1.01,
         maxvol_iters: int = 300,
         show_progress: bool = False,
@@ -351,13 +350,13 @@ class ExtrapolationGrade:
         Args:
             rows: Candidate features of shape ``[n_atoms, n_features]``.
             max_rows: Maximum number of rows for QR; defaults to the feature
-                dimension. MaxVol requires a square set, so this must 
+                dimension. MaxVol requires a square set, so this must
                 be omitted or equal the feature dimension.
             method: ``"pivoted-qr"`` greedily adds the row with the largest
                 component outside the span already selected. ``"maxvol"`` starts
                 with QR and exchanges rows to increase the absolute determinant.
                 If too few independent rows are available, it returns the QR set.
-            tolerance: Absolute residual-norm threshold for stopping QR selection.
+            qr_tolerance: Absolute residual-norm threshold for stopping QR selection.
             maxvol_tolerance: Stop MaxVol when the largest absolute coefficient
                 of the candidate rows in the active set is at most this value.
                 Values just above one give tighter refinement; default ``1.01``.
@@ -378,7 +377,7 @@ class ExtrapolationGrade:
                 rows,
                 show_progress=show_progress,
                 max_rows=max_rows,
-                tolerance=tolerance,
+                qr_tolerance=qr_tolerance,
             )
         if method == "maxvol":
             underdetermined = rows.shape[0] < n_features
@@ -396,7 +395,7 @@ class ExtrapolationGrade:
                 show_progress=show_progress,
                 maxvol_tolerance=maxvol_tolerance,
                 maxvol_iters=maxvol_iters,
-                init_tolerance=tolerance,
+                qr_tolerance=qr_tolerance,
             )
         raise ValueError(f"Unknown active-row selection method: {method}.")
 
