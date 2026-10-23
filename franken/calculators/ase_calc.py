@@ -33,6 +33,7 @@ class FrankenCalculator(Calculator):
         device=None,
         rf_weight_id: int | None = None,
         gnn_config: BackboneConfig | None = None,
+        dtype: torch.dtype | str | None = None,
         **calc_kwargs,
     ):
         """Initialize FrankenCalculator class from a franken model.
@@ -48,7 +49,16 @@ class FrankenCalculator(Calculator):
                 Normal behavior is to automatically detect the GNN from the loaded franken model.
                 This may not be always possible, in particular if the provided model is JIT scripted.
                 In those cases passing the correct `gnn_config` is needed.
+            dtype : Inference precision, either ``"float32"|torch.float32`` or ``"float64"|torch.float64``.
+                ``None`` preserves the model's precision and uses the backbone's
+                precision for inputs.
         """
+        if isinstance(dtype, str):
+            dtype = {"float32": torch.float32, "float64": torch.float64}.get(dtype, dtype)
+        if dtype is not None and dtype not in (torch.float32, torch.float64):
+            raise ValueError(
+                'dtype must be None, torch.float32, torch.float64, "float32", or "float64"'
+            )
         super().__init__(**calc_kwargs)
         self.franken: FrankenPotential
         if isinstance(franken_ckpt, torch.nn.Module):
@@ -67,6 +77,14 @@ class FrankenCalculator(Calculator):
                     map_location=device,
                     rf_weight_id=rf_weight_id,
                 )
+        # convert franken model to the requested dtype if specified.
+        if dtype is not None:
+            self.franken = self.franken.to(dtype=dtype)
+        self.dtype = next(
+            tensor.dtype
+            for tensor in (*self.franken.gnn.parameters(), *self.franken.gnn.buffers())
+            if tensor.is_floating_point()
+        )
         self.franken.gnn.franken_val()
 
         if hasattr(self.franken, "gnn_config"):
@@ -102,7 +120,7 @@ class FrankenCalculator(Calculator):
         config_idx = self.dataset.add_configuration(self.atoms)  # type: ignore
         cpu_data = self.dataset.__getitem__(config_idx, no_targets=True)
         assert isinstance(cpu_data, Configuration)
-        data = cpu_data.to(self.device)
+        data = cpu_data.to(device=self.device, dtype=self.dtype)
 
         targets = [ENERGY_TARGET_KEY]
         if "forces" in properties:
@@ -112,7 +130,6 @@ class FrankenCalculator(Calculator):
         computed = self.franken(targets, data)
 
         self.results["energy"] = computed[ENERGY_TARGET_KEY].item()
-
         if "forces" in properties:
             self.results["forces"] = (
                 computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
