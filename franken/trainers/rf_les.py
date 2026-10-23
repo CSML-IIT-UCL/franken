@@ -265,8 +265,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
         )
         solution = torch.cholesky_solve(weighted_coeffs[:, None], proj_mat, upper=True)
-        # weights from [n_rf] to [1, n_rf]
-        solution = solution.unsqueeze(0)
+        # weights from [n_rf, 1] to [1, n_rf]
+        solution = solution.unsqueeze(0).squeeze(-1)
         return solution
 
     def _backward_batch(self, model, indices, normalization):
@@ -439,6 +439,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
         )
         solution = torch.cholesky_solve(rhs[:, None], proj_mat, upper=True)
+        # weights from [n_rf, 1] to [1, n_rf]
+        solution = solution.unsqueeze(0).squeeze(-1)
         model.rf.weights.copy_(solution)
 
     @no_jit()
