@@ -263,31 +263,18 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
         else:
             model.rf.weights.copy_(torch.randn(model.rf.weights.shape))
 
+        model.gnn.franken_val()
         model_func = deepcopy(model)
         model_func.force_func_grad = True
-        calc_func = FrankenCalculator(model_func, device=device)
-        calc_autograd = FrankenCalculator(model, device=device)
-        for atoms in dataset.ase_atoms[:1]:
-            calc_func.calculate(atoms)
-            calc_autograd.calculate(atoms)
-            print(
-                np.max(
-                    np.abs(
-                        calc_func.results["forces"] - calc_autograd.results["forces"]
-                    )
-                )
-            )
-            assert np.allclose(
-                calc_func.results["forces"],
-                calc_autograd.results["forces"],
-                rtol=1e-3,
-                atol=1e-3,
-            )
-            assert np.allclose(
-                calc_func.results["energy"],
-                calc_autograd.results["energy"],
-                rtol=1e-3,
-                atol=1e-3,
+        data = dataset.__getitem__(0, no_targets=True).to(device=device)
+        out_func = model_func(ALL_TARGETS, data)
+        out_autograd = model(ALL_TARGETS, data)
+        energy_shape = (10, 1) if multiweights else (1,)
+        assert out_func[ENERGY_TARGET_KEY].shape == energy_shape
+        assert out_autograd[ENERGY_TARGET_KEY].shape == energy_shape
+        for target in ALL_TARGETS:
+            torch.testing.assert_close(
+                out_func[target], out_autograd[target], rtol=1e-3, atol=1e-3
             )
 
 
