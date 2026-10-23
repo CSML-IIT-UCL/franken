@@ -31,7 +31,6 @@ from franken.trainers.log_utils import (
     LogCollection,
     LogEntry,
 )
-from franken.utils.linalg.psdsolve import psd_ridge
 from franken.utils.misc import no_jit, throughput
 
 logger = logging.getLogger("franken")
@@ -251,7 +250,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     def _fit_rff(
         self,
         model: LESFrankenPotential,
-        covs: dict[TargetType, Tensor],
+        proj_mat: Tensor,
         normalization: dict[TargetType, Tensor] | None,
         direct_coeffs: dict[TargetType, Tensor] | None = None,
     ) -> Tensor:
@@ -261,10 +260,14 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
-        rf_weights = self.solve(covs=covs, coeffs=coeffs)
+        target_weights = self.rel_tgt_weight
+        weighted_coeffs: Tensor = cast(
+            Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
+        )
+        solution = torch.cholesky_solve(weighted_coeffs[:, None], proj_mat, upper=True)
         # weights from [n_rf] to [1, n_rf]
-        rf_weights = rf_weights.unsqueeze(0)
-        return rf_weights
+        solution = solution.unsqueeze(0)
+        return solution
 
     def _backward_batch(self, model, indices, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
@@ -421,7 +424,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             Tensor, sum(target_weights[t] * covs[t] for t in self.training_targets)
         )
         matrix.diagonal().add_(l2_penalty)
-        return torch.linalg.cholesky(matrix)
+        return torch.linalg.cholesky(matrix, upper=True)
 
     @torch.no_grad()
     def _refit_projected_rff(
@@ -435,7 +438,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         rhs: Tensor = cast(
             Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
         )
-        solution = torch.cholesky_solve(rhs[:, None], proj_mat).T
+        solution = torch.cholesky_solve(rhs[:, None], proj_mat, upper=True)
         model.rf.weights.copy_(solution)
 
     @no_jit()
@@ -466,12 +469,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.on_fit_start(model)
 
         covs, coeffs, normalization, proj_mat = None, None, None, None
-        if self.mode != "joint":
-            # Joint doesn't need covariance!
+        if self.mode != "joint":  # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
-            if self.mode == "variable_projection":
-                proj_mat = self._prepare_projection(covs)
+            proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
 
         for outer_it in range(self.num_cycles):
@@ -479,7 +480,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             #    nonzero random initialization in the first cycle.
             if self.mode in {"alternating", "variable_projection"}:
                 assert covs is not None
-                rf_weights = self._fit_rff(model, covs, normalization)
+                assert proj_mat is not None
+                rf_weights = self._fit_rff(model, proj_mat, normalization)
                 if torch.any(torch.isnan(rf_weights)):
                     logger.warning(
                         f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
@@ -696,22 +698,3 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 f"Covariance normalization {self.random_features_normalization} is not implemented."
             )
         return covs, coeffs, norm_coefs
-
-    @torch.no_grad()
-    def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
-        self,
-        covs: dict[TargetType, Tensor],
-        coeffs: dict[TargetType, Tensor],
-    ) -> Tensor:
-        target_weights = self.rel_tgt_weight
-        l2_penalty = self.l2_penalty
-        solve_cov, solve_coeff = None, None
-        for tt in self.training_targets:
-            if solve_cov is None or solve_coeff is None:
-                solve_cov = covs[tt] * target_weights[tt]
-                solve_coeff = coeffs[tt] * target_weights[tt]
-            else:
-                solve_cov.add_(covs[tt], alpha=target_weights[tt])
-                solve_coeff.add_(coeffs[tt], alpha=target_weights[tt])
-        assert solve_cov is not None and solve_coeff is not None
-        return psd_ridge(solve_cov, solve_coeff, l2_penalty)
