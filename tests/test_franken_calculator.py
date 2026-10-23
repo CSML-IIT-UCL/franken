@@ -225,3 +225,34 @@ def test_calculator_compile(device, gnn_cfg):
     md.run(2)
     compiled_energy = md.atoms.get_total_energy()
     np.testing.assert_allclose(compiled_energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-1)
+
+@pytest.mark.parametrize("dtype", [None, torch.float32, torch.float64, "float32", "float64"])
+@pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
+def test_calculator_precision(dtype, gnn_cfg):
+    model = FrankenPotential(
+        gnn_cfg,
+        MultiscaleGaussianRFConfig(num_random_features=16),
+    ).to(dtype=torch.float64)
+    # Preserve a mixed-precision checkpoint when no conversion is requested.
+    model.rf.weights = torch.randn(
+        (1, model.rf.total_random_features), dtype=torch.float32
+    )
+    calculator = FrankenCalculator(model, dtype=dtype)
+    resolved_dtype = getattr(torch, dtype) if isinstance(dtype, str) else dtype
+    expected_dtype = torch.float64 if dtype is None else resolved_dtype
+    assert calculator.dtype == expected_dtype
+    assert model.rf.weights.dtype == (torch.float32 if dtype is None else resolved_dtype)
+    atoms = read(DATASET_REGISTRY.get_path("test", "md", None, False), index=0)
+    atoms.calc = calculator
+    energy = atoms.get_potential_energy()
+    forces = atoms.get_forces()
+    assert isinstance(energy, float)
+    assert np.isfinite(energy)
+    assert forces.dtype == (np.float64 if expected_dtype == torch.float64 else np.float32)
+    assert np.isfinite(forces).all()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, "float16", "invalid"])
+def test_calculator_invalid_precision(dtype):
+    with pytest.raises(ValueError, match="dtype must be"):
+        FrankenCalculator("unused.pt", dtype=dtype)
