@@ -432,7 +432,7 @@ def autotune(cfg: AutotuneConfig):
             target_weight=solver_weights,
             random_features_normalization=cfg.rf_normalization,
             save_every_model=cfg.save_every_model,
-            dtype=cfg.dtype,
+            dtype=torch.float64,
             save_fmaps=cfg.save_fmaps,
             log_dir=run_dir,
             device=device,
