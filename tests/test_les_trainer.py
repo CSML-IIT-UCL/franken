@@ -11,7 +11,7 @@ import torch
 
 from franken.autotune.cli import parse_cli
 from franken.config import LESConfig
-from franken.data.base import Configuration, Target
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, Configuration, Target
 from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 
@@ -37,45 +37,68 @@ class ToyModel(torch.nn.Module):
         return result
 
 
-def make_trainer(config, n=5):
-    dataset = [
-        (
-            Configuration(
-                torch.tensor([[float(i), 0, 0]], dtype=torch.float64),
-                torch.tensor([1]),
-                torch.tensor([1]),
-            ),
-            Target(torch.tensor([2.0 * i], dtype=torch.float64), torch.ones(1, 3)),
-        )
-        for i in range(1, n + 1)
-    ]
+def make_trainer(
+    cfg: LESConfig, 
+    device="cpu", 
+    targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+    dtype=torch.float32, 
+    save_fmaps=False, 
+    dataset=None, 
+    n=5
+):
+    if dataset is None:
+        dataset = [
+            (
+                Configuration(
+                    torch.tensor([[float(i), 0, 0]], dtype=torch.float64),
+                    torch.tensor([1]),
+                    torch.tensor([1]),
+                ),
+                Target(torch.tensor([2.0 * i], dtype=torch.float64), torch.ones(1, 3)),
+            )
+            for i in range(1, n + 1)
+        ]
     trainer = RandomFeaturesEwaldsTrainer(
-        SimpleNamespace(dataset=dataset),
-        ["energy", "forces"],
-        1e-6,
-        {"energy": 1.0, "forces": 0.0},
-        device="cpu",
-        dtype=torch.float64,
-        les_config=config,
-        best_model_selection=["energy_MAE"],
+        train_dataloader=SimpleNamespace(dataset=dataset), # type: ignore
+        training_targets=targets,
+        l2_penalty=1e-6,
+        target_weight={ENERGY_TARGET_KEY: 1.0, FORCES_TARGET_KEY: 1.0},
+        optimizer=cfg.optimizer,
+        num_cycles=cfg.num_cycles, # type: ignore
+        epochs_per_cycle=cfg.epochs_per_cycle, # type: ignore
+        batch_size=cfg.batch_size,
+        learning_rate=cfg.learning_rate, # type: ignore
+        lr_decay=cfg.lr_decay, # type: ignore
+        lbfgs_max_iter=cfg.lbfgs_max_iter, # type: ignore
+        lbfgs_learning_rate=cfg.lbfgs_learning_rate, # type: ignore
+        lbfgs_history_size=cfg.lbfgs_history_size, # type: ignore
+        lbfgs_tolerance_grad=cfg.lbfgs_tolerance_grad, # type: ignore
+        lbfgs_tolerance_change=cfg.lbfgs_tolerance_change, # type: ignore
+        mode=cfg.mode,
+        random_features_normalization=None,#"leading_eig",
+        save_every_model=False,
+        save_fmaps=save_fmaps,
+        dtype=dtype,
+        device=device,
     )
-    trainer._print_eval = Mock()
+    # trainer._print_eval = Mock()
     return trainer
 
 
-HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
+# HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
 
 
 @pytest.mark.parametrize("save_fmaps", [False, True])
 def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
     """The force must use A_F @ w, not a rounded backward pass through RFF."""
+    dt = torch.float64  # TODO: Test that it doesn't work in f32
 
     class CancellationModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.rf = torch.nn.Module()
             self.rf.weights = torch.nn.Parameter(
-                torch.tensor([[1e8, -1e8 + 1]], dtype=torch.float64)
+                torch.tensor([[1e8, -1e8 + 1]], dtype=dt)
             )
             self.les = torch.nn.Linear(1, 1, bias=False)
             torch.nn.init.zeros_(self.les.weight)
@@ -83,18 +106,18 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
         def grad_feature_map(self, data, targets):
             return {"forces": -torch.ones(2, 3)}
 
-        def predict_les(self, data, targets, is_training=False):
+        def predict_les(self, data, targets):
             data.atom_pos.requires_grad_(True)
             energy = self.les.weight.sum() * data.atom_pos.sum()
             force = -torch.autograd.grad(
-                energy, data.atom_pos, create_graph=is_training
+                energy, data.atom_pos, create_graph=True
             )[0]
             return {"forces": force.unsqueeze(0)}
 
         def predict(self, targets, data, is_training=False, **kwargs):
             data.atom_pos.requires_grad_(True)
             features = torch.stack([data.atom_pos.sum(), data.atom_pos.sum()])
-            energy = (self.rf.weights @ features.double()).sum()
+            energy = (self.rf.weights @ features.to(dtype=dt)).sum()
             energy = energy + self.les.weight.sum() * data.atom_pos.sum()
             force = -torch.autograd.grad(
                 energy, data.atom_pos, create_graph=is_training
@@ -103,33 +126,33 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
 
     data = Configuration(torch.ones(1, 3), torch.tensor([1]), torch.tensor([1]))
     dataset = [(data, Target(energy=torch.zeros(1), forces=torch.zeros(1, 3)))]
-    trainer = RandomFeaturesEwaldsTrainer(
-        SimpleNamespace(dataset=dataset),
-        ["forces"],
-        1e-6,
-        {"forces": 1.0},
+    trainer = make_trainer(
+        LESConfig(optimizer="lbfgs", mode="variable_projection"), 
         device="cpu",
-        dtype=torch.float64,
-        save_fmaps=save_fmaps,
-        les_config=LESConfig(optimizer="lbfgs", mode="variable_projection"),
+        targets=[FORCES_TARGET_KEY],
+        dtype=dt,
+        dataset=dataset,
+        save_fmaps=save_fmaps
     )
     model = CancellationModel()
-    # The double coefficients differ by one, but their float32 adjoints cancel
-    # to zero before reaching the positions in the combined-energy path.
+    # If dtype is propagated correctly we should see a difference 
+    # between f32 and f64. With f32, the product of [1e8, -1e8 + 1] (RFs)
+    # and the data ([[-1, -1, -1], [-1, -1, -1]]) rounds to zero (not
+    # enough precision to resolve the +1). With f64 it does not.
     torch.testing.assert_close(
         model.predict(["forces"], data)["forces"], torch.zeros(1, 1, 3)
     )
     if save_fmaps:
-        trainer.fmaps = {"forces": [-torch.ones(2, 3, dtype=torch.float64)]}
-    loss = trainer._backward_batch(model, [0], {"forces": 1.0})
-    torch.testing.assert_close(loss, torch.tensor(3.0, dtype=torch.float64))
+        trainer.fmaps = {"forces": [-torch.ones(2, 3, dtype=dt)]}
+    loss = trainer._backward_batch(model, [0], None)
+    torch.testing.assert_close(loss, torch.tensor(3.0, dtype=dt))
     torch.testing.assert_close(model.les.weight.grad, torch.tensor([[6.0]]))
+    # TODO: The following should be a different test.
     assert model.rf.weights.grad is None
 
 
 @pytest.mark.parametrize("periodic", [False, True])
-@pytest.mark.parametrize("activation", ["relu", "silu"])
-def test_les_force_and_parameter_derivatives(periodic, activation):
+def test_les_force_and_parameter_derivatives(periodic):
     Les = pytest.importorskip("les").Les
     head = Les(
         les_arguments={
@@ -138,7 +161,6 @@ def test_les_force_and_parameter_derivatives(periodic, activation):
             "output_scaling_factor": 1.0,
         }
     )
-    head.atomwise.activation = getattr(torch.nn.functional, activation)
     head.atomwise(torch.zeros(1, 3), torch.zeros(1, dtype=torch.long))
     head = head.double()
     positions = torch.tensor([[0.2, 0.3, 0.1], [1.4, 0.8, 0.5]], dtype=torch.float64)

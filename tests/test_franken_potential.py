@@ -102,9 +102,6 @@ def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
     return data
 
 
-
-
-
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 @pytest.mark.parametrize("device", DEVICES)
@@ -648,4 +645,3 @@ class TestStatistics:
         torch.testing.assert_close(
             st.statistics[5]["std"], atom5_std.double(), rtol=1e-2, atol=1e-2
         )
-
