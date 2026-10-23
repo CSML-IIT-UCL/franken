@@ -37,6 +37,9 @@ else:
         """Wrap a :class:`franken.rf.model.FrankenPotential` model with the torch-sim ``ModelInterface`` API.
 
         This adapter returns per-system energies, per-atom forces and per-system stress tensors.
+
+        The dtype controls inference precision, either ``"float32"|torch.float32`` or ``"float64"|torch.float64``.
+        By default ``None`` preserves the model's precision and uses the backbone's precision for inputs.
         """
 
         def __init__(
@@ -44,18 +47,25 @@ else:
             franken_model: FrankenPotential | str | Path,
             *,
             device: torch.device | str,
-            dtype: torch.dtype = torch.float32,
+            dtype: torch.dtype | str | None = None,
             rf_weight_id: int | None = None,
             neighbor_list_fn: Callable = torchsim_nl,
             compute_forces: bool = True,
             compute_stress: bool = False,
         ) -> None:
             super().__init__()
+            if isinstance(dtype, str):
+                dtype = {"float32": torch.float32, "float64": torch.float64}.get(
+                    dtype, dtype
+                )
+            if dtype is not None and dtype not in (torch.float32, torch.float64):
+                raise ValueError(
+                    'dtype must be None, torch.float32, torch.float64, "float32", or "float64"'
+                )
             if isinstance(device, str):
                 self._device = torch.device(device)
             else:
                 self._device = device
-            self._dtype = dtype
             self._compute_forces = compute_forces
             self._compute_stress = compute_stress
             self._memory_scales_with = "n_atoms_x_density"
@@ -75,7 +85,19 @@ else:
                     f"Underlying Franken backbone does not implement AtomisticModelWrapper. Found type {type(self.model.gnn)}"
                 )
 
-            self.model = self.model.to(device=self._device, dtype=self._dtype).eval()
+            self.model = self.model.to(device=self._device, dtype=dtype).eval()
+            self._dtype = (
+                dtype
+                if dtype is not None
+                else next(
+                    tensor.dtype
+                    for tensor in (
+                        *self.model.gnn.parameters(),
+                        *self.model.gnn.buffers(),
+                    )
+                    if tensor.is_floating_point()
+                )
+            )
             self.model.gnn.franken_val()
 
         def forward(

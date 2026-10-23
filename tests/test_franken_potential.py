@@ -52,6 +52,43 @@ def mocked_torch_save_load():
     return patch.multiple("torch", load=DEFAULT, save=DEFAULT)
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("multiweight", [False, True])
+def test_load_preserves_regression_precision(tmp_path, dtype, multiweight):
+    model = FrankenPotential(
+        gnn_config=DEFAULT_GNN_CONFIGS[0],
+        rf_config=GaussianRFConfig(num_random_features=16, length_scale=1.0),
+    )
+    # This value loses digits if an f64 checkpoint is copied into an f32 buffer.
+    weights = torch.full_like(model.rf.weights, 1.000000000123, dtype=dtype)
+    checkpoint = tmp_path / "model.pt"
+    if multiweight:
+        # The selected solution can have a different dtype from the base weights.
+        model.rf.weights = model.rf.weights.to(
+            dtype=torch.float32 if dtype == torch.float64 else torch.float64
+        )
+        model.save(checkpoint, multi_weights=torch.cat([weights * 2, weights]))
+    else:
+        model.rf.weights = weights.clone()
+        model.save(checkpoint)
+
+    loaded = FrankenPotential.load(
+        checkpoint, map_location="cpu", rf_weight_id=1 if multiweight else None
+    )
+    assert loaded.rf.weights.dtype == dtype
+    torch.testing.assert_close(loaded.rf.weights, weights, rtol=0, atol=0)
+    assert next(loaded.gnn.parameters()).dtype == next(model.gnn.parameters()).dtype
+
+    # Explicit f64 ASE inference must receive the original coefficients without
+    # an intermediate f32 rounding step in the checkpoint loader.
+    calculator = FrankenCalculator(
+        checkpoint, dtype="float64", rf_weight_id=1 if multiweight else None
+    )
+    torch.testing.assert_close(
+        calculator.franken.rf.weights, weights.double(), rtol=0, atol=0
+    )
+
+
 def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
     data = []
     for _ in range(num_configs):
@@ -180,7 +217,7 @@ def test_multiweight_save_load_functionality(rf_cfg, device, scale_by_Z):
                 rf_weight_id=10,
             )
 
-            model.rf.weights.copy_(multi_weights[10].reshape_as(model.rf.weights))
+            model.rf.weights = multi_weights[10].reshape_as(model.rf.weights).clone()
 
             # Step 4: Compare rf.state_dict between the original and loaded models
             assert are_dicts_close(
@@ -226,31 +263,18 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
         else:
             model.rf.weights.copy_(torch.randn(model.rf.weights.shape))
 
+        model.gnn.franken_val()
         model_func = deepcopy(model)
         model_func.force_func_grad = True
-        calc_func = FrankenCalculator(model_func, device=device)
-        calc_autograd = FrankenCalculator(model, device=device)
-        for atoms in dataset.ase_atoms[:1]:
-            calc_func.calculate(atoms)
-            calc_autograd.calculate(atoms)
-            print(
-                np.max(
-                    np.abs(
-                        calc_func.results["forces"] - calc_autograd.results["forces"]
-                    )
-                )
-            )
-            assert np.allclose(
-                calc_func.results["forces"],
-                calc_autograd.results["forces"],
-                rtol=1e-3,
-                atol=1e-3,
-            )
-            assert np.allclose(
-                calc_func.results["energy"],
-                calc_autograd.results["energy"],
-                rtol=1e-3,
-                atol=1e-3,
+        data = dataset.__getitem__(0, no_targets=True).to(device=device)
+        out_func = model_func(ALL_TARGETS, data)
+        out_autograd = model(ALL_TARGETS, data)
+        energy_shape = (10, 1) if multiweights else (1,)
+        assert out_func[ENERGY_TARGET_KEY].shape == energy_shape
+        assert out_autograd[ENERGY_TARGET_KEY].shape == energy_shape
+        for target in ALL_TARGETS:
+            torch.testing.assert_close(
+                out_func[target], out_autograd[target], rtol=1e-3, atol=1e-3
             )
 
 

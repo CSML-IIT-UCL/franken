@@ -90,10 +90,10 @@ class Configuration:
             cell = cell.to(device=device, dtype=dtype)
         batch_ids = self.batch_ids
         if batch_ids is not None:
-            batch_ids = batch_ids.to(device=device, dtype=dtype)
+            batch_ids = batch_ids.to(device=device)
         pbc = self.pbc
         if pbc is not None:
-            pbc = pbc.to(device=device, dtype=dtype)
+            pbc = pbc.to(device=device)
         return Configuration(
             atom_pos=self.atom_pos.to(device=device, dtype=dtype),
             atomic_numbers=self.atomic_numbers.to(device=device),

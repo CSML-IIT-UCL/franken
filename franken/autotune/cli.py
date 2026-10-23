@@ -502,12 +502,6 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "save_every_model"),
     )
     parser.add_argument(
-        "--dtype",
-        choices=["float32", "float64"],
-        default="float64",
-        help=get_field_docstring(AutotuneConfig, "dtype"),
-    )
-    parser.add_argument(
         "--save-fmaps",
         action="store_true",
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
@@ -610,7 +604,6 @@ def parse_cli(argv):
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
-        dtype=args.dtype,
         save_fmaps=args.save_fmaps,
         metrics=args.metrics,
         best_model_selection=args.best_model_selection,
