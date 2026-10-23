@@ -55,7 +55,9 @@ else:
         ) -> None:
             super().__init__()
             if isinstance(dtype, str):
-                dtype = {"float32": torch.float32, "float64": torch.float64}.get(dtype, dtype)
+                dtype = {"float32": torch.float32, "float64": torch.float64}.get(
+                    dtype, dtype
+                )
             if dtype is not None and dtype not in (torch.float32, torch.float64):
                 raise ValueError(
                     'dtype must be None, torch.float32, torch.float64, "float32", or "float64"'
@@ -84,10 +86,17 @@ else:
                 )
 
             self.model = self.model.to(device=self._device, dtype=dtype).eval()
-            self._dtype = dtype if dtype is not None else next(
-                tensor.dtype
-                for tensor in (*self.model.gnn.parameters(), *self.model.gnn.buffers())
-                if tensor.is_floating_point()
+            self._dtype = (
+                dtype
+                if dtype is not None
+                else next(
+                    tensor.dtype
+                    for tensor in (
+                        *self.model.gnn.parameters(),
+                        *self.model.gnn.buffers(),
+                    )
+                    if tensor.is_floating_point()
+                )
             )
             self.model.gnn.franken_val()
 
