@@ -111,9 +111,8 @@ class FrankenCalculator(Calculator):
             targets.append(STRESS_TARGET_KEY)
         computed = self.franken(targets, data)
 
-        self.results["energy"] = (
-            computed[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
-        )
+        self.results["energy"] = computed[ENERGY_TARGET_KEY].item()
+
         if "forces" in properties:
             self.results["forces"] = (
                 computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
