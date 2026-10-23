@@ -21,15 +21,19 @@ class ExtrapolationGrade:
 
     Use :meth:`build_active_set` with a trained model and reference structures,
     or :meth:`build_active_set_from_features` with precomputed atomic features.
-    Then call :meth:`grade_model_configuration` to score new structures. 
+    Then call :meth:`grade_model_configuration` to score new structures (or attach
+    it to a ASE FrankenCalculator). 
+
+    By default, it uses the maxvol algorithm to select a square active matrix of 
+    reference atomic features. 
 
     Each atomic grade is the largest absolute coefficient expressing its feature
-    row in the active set. The per-structure grade is computed as the largest atomic one.
+    row in the active set. The per-structure extrapolation is computed as the largest atomic one.
 
     Attributes:
         active_matrices: Dictionary of selected feature rows, shaped ``[n_active, n_features]``
             for each atomic number if ``per_species=True``, or a single shared set with key ``0`` otherwise.
-        inverse_matrices: Inverse or pseudoinverse factors used for scoring,
+        inverse_matrices: Dictionary of inverse (or pseudoinverse) factors used for scoring,
             shaped ``[n_features, n_active]``.
         regularization: used when computing the inverse factor.
         selection_method: Requested selection method, ``"maxvol"`` or
@@ -128,9 +132,6 @@ class ExtrapolationGrade:
         dtype: torch.dtype | None = None,
     ) -> "ExtrapolationGrade":
         """Return a scorer with its tensors converted to ``device`` and ``dtype``.
-
-        The current scorer is unchanged. Omitted arguments preserve the
-        corresponding tensor device or dtype.
         """
         return type(self)(
             active_matrices={
@@ -350,7 +351,7 @@ class ExtrapolationGrade:
         Args:
             rows: Candidate features of shape ``[n_atoms, n_features]``.
             max_rows: Maximum number of rows for QR; defaults to the feature
-                dimension. MaxVol requires a square set, so this must normally
+                dimension. MaxVol requires a square set, so this must 
                 be omitted or equal the feature dimension.
             method: ``"pivoted-qr"`` greedily adds the row with the largest
                 component outside the span already selected. ``"maxvol"`` starts
@@ -412,7 +413,7 @@ class ExtrapolationGrade:
         per_species: bool = True,
         show_progress: bool = True,
     ) -> ExtrapolationGrade:
-        """Build a scorer from reference atomic features without running a model.
+        """Build a scorer from reference atomic features.
 
         Args:
             atomic_features: Unpooled RF rows of shape ``[n_atoms, n_features]``,
@@ -686,7 +687,7 @@ class ExtrapolationGrade:
 
     @staticmethod
     def grade_atom(phi: torch.Tensor, active_inverse: torch.Tensor) -> torch.Tensor:
-        """Return the extrapolation grade of a single atomic feature row.
+        """Return the extrapolation grade of a single atomic feature.
 
         Args:
             phi: Unpooled atomic RF vector of shape ``[n_features]``.
@@ -758,7 +759,7 @@ class ExtrapolationGrade:
         data: Configuration,
         return_atomic: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Score a new configuration with a trained model, without gradients.
+        """Score a new configuration with a trained model (without gradients).
 
         Args:
             model: Model with the same backbone, scaler, and RF parameters used
