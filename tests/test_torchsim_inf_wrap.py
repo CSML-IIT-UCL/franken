@@ -152,7 +152,7 @@ def test_torchsim_adapter_precision(tmp_path, dtype, from_checkpoint):
     state = _demo_state(input_dtype)
     positions = state.positions.clone()
     out = adapter(state)
-    assert out["energy"].dtype == expected_weights.dtype
+    assert out["energy"].dtype == torch.float64
     assert out["forces"].dtype == expected_dtype
     assert torch.isfinite(out["energy"]).all()
     assert torch.isfinite(out["forces"]).all()

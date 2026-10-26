@@ -512,7 +512,7 @@ class TestEnergyShift:
         torch.testing.assert_close(out_ag[FORCES_TARGET_KEY], out_ag_shift[FORCES_TARGET_KEY])
         torch.testing.assert_close(out_ag[STRESS_TARGET_KEY], out_ag_shift[STRESS_TARGET_KEY])
         torch.testing.assert_close(
-            out_ag[ENERGY_TARGET_KEY] + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, 
+            out_ag[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
             out_ag_shift[ENERGY_TARGET_KEY]
         )
         out_fn = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=False)
@@ -520,7 +520,7 @@ class TestEnergyShift:
         torch.testing.assert_close(out_fn[FORCES_TARGET_KEY], out_fn_shift[FORCES_TARGET_KEY])
         torch.testing.assert_close(out_fn[STRESS_TARGET_KEY], out_fn_shift[STRESS_TARGET_KEY])
         torch.testing.assert_close(
-            out_fn[ENERGY_TARGET_KEY] + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, 
+            out_fn[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
             out_fn_shift[ENERGY_TARGET_KEY]
         )
 
@@ -545,7 +545,7 @@ class TestEnergyShift:
         torch.testing.assert_close(out_from_fmaps[FORCES_TARGET_KEY], out_from_fmaps_shift[FORCES_TARGET_KEY])
         torch.testing.assert_close(out_from_fmaps[STRESS_TARGET_KEY], out_from_fmaps_shift[STRESS_TARGET_KEY])
         torch.testing.assert_close(
-            out_from_fmaps[ENERGY_TARGET_KEY] + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5, 
+            out_from_fmaps[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
             out_from_fmaps_shift[ENERGY_TARGET_KEY]
         )
 
@@ -571,7 +571,7 @@ class TestEnergyShift:
         torch.testing.assert_close(out_ag[FORCES_TARGET_KEY], out_ag_shift[FORCES_TARGET_KEY])
         torch.testing.assert_close(out_ag[STRESS_TARGET_KEY], out_ag_shift[STRESS_TARGET_KEY])
         torch.testing.assert_close(
-            out_ag[ENERGY_TARGET_KEY] + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3, 
+            out_ag[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
             out_ag_shift[ENERGY_TARGET_KEY]
         )
         out_fn = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=False)
@@ -579,7 +579,7 @@ class TestEnergyShift:
         torch.testing.assert_close(out_fn[FORCES_TARGET_KEY], out_fn_shift[FORCES_TARGET_KEY])
         torch.testing.assert_close(out_fn[STRESS_TARGET_KEY], out_fn_shift[STRESS_TARGET_KEY])
         torch.testing.assert_close(
-            out_fn[ENERGY_TARGET_KEY] + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3, 
+            out_fn[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
             out_fn_shift[ENERGY_TARGET_KEY]
         )
 

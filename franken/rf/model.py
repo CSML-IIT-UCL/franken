@@ -527,7 +527,7 @@ class FrankenPotential(torch.nn.Module):
         if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in targets:
             out[franken.data.base.ENERGY_TARGET_KEY] = out[
                 franken.data.base.ENERGY_TARGET_KEY
-            ] + self.energy_shift(
+            ].to(dtype=torch.float64) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),
@@ -591,7 +591,7 @@ class FrankenPotential(torch.nn.Module):
         if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in fmaps.keys():
             out[franken.data.base.ENERGY_TARGET_KEY] = out[
                 franken.data.base.ENERGY_TARGET_KEY
-            ] + self.energy_shift(
+            ].to(dtype=torch.float64) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),

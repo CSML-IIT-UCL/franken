@@ -125,15 +125,10 @@ def test_wrap_compile(rf_cfg, device, backbone):
             verbose=True,
         ), "The input_scaler.state_dict() of the loaded model does not match the original model."
 
-        with pytest.raises(RuntimeError) as exc:
-            assert are_dicts_close(
-                model.energy_shift.state_dict(),
-                comp_model.model.energy_shift.state_dict(),
-                verbose=True,
-            )
-        assert "Float did not match Double" in str(exc.value)
+        assert model.energy_shift.atomic_energies.dtype == torch.float64
+        assert comp_model.model.energy_shift.atomic_energies.dtype == torch.float64
         assert are_dicts_close(
-            model.energy_shift.double().state_dict(),
+            model.energy_shift.state_dict(),
             comp_model.model.energy_shift.state_dict(),
             verbose=True,
         ), "The energy_shift.state_dict() of the loaded model does not match the original model."
