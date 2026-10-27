@@ -156,7 +156,7 @@ class FrankenPotential(torch.nn.Module):
             num_species=ckpt["num_species"],
             **ckpt["input_scaler"]["config"],
         )
-        model.rf.load_state_dict(ckpt["rf"]["state_dict"])
+        model.rf.load_state_dict(ckpt["rf"]["state_dict"], assign=True)
         model.input_scaler.load_state_dict(ckpt["input_scaler"]["state_dict"])
         model.energy_shift.load_state_dict(ckpt["energy_shift"])
 
@@ -166,6 +166,7 @@ class FrankenPotential(torch.nn.Module):
                     f"The checkpoint contains {ckpt['multi_weights'].shape[0]}, select which one to load by specifying rf_weight_id"
                 )
             assert rf_weight_id < ckpt["multi_weights"].shape[0]
+            model.rf.weights = model.rf.weights.to(dtype=ckpt["multi_weights"].dtype)
             model.rf.weights.copy_(
                 ckpt["multi_weights"][rf_weight_id].reshape_as(model.rf.weights)
             )
@@ -526,7 +527,7 @@ class FrankenPotential(torch.nn.Module):
         if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in targets:
             out[franken.data.base.ENERGY_TARGET_KEY] = out[
                 franken.data.base.ENERGY_TARGET_KEY
-            ] + self.energy_shift(
+            ].to(dtype=torch.float64) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),
@@ -590,7 +591,7 @@ class FrankenPotential(torch.nn.Module):
         if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in fmaps.keys():
             out[franken.data.base.ENERGY_TARGET_KEY] = out[
                 franken.data.base.ENERGY_TARGET_KEY
-            ] + self.energy_shift(
+            ].to(dtype=torch.float64) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),

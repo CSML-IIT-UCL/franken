@@ -355,9 +355,6 @@ class AutotuneConfig:
     save_every_model: bool = False
     """If true saves a checkpoint for every trial, otherwise it saves only the best model."""
 
-    dtype: Literal["float32", "float64"] = "float64"
-    """Data-type for the franken solution. float64 can usually obtain slightly smaller errors while paying a small performance cost."""
-
     save_fmaps: bool = False
     """Whether to save training feature maps. If the dataset is small (~100 samples), setting this to True can increase the speed of hyperparameter tuning, at the cost of higher memory usage."""
 

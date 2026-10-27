@@ -22,7 +22,9 @@ class AtomicEnergiesShift(torch.nn.Module):
         super().__init__()
 
         self.num_species = num_species
-        self.register_buffer("atomic_energies", torch.zeros(num_species))
+        self.register_buffer(
+            "atomic_energies", torch.zeros(num_species, dtype=torch.float64)
+        )
         self.register_buffer(
             "z_keys", torch.zeros((self.num_species,), dtype=torch.long)
         )  # placeholder
@@ -40,7 +42,11 @@ class AtomicEnergiesShift(torch.nn.Module):
         device = self.atomic_energies.device
         self.atomic_energies = torch.stack(
             [
-                v.clone().detach() if isinstance(v, torch.Tensor) else torch.tensor(v)
+                (
+                    v.detach().to(device=device, dtype=torch.float64).clone()
+                    if isinstance(v, torch.Tensor)
+                    else torch.tensor(v, device=device, dtype=torch.float64)
+                )
                 for v in atomic_energies.values()
             ]
         ).to(device)
@@ -50,6 +56,15 @@ class AtomicEnergiesShift(torch.nn.Module):
             device=self.atomic_energies.device,
         )
         self.is_initialized = True
+
+    def _apply(self, fn, recurse=True):
+        # Model-wide dtype conversions must not round the energy reference.
+        atomic_energies = self.atomic_energies
+        super()._apply(fn, recurse=recurse)
+        self.atomic_energies = atomic_energies.to(
+            device=self.atomic_energies.device, dtype=torch.float64
+        )
+        return self
 
     def forward(
         self,
@@ -71,13 +86,16 @@ class AtomicEnergiesShift(torch.nn.Module):
             Scalar shift for single-system inputs, or a tensor of shape
             ``[n_systems]`` when ``batch_ids`` is provided.
         """
+        # Also enforce double accumulation for scripted modules, whose generic
+        # conversion methods do not call the Python _apply override.
+        atomic_energies = self.atomic_energies.to(dtype=torch.float64)
         if batch_ids is None:
             shift = torch.tensor(
                 0.0,
-                dtype=self.atomic_energies.dtype,
+                dtype=torch.float64,
                 device=self.atomic_energies.device,
             )
-            for z, atom_ene in zip(self.z_keys, self.atomic_energies):
+            for z, atom_ene in zip(self.z_keys, atomic_energies):
                 mask = atomic_numbers == z
                 shift += torch.sum(atom_ene * mask)
             return shift
@@ -90,13 +108,11 @@ class AtomicEnergiesShift(torch.nn.Module):
 
         shift = torch.zeros(
             (num_systems,),
-            dtype=self.atomic_energies.dtype,
+            dtype=torch.float64,
             device=self.atomic_energies.device,
         )
-        for z, atom_ene in zip(self.z_keys, self.atomic_energies):
-            contrib = atom_ene * (atomic_numbers == z).to(
-                dtype=self.atomic_energies.dtype
-            )
+        for z, atom_ene in zip(self.z_keys, atomic_energies):
+            contrib = atom_ene * (atomic_numbers == z).to(dtype=torch.float64)
             shift = shift.index_add(0, batch_ids, contrib)
         return shift
 

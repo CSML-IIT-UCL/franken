@@ -124,3 +124,43 @@ def test_torchsim_adapter_cuda_batched_smoke() -> None:
     assert out["forces"].device.type == "cuda"
     assert not out["energy"].requires_grad
     assert not out["forces"].requires_grad
+
+
+@pytest.mark.parametrize("from_checkpoint", [False, True])
+@pytest.mark.parametrize("dtype", [None, torch.float32, torch.float64, "float32", "float64", "default"])
+def test_torchsim_adapter_precision(tmp_path, dtype, from_checkpoint):
+    model = FrankenPotential(
+        MaceBackboneConfig("mace_mp/small"),
+        GaussianRFConfig(num_random_features=16, length_scale=1.0),
+    ).to(dtype=torch.float32)
+    weights = torch.full_like(model.rf.weights, 1.000000000123, dtype=torch.float64)
+    model.rf.weights = weights.clone()
+    source = model
+    if from_checkpoint:
+        source = tmp_path / "model.pt"
+        model.save(source)
+    kwargs = {} if dtype == "default" else {"dtype": dtype}
+    adapter = FrankenTorchSimModel(source, device="cpu", **kwargs)
+    expected_dtype = torch.float64 if dtype in (torch.float64, "float64") else torch.float32
+    expected_weights = weights if dtype in (None, "default") else weights.to(expected_dtype)
+    assert adapter.dtype == expected_dtype
+    assert next(adapter.model.gnn.parameters()).dtype == expected_dtype
+    torch.testing.assert_close(adapter.model.rf.weights, expected_weights, rtol=0, atol=0)
+
+    # The adapter converts the incoming state's precision without mutating it.
+    input_dtype = torch.float64 if expected_dtype == torch.float32 else torch.float32
+    state = _demo_state(input_dtype)
+    positions = state.positions.clone()
+    out = adapter(state)
+    assert out["energy"].dtype == torch.float64
+    assert out["forces"].dtype == expected_dtype
+    assert torch.isfinite(out["energy"]).all()
+    assert torch.isfinite(out["forces"]).all()
+    torch.testing.assert_close(state.positions, positions)
+    assert state.dtype == input_dtype
+
+
+@pytest.mark.parametrize("dtype", [torch.float16, "float16", "invalid"])
+def test_torchsim_adapter_invalid_precision(dtype):
+    with pytest.raises(ValueError, match="dtype must be"):
+        FrankenTorchSimModel("unused.pt", device="cpu", dtype=dtype)
