@@ -1,9 +1,18 @@
 from functools import partial
 from unittest.mock import DEFAULT, patch
+import warnings
 
 import numpy as np
 import pytest
 import torch
+
+import franken
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.trainers.rf_trainer import RandomFeaturesTrainer
+import franken.utils
+import franken.utils.linalg
+from franken.utils.linalg.solve import lowmem_psd_solve, psd_solve
+import franken.utils.linalg.solve
 try:
     import cupy # pyright: ignore[reportMissingImports]  # noqa: F401
     cupy_available = True
@@ -228,28 +237,35 @@ class TestCovUpdates:
 
 
 class TestPSDSolvers:
-    def trainer(self):
-        return LowMemRandomFeaturesTrainer(
-            train_dataloader=None, l2_penalty=1e-5,
-            training_targets=["energy", "forces"], target_weight={}, device="cpu",
-        )
-
     mat_size = 5  # needs to be small otherwise too much numerical error
 
     def A(self, device, dtype):
-        gen = torch.Generator(device=device)
+        gen = torch.Generator(device="cpu")
         gen.manual_seed(37)
-        mat = torch.randn(self.mat_size, self.mat_size, device=device, dtype=dtype, generator=gen)
-        return (mat @ mat.T) / self.mat_size
+        mat = torch.randn(self.mat_size, self.mat_size, device="cpu", dtype=torch.float64, generator=gen)
+        return ((mat @ mat.T) / self.mat_size).to(device=device, dtype=dtype)
 
     def B(self, device, dtype):
-        gen = torch.Generator(device=device)
+        gen = torch.Generator(device="cpu")
         gen.manual_seed(33)
-        return torch.randn(self.mat_size, 2, device=device, dtype=dtype, generator=gen) / self.mat_size
+        mat = torch.randn(self.mat_size, 2, device="cpu", dtype=torch.float64, generator=gen) / self.mat_size
+        return mat.to(device=device, dtype=dtype)
 
     def expected(self, A, B, penalty):
         A = A + torch.eye(A.shape[0], dtype=A.dtype, device=A.device) * penalty
         return torch.linalg.solve(A.double(), B.double()).to(dtype=A.dtype)
+
+    def base_trainer(self):
+        return RandomFeaturesTrainer(
+            train_dataloader=None, l2_penalty=1e-5,
+            training_targets=["energy", "forces"], target_weight={}, device="cpu",
+        )
+
+    def lowmem_trainer(self):
+        return LowMemRandomFeaturesTrainer(
+            train_dataloader=None, l2_penalty=1e-5,
+            training_targets=["energy", "forces"], target_weight={}, device="cpu",
+        )
 
     @SKIP_NO_CUDA
     @FAIL_NO_CUPY_MARK
@@ -265,7 +281,7 @@ class TestPSDSolvers:
         # To make sure only upper part of A is accessed set the lower to zero
         A = torch.triu(A)
         Acopy = torch.clone(A)
-        result = self.trainer().psd_solve(A, B, penalty, return_cholesky_factor)
+        result = lowmem_psd_solve(A, B, penalty, return_cholesky_factor)
         if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
@@ -282,15 +298,19 @@ class TestPSDSolvers:
     @pytest.mark.parametrize("return_cholesky_factor", [False, True])
     def test_lowmem_cpu(self, return_cholesky_factor):
         A = self.A("cpu", torch.float32)
+        Acopy = torch.clone(A)
         B = self.B("cpu", torch.float32)
         penalty = 1e-5
         expected_cov = A + torch.eye(self.mat_size, device=A.device, dtype=A.dtype) * penalty
         expected = self.expected(A, B, penalty)
-        result = self.trainer().psd_solve(A, B, penalty, return_cholesky_factor)
+        result = lowmem_psd_solve(A, B, penalty, return_cholesky_factor)
         if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
             torch.testing.assert_close(factor.T @ factor, expected_cov)
+        # A should have been overwritten (by cholesky)
+        assert not torch.isclose(A, Acopy).all()
+        # Correctness
         torch.testing.assert_close(result, expected)
 
     @pytest.mark.parametrize("device", DEVICES)
@@ -307,7 +327,7 @@ class TestPSDSolvers:
         A = torch.triu(A)
         Acopy = torch.clone(A)
         Bcopy = torch.clone(B)
-        result = BaseTrainer.psd_solve(self.trainer(), A, B, penalty, return_cholesky_factor)
+        result = psd_solve(A, B, penalty, return_cholesky_factor)
         if return_cholesky_factor:
             result, packed = result
             factor = unpack_upper(packed, self.mat_size)
@@ -323,49 +343,127 @@ class TestPSDSolvers:
     @SKIP_NO_CUDA
     @FAIL_NO_CUPY_MARK
     def test_dispatcher_cuda(self):
-        with patch.object(BaseTrainer, "psd_solve") as naive:
+        # Lots of patches because the functions are called with different names.
+        with (
+            patch("franken.utils.linalg.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem,
+            patch("franken.trainers.rf_lowmem.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem2,
+            patch("franken.utils.linalg.psd_solve", side_effect=psd_solve) as naive,
+            patch("franken.utils.linalg.solve.psd_solve", side_effect=psd_solve) as naive2,
+        ):
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
-            expected = self.expected(A, B, 1e-5)
-            result = self.trainer().psd_solve(A, B, 1e-5)
-            torch.testing.assert_close(result, expected)
+            franken.utils.linalg.lowmem_psd_solve(A, B, 1e-5)
             naive.assert_not_called()
+            naive2.assert_not_called()
+            lowmem.assert_called_once_with(A, B, 1e-5)
+
+            # Test the same code path but through the trainer
+            lowmem.reset_mock()
+            lm_trainer = self.lowmem_trainer()
+            lm_trainer.solve(
+                covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
+                coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                l2_penalty=1e-5, 
+                energy_weight=1,
+                forces_weight=0,
+            )
+            naive.assert_not_called()
+            naive2.assert_not_called()
+            lowmem2.assert_called_once_with(A, B, 1e-5, False)
 
     @SKIP_NO_CUDA
     def test_dispatcher_cuda_nocupy(self):
-        with patch("franken.trainers.rf_lowmem.cupy", None), patch.object(
-            BaseTrainer, "psd_solve", autospec=True, side_effect=BaseTrainer.psd_solve
-        ) as naive:
+        with (
+            patch("franken.utils.linalg.solve.cupy", None),
+            patch("franken.utils.linalg.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem,
+            patch("franken.trainers.rf_lowmem.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem2,
+            patch("franken.utils.linalg.solve.psd_solve", side_effect=psd_solve) as naive2,
+        ):
             A = self.A("cuda", torch.float32)
             B = self.B("cuda", torch.float32)
-            expected = self.expected(A, B, 1e-5)
-            trainer = self.trainer()
             with pytest.warns(UserWarning, match="`cupy` is not available"):
-                result = trainer.psd_solve(A, B, 1e-5)
-            torch.testing.assert_close(result, expected)
-            naive.assert_called_once_with(trainer, A, B, 1e-5, False)
+                franken.utils.linalg.lowmem_psd_solve(A, B, 1e-5)
+            naive2.assert_called_once_with(A, B, 1e-5, False)
+            lowmem.assert_called_once_with(A, B, 1e-5)
+
+            # Test the same code path but through the trainer
+            naive2.reset_mock()
+            lm_trainer = self.lowmem_trainer()
+            with pytest.warns(UserWarning, match="`cupy` is not available"):
+                lm_trainer.solve(
+                    covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
+                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    l2_penalty=1e-5, 
+                    energy_weight=1,
+                    forces_weight=0,
+                )
+            naive2.assert_called_once_with(A, B, 1e-5, False)
+            lowmem2.assert_called_once_with(A, B, 1e-5, False)
 
     def test_dispatcher_cpu(self):
-        with patch.object(
-            BaseTrainer, "psd_solve", autospec=True, side_effect=BaseTrainer.psd_solve
-        ) as naive:
+        # Lots of patches because the functions are called with different names.
+        with (
+            patch("franken.utils.linalg.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem,
+            patch("franken.trainers.rf_lowmem.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem2,
+            patch("franken.utils.linalg.psd_solve", side_effect=psd_solve) as naive,
+            patch("franken.utils.linalg.solve.psd_solve", side_effect=psd_solve) as naive2,
+        ):
+            # Base code path
             A = self.A("cpu", torch.float32)
             B = self.B("cpu", torch.float32)
-            expected = self.expected(A, B, 1e-5)
-            trainer = self.trainer()
-            result = trainer.psd_solve(A, B, 1e-5)
-            torch.testing.assert_close(result, expected)
-            naive.assert_called_once_with(trainer, A, B, 1e-5, False)
+            franken.utils.linalg.psd_solve(A, B, 1e-5)
+            naive.assert_called_once_with(A, B, 1e-5)
+            lowmem.assert_not_called()
+
+            # lowmem code path
+            naive.reset_mock()
+            lowmem.reset_mock()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")  # assert no warning are raised
+                franken.utils.linalg.lowmem_psd_solve(A, B, 1e-5)
+            lowmem.assert_called_once_with(A, B, 1e-5)
+            naive2.assert_called_once_with(A, B, 1e-5, False)
+
+            # lowmem trainer code path
+            naive2.reset_mock()
+            lowmem.reset_mock()
+            lm_trainer = self.lowmem_trainer()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")  # assert no warning are raised
+                lm_trainer.solve(
+                    covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
+                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    l2_penalty=1e-5, 
+                    energy_weight=1,
+                    forces_weight=0,
+                )
+            lowmem2.assert_called_once()
+            naive2.assert_called_once()
 
     @pytest.mark.parametrize("device", DEVICES)
     def test_base_dispatcher(self, device):
-        with patch("franken.trainers.rf_lowmem.cupy", None), patch("warnings.warn") as warn:
+        with (
+            patch("franken.utils.linalg.solve.cupy", None),
+            patch("franken.utils.linalg.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem,
+            patch("franken.utils.linalg.solve.lowmem_psd_solve", side_effect=lowmem_psd_solve) as lowmem2,
+            patch("franken.trainers.rf_trainer.psd_solve", side_effect=psd_solve) as naive,
+            patch("franken.utils.linalg.solve.psd_solve", side_effect=psd_solve) as naive2,
+        ):
             A = self.A(device, torch.float32)
             B = self.B(device, torch.float32)
-            expected = self.expected(A, B, 1e-5)
-            result = BaseTrainer.psd_solve(self.trainer(), A, B, 1e-5)
-            torch.testing.assert_close(result, expected)
-            warn.assert_not_called()
+            trainer = self.base_trainer()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")  # assert no warning are raised
+                trainer.solve(
+                    covs={ENERGY_TARGET_KEY: A, FORCES_TARGET_KEY: A}, 
+                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    l2_penalty=1e-5, 
+                    energy_weight=1,
+                    forces_weight=0,
+                )
+            lowmem.assert_not_called()
+            lowmem2.assert_not_called()
+            naive.assert_called_once()
 
 
 @pytest.mark.parametrize("device", DEVICES)

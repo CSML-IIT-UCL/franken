@@ -56,6 +56,8 @@ class FrankenPotential(torch.nn.Module):
         128 (for smaller systems).
     """
 
+    _cholesky_factor: torch.Tensor | None
+
     def __init__(
         self,
         gnn_config: BackboneConfig,
