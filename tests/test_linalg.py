@@ -466,34 +466,35 @@ class TestPSDSolvers:
             naive.assert_called_once()
 
 
-@pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("n", [0, 1, 5])
-def test_packed_upper(device, n):
-    matrix = torch.randn(n, n, device=device, dtype=torch.float64)
-    packed = pack_upper(matrix)
-    assert packed.shape == (n * (n + 1) // 2,)
-    assert packed.untyped_storage().nbytes() == packed.numel() * packed.element_size()
-    indices = torch.triu_indices(n, n, device=device)
-    torch.testing.assert_close(packed, matrix[indices[0], indices[1]])
-    torch.testing.assert_close(unpack_upper(packed, n), torch.triu(matrix))
+class TestPackUnpack:
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    @pytest.mark.parametrize("device", DEVICES)
+    @pytest.mark.parametrize("n", [0, 1, 5])
+    def test_packed_upper(self, device, dtype, n):
+        matrix = torch.randn(n, n, device=device, dtype=dtype)
+        packed = pack_upper(matrix)
+        assert packed.shape == (n * (n + 1) // 2,)
+        assert packed.untyped_storage().nbytes() == packed.numel() * packed.element_size()
+        indices = torch.triu_indices(n, n, device=device)
+        torch.testing.assert_close(packed, matrix[indices[0], indices[1]])
+        torch.testing.assert_close(unpack_upper(packed, n), torch.triu(matrix))
 
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    @pytest.mark.parametrize("device", DEVICES)
+    @pytest.mark.parametrize("n", [0, 1, 5])
+    def test_packed_symmetric(self, device, dtype, n):
+        matrix = torch.randn(n, n, device=device, dtype=dtype)
+        matrix = matrix + matrix.T
+        packed = pack_upper(matrix)
+        torch.testing.assert_close(unpack_symm(packed, n), matrix)
 
-@pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("n", [0, 1, 5])
-def test_packed_symmetric(device, n):
-    matrix = torch.randn(n, n, device=device, dtype=torch.float64)
-    matrix = matrix + matrix.T
-    packed = pack_upper(matrix)
-    torch.testing.assert_close(unpack_symm(packed, n), matrix)
-
-
-def test_invalid_packed_upper():
-    with pytest.raises(ValueError):
-        pack_upper(torch.zeros(2, 3))
-    with pytest.raises(ValueError):
-        unpack_upper(torch.zeros(4), 2)
-    with pytest.raises(ValueError):
-        unpack_symm(torch.zeros(4), 2)
+    def test_invalid_packed_upper(self):
+        with pytest.raises(ValueError):
+            pack_upper(torch.zeros(2, 3))
+        with pytest.raises(ValueError):
+            unpack_upper(torch.zeros(4), 2)
+        with pytest.raises(ValueError):
+            unpack_symm(torch.zeros(4), 2)
 
 
 @SKIP_NO_CUDA
