@@ -1,7 +1,6 @@
 import abc
 import json
 import logging
-import shutil
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -154,41 +153,44 @@ class BaseTrainer(abc.ABC):
             best_model_selection=best_model_selection,
         )
 
+    def has_new_best_model(
+        self, best_model_selection: list[str], split: DataSplit
+    ) -> tuple[bool, LogEntry]:
+        assert self.log_dir is not None, "Log directory is not set"
+        log_collection = LogCollection.from_json(self.log_dir / "log.json")
+        new_best_model = log_collection.get_best_model(
+            split=split, metrics_to_minimize=best_model_selection
+        )
+        best_model_file = self.log_dir / "best.json"
+        new_best = True
+        if best_model_file.exists():
+            with open(best_model_file, "r") as f:
+                old_best_model = LogEntry.from_dict(json.load(f))
+            if new_best_model == old_best_model:
+                new_best = False
+        return new_best, new_best_model
+
     def serialize_best_model(
         self,
         model: FrankenPotential,
         all_weights: torch.Tensor,
         best_model_selection: list[str],
         split: DataSplit = DataSplit.TRAIN,
-    ) -> None:
+    ) -> bool:
         assert self.log_dir is not None, "Log directory is not set"
-        log_collection = LogCollection.from_json(self.log_dir / "log.json")
-        best_model = log_collection.get_best_model(
-            split=split, metrics_to_minimize=best_model_selection
+        should_save, best_log_entry = self.has_new_best_model(
+            best_model_selection, split
         )
-
         best_model_file = self.log_dir / "best.json"
-        should_save = True
-        if best_model_file.exists():
-            with open(best_model_file, "r") as f:
-                current_best = LogEntry.from_dict(json.load(f))
-            if best_model == current_best:
-                should_save = False
-
         if should_save:
-            logger.debug(f"Identified new best model: {best_model}")
+            logger.debug(f"Identified new best model: {best_log_entry}")
             with open(best_model_file, "w") as f:
-                json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
-            weights = all_weights[best_model.checkpoint_rf_weight_id]
+                json.dump(best_log_entry.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
+            weights = all_weights[best_log_entry.checkpoint_rf_weight_id]
             model.rf.weights = torch.nn.Parameter(weights.reshape_as(model.rf.weights))
             model.save(self.log_dir / "best_ckpt.pt")
             logger.debug(
-                f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
+                f"Saved best model (within-experiment ID={best_log_entry.checkpoint_rf_weight_id}) "
                 f"to {self.log_dir / 'best_ckpt.pt'}"
             )
-            history_file = self.log_dir / "training_history.json"
-            if history_file.exists():
-                shutil.copy2(
-                    history_file,
-                    self.log_dir / "best_training_history.json",
-                )
+        return should_save

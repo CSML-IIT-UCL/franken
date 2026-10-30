@@ -3,6 +3,7 @@ import json
 import logging
 import math
 from pathlib import Path
+import shutil
 from time import perf_counter
 from typing import Literal, Mapping, Sequence, cast
 
@@ -650,3 +651,23 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 f"Covariance normalization {self.random_features_normalization} is not implemented."
             )
         return covs, coeffs, norm_coefs
+
+    def serialize_best_model(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self,
+        model: LESFrankenPotential,
+        all_weights: torch.Tensor,
+        best_model_selection: list[str],
+        split: DataSplit = DataSplit.TRAIN,
+    ) -> bool:
+        should_save = super().serialize_best_model(
+            model, all_weights, best_model_selection, split
+        )
+        assert self.log_dir is not None, "Log directory is not set"
+        if should_save:
+            history_file = self.log_dir / "training_history.json"
+            if history_file.exists():
+                shutil.copy2(
+                    history_file,
+                    self.log_dir / "best_training_history.json",
+                )
+        return should_save
