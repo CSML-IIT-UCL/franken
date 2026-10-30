@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Literal, Mapping, Optional, Union
+from typing import Literal, Mapping, Optional, Sequence, Union
 
 import torch
 
@@ -251,7 +251,7 @@ class LESFrankenPotential(FrankenPotential):
     def predict_les(
         self,
         data: Configuration,
-        targets: list[str],
+        targets: Sequence[str],
     ) -> dict[str, torch.Tensor]:
         """Predict using **only** the LES module.
 

@@ -24,7 +24,6 @@ from franken.data.base import (
     all_target_keys,
     is_scalar_target,
 )
-from franken.rf.model import FrankenPotential
 from franken.trainers.log_utils import (
     DataSplit,
     HyperParameterGroup,
@@ -457,23 +456,16 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 The fitting logs, together with the learned weights.
         """
         self.patch_e3nn()
-        model.train()
-
-        if dist_utils.get_world_size() != 1:
-            raise NotImplementedError(
-                "LES optimization currently supports one process only"
-            )
         self.training_history = []
         self._les_optimizer = None
         self._shuffle_rng = torch.Generator().manual_seed(self.seed)
-        model = model.to(self.device)
-        model.train()
         self.on_fit_start(model)
 
         covs, coeffs, normalization, proj_mat = None, None, None, None
         if self.mode != "joint":  # Joint doesn't need covariance!
             t_cov = perf_counter()
-            covs, coeffs, normalization = self.covariances(model, self.train_dataloader)
+            covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
+            covs, coeffs, normalization = self._calc_cov_normalization(covs, coeffs)
             proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
 
@@ -513,75 +505,71 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         log_collection: LogCollection,
         all_weights: torch.Tensor | None,
     ) -> LogCollection:
-        was_training = model.training
+        self.patch_e3nn()
         model.eval()
+        model.gnn.franken_val()
+        assert isinstance(dataloader.dataset, FrankenAtomsDataset)
+        tot_dset_size = len(dataloader.dataset)
+        metric_objects: list[BaseMetric] = self.get_metrics()
+        split_name = dataloader.dataset.split
         try:
-            self.patch_e3nn()
-            assert isinstance(dataloader.dataset, FrankenAtomsDataset)
-            tot_dset_size = len(dataloader.dataset)
-            metric_objects: list[BaseMetric] = self.get_metrics()
-            split_name = dataloader.dataset.split
-            try:
-                split = DataSplit[split_name.upper()]
-            except KeyError:
-                logger.warning(f"Unrecognized split '{split_name}' in dataloader")
-                split = DataSplit.UNDEFINED
+            split = DataSplit[split_name.upper()]
+        except KeyError:
+            logger.warning(f"Unrecognized split '{split_name}' in dataloader")
+            split = DataSplit.UNDEFINED
 
-            progress_bar = throughput(
-                dataloader,
-                desc=f"{split.name.lower()} evaluation",
-                total=tot_dset_size,
-                device=self.device,
+        progress_bar = throughput(
+            dataloader,
+            desc=f"{split.name.lower()} evaluation",
+            total=tot_dset_size,
+            device=self.device,
+        )
+        for i, (data, targets) in enumerate(progress_bar):
+            data = data.to(device=self.device)
+            targets = targets.to(device=self.device)
+            if all_weights is None or all_weights.shape[0] <= 100:
+                forces_mode = "torch.autograd"
+            else:
+                forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
+            predictions = model.predict(
+                targets=self.training_targets,  # type: ignore
+                data=data,
+                weights=all_weights,
+                differential_mode=forces_mode,
+                add_energy_shift=(False if split == DataSplit.TRAIN else True),
             )
-            model.gnn.franken_val()
-            for i, (data, targets) in enumerate(progress_bar):
-                data = data.to(device=self.device)
-                targets = targets.to(device=self.device)
-                if all_weights is None or all_weights.shape[0] <= 100:
-                    forces_mode = "torch.autograd"
-                else:
-                    forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
-                predictions = model.predict(
-                    targets=self.training_targets,  # type: ignore
-                    data=data,
-                    weights=all_weights,
-                    differential_mode=forces_mode,
-                    add_energy_shift=(False if split == DataSplit.TRAIN else True),
-                )
-                for tt, val in predictions.items():
-                    if torch.any(torch.isnan(val)):
-                        logger.warning(
-                            f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
-                        )
-                for metric in metric_objects:
-                    metric.update(Target.from_types(predictions), targets, data)  # type: ignore
-
-            num_models = (
-                all_weights.shape[0]
-                if all_weights is not None
-                else model.rf.weights.shape[0]
-            )
-
-            # list with one element for each model trained
+            for tt, val in predictions.items():
+                if torch.any(torch.isnan(val)):
+                    logger.warning(
+                        f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
+                    )
             for metric in metric_objects:
-                metric_values = metric.compute()
-                for metric_name, metric_value in metric_values:
-                    assert metric_value.shape == (
-                        num_models,
-                    ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
-                    for model_idx in range(metric_value.shape[0]):
-                        log_entry = log_collection[model_idx]
-                        try:
-                            log_entry.add_metric(
-                                name=metric_name,
-                                value=metric_value[model_idx].item(),
-                                split=split,
-                            )
-                        except ValueError as e:
-                            logger.warning(f"Could not add metric: {str(e)}")
-            return log_collection
-        finally:
-            model.train(was_training)
+                metric.update(Target.from_types(predictions), targets, data)  # type: ignore
+
+        num_models = (
+            all_weights.shape[0]
+            if all_weights is not None
+            else model.rf.weights.shape[0]
+        )
+
+        # list with one element for each model trained
+        for metric in metric_objects:
+            metric_values = metric.compute()
+            for metric_name, metric_value in metric_values:
+                assert metric_value.shape == (
+                    num_models,
+                ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
+                for model_idx in range(metric_value.shape[0]):
+                    log_entry = log_collection[model_idx]
+                    try:
+                        log_entry.add_metric(
+                            name=metric_name,
+                            value=metric_value[model_idx].item(),
+                            split=split,
+                        )
+                    except ValueError as e:
+                        logger.warning(f"Could not add metric: {str(e)}")
+        return log_collection
 
     @no_jit()
     @torch.no_grad()
@@ -641,57 +629,13 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     @no_jit()
     @torch.no_grad()
-    def covariances(
-        self,
-        model: FrankenPotential,
-        dataloader: torch.utils.data.DataLoader,
-    ):
-        n_samples = len(dataloader.dataset)  # type: ignore
-        n_rf = model.rf.total_random_features
-
-        covs: dict[TargetType, Tensor] = {
-            t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
-            for t in self.training_targets
-        }
-        coeffs: dict[TargetType, Tensor] = {
-            t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
-            for t in self.training_targets
-        }
-        self.fmaps = {t: [] for t in self.training_targets} if self.save_fmaps else {}
-
-        progress_bar = throughput(
-            dataloader, "covs", total=n_samples, device=self.device
-        )
-        for i, (data, targets) in enumerate(progress_bar):
-            assert isinstance(data, Configuration)
-            data = data.to(device=self.device)
-            targets = targets.to(device=self.device)
-            assert data.natoms.numel() == 1, "Batched training is not supported"
-
-            target_fmaps = model.grad_feature_map(data, self.training_targets)
-            if self.save_fmaps and i == 0:
-                self.warn_save_fmaps(list(target_fmaps.values()), len(dataloader))
-            for tgt_name in self.training_targets:
-                try:
-                    tgt = targets[tgt_name]
-                except KeyError:
-                    raise RuntimeError(
-                        f"Target {i} does not contain any values for {tgt_name}."
-                    )
-                tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
-                fmap = target_fmaps[tgt_name].to(self.buffer_dt)
-                if self.save_fmaps:
-                    self.fmaps[tgt_name].append(fmap)
-                if is_scalar_target(tgt_name):
-                    covs[tgt_name].addmm_(fmap, fmap.T)
-                    coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
-                else:
-                    covs[tgt_name].addmm_(fmap, fmap.T)
-                    coeffs[tgt_name].addmv_(fmap, tgt_per_atom.reshape(-1))
-        # Sync covariance matrices & coefficients
-        for tgt_name in self.training_targets:
-            dist_utils.all_sum(covs[tgt_name])
-            dist_utils.all_sum(coeffs[tgt_name])
+    def _calc_cov_normalization(
+        self, covs: dict[TargetType, Tensor], coeffs: dict[TargetType, Tensor]
+    ) -> tuple[
+        dict[TargetType, Tensor],
+        dict[TargetType, Tensor],
+        dict[TargetType, Tensor] | None,
+    ]:
         # RF normalization
         norm_coefs = None
         if self.random_features_normalization == "leading_eig":
