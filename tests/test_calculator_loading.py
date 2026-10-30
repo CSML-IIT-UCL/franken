@@ -1,4 +1,4 @@
- """Checkpoint dispatch tests without downloaded backbone models."""
+"""Checkpoint dispatch tests without downloaded backbone models."""
 
 from unittest.mock import patch
 
