@@ -134,19 +134,6 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             for j in range(2):
                 dist_utils.all_sum(diags[j])
                 dist_utils.all_sum(coeffs[j])
-        # RF normalization
-        if self.random_features_normalization == "leading_eig":
-            logger.warning(
-                "`leading_eig` normalization has high memory usage. If you encounter OOM errors try to disable it."
-            )
-            for j in range(2):
-                lowmem_normalize_leading_eig(
-                    covariance, diags[j], coeffs[j], upper=cov_upper[j]
-                )
-        elif self.random_features_normalization is not None:
-            raise NotImplementedError(
-                f"Covariance normalization {self.random_features_normalization} is not implemented."
-            )
         covs_out = {
             self.training_targets[0]: (covariance, diags[0], cov_upper[0]),
             self.training_targets[1]: (covariance, diags[1], cov_upper[1]),
@@ -156,6 +143,31 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             self.training_targets[1]: coeffs[1],
         }
         return covs_out, coeffs_out
+
+    @no_jit()
+    @torch.no_grad()
+    def _normalize_covs(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self,
+        covs: dict[TargetType, tuple[Tensor, Tensor, bool]],
+        coeffs: dict[TargetType, Tensor],
+    ) -> tuple[dict[TargetType, tuple[Tensor, Tensor, bool]], dict[TargetType, Tensor]]:
+        # RF normalization
+        if self.random_features_normalization == "leading_eig":
+            logger.warning(
+                "`leading_eig` normalization has high memory usage. If you encounter OOM errors try to disable it."
+            )
+            for tgt_name in self.training_targets:
+                lowmem_normalize_leading_eig(
+                    covs[tgt_name][0],
+                    covs[tgt_name][1],
+                    coeffs[tgt_name],
+                    upper=covs[tgt_name][2],
+                )
+        elif self.random_features_normalization is not None:
+            raise NotImplementedError(
+                f"Covariance normalization {self.random_features_normalization} is not implemented."
+            )
+        return covs, coeffs
 
     @torch.no_grad()
     def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
