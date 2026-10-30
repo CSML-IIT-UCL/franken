@@ -1,19 +1,24 @@
 """Small optimizer tests, independent of downloaded backbone checkpoints."""
 
 import json
+import logging
 from pathlib import Path
+import pathlib
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch, DEFAULT
 
 import pytest
 import torch
 
 from franken.autotune.cli import parse_cli
-from franken.config import LESConfig
+from franken.config import GaussianRFConfig, LESConfig, MaceBackboneConfig
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, Configuration, Target
-from franken.trainers.log_utils import DataSplit, LogEntry
+from franken.rf.les_model import LESFrankenPotential
+from franken.rf.model import FrankenPotential
+from franken.trainers.log_utils import DataSplit, LogCollection, LogEntry
 from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
+from tests.utils import mocked_gnn
 
 
 class ToyModel(torch.nn.Module):
@@ -691,3 +696,122 @@ class TestLESTrainingHistory():
             assert trainer.evaluate.call_count == 2
             assert trainer.training_history == []
             assert list(Path(tmp).iterdir()) == []
+
+
+@pytest.fixture
+def log_collection():
+    return LogCollection(logs=[LogEntry.from_dict(log) for log in [{
+        "checkpoint": {"hash": "rand_uuid", "rf_weight_id": 0},
+        "timings": {"cov_coeffs": 1.0, "solve": 1.0},
+        "metrics": {
+            "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
+            "validation": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
+            "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
+        },
+        "hyperparameters": {
+            "franken": {
+                "gnn_backbone_id": "mace_mp/small",
+                "interaction_block": 3,
+                "kernel_type": "gaussian",
+            },
+            "random_features": {
+                "num_random_features": 1024,
+            },
+            "input_scaler": {"scale_by_Z": True, "num_species": 2},
+            "solver": {
+                "l2_penalty": 1e-6,
+                "forces_weight": 0.1,
+                "dtype": "torch.float64",
+            },
+        },
+    },{
+        "checkpoint": {"hash": "rand_uuid2", "rf_weight_id": 1},
+        "timings": {"cov_coeffs": 1.0, "solve": 1.0},
+        "metrics": {
+            "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
+            "validation": {"energy_MAE": 1.0, "forces_MAE": 0.5, "forces_cosim": 1.0},
+            "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
+        },
+        "hyperparameters": {
+            "franken": {
+                "gnn_backbone_id": "mace_mp/small",
+                "interaction_block": 3,
+                "kernel_type": "gaussian",
+            },
+            "random_features": {
+                "num_random_features": 1024,
+            },
+            "input_scaler": {"scale_by_Z": True, "num_species": 2},
+            "solver": {
+                "l2_penalty": 1e-6,
+                "forces_weight": 0.1,
+                "dtype": "torch.float64",
+            },
+        },
+    }]])
+
+
+def test_serialize_best_model(log_collection):
+    with (
+        mocked_gnn("cpu", torch.float32),
+        tempfile.TemporaryDirectory() as temp_dir,
+    ):
+        temp_dir = Path(temp_dir)
+        with open(temp_dir / "training_history.json", "w") as fh:
+            json.dump("test", fh)
+
+        trainer = RandomFeaturesEwaldsTrainer(
+            train_dataloader=None, # type: ignore
+            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+            l2_penalty=[1e-6],
+            target_weight={},
+            random_features_normalization=None,
+            log_dir=temp_dir,
+            save_every_model=False,
+            device="cpu",
+            dtype=torch.float32,
+            optimizer="adam",
+            mode="alternating",
+            num_cycles=1,
+            epochs_per_cycle=1,
+            batch_size=1,
+            learning_rate=1,
+            lr_decay=1,
+            lbfgs_history_size=1,
+            lbfgs_learning_rate=1,
+            lbfgs_max_iter=1,
+            lbfgs_tolerance_change=1,
+            lbfgs_tolerance_grad=1
+        )
+        model = LESFrankenPotential(
+            gnn_config=MaceBackboneConfig("test"),
+            rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0),
+            les_config=LESConfig(),
+        ).to("cpu")
+        all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
+        # 1. don't need to save
+        with patch.object(trainer, "has_new_best_model") as trainer_patch:
+            trainer_patch.return_value = (False, log_collection[1])
+            should_save = trainer.serialize_best_model(
+                model=model,
+                all_weights=all_weights,
+                split=DataSplit.VALIDATION,
+                best_model_selection=["energy_MAE", "forces_MAE"],
+            )
+            assert not should_save
+            assert (temp_dir / "training_history.json").exists()
+            assert not (temp_dir / "best_training_history.json").exists()
+        # 2. need to save
+        with patch.object(trainer, "has_new_best_model") as trainer_patch:
+            trainer_patch.return_value = (True, log_collection[1])
+            should_save = trainer.serialize_best_model(
+                model=model,
+                all_weights=all_weights,
+                split=DataSplit.VALIDATION,
+                best_model_selection=["energy_MAE", "forces_MAE"],
+            )
+            assert should_save
+            assert (temp_dir / "training_history.json").exists()
+            assert (temp_dir / "best_training_history.json").exists()
+            with open(temp_dir / "best_training_history.json", "r") as fh:
+                assert fh.readline() == '"test"'

@@ -428,72 +428,74 @@ class TestSerializeBestModel:
         }]])
 
     def test_should_save(self, log_collection, caplog):
-        with patch.object(pathlib.Path, 'exists') as mock_exists:
-            with mocked_gnn("cpu", torch.float32):
-                with patch.multiple("franken.trainers.base", LogCollection=DEFAULT) as p2:
-                    with patch.multiple("torch", load=DEFAULT, save=DEFAULT) as p3:
-                        with patch("builtins.open", mock_open()) as file_open:
-                            trainer = RandomFeaturesTrainer(
-                                train_dataloader=None, # type: ignore
-                                training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
-                                l2_penalty=[1e-6],
-                                target_weight={},
-                                random_features_normalization=None,
-                                log_dir=pathlib.Path("test_dir"),
-                                save_every_model=False,
-                                device="cpu",
-                                dtype=torch.float32
-                            )
-                            model = FrankenPotential(
-                                gnn_config=MaceBackboneConfig("test"),
-                                rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0)
-                            ).to("cpu")
-                            all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
-                            # 1. best_model_file exists but contains same best model as log_collection
-                            mock_exists.return_value = True
-                            p2["LogCollection"].from_json.return_value = log_collection
-                            # log_collection[1] is best model (read will be used to open best_model_file)
-                            file_open.return_value.read.return_value = json.dumps(log_collection[1].to_dict())
-                            with caplog.at_level(logging.DEBUG):
-                                trainer.serialize_best_model(
-                                    model=model,
-                                    all_weights=all_weights,
-                                    split=DataSplit.VALIDATION,
-                                    best_model_selection=["energy_MAE", "forces_MAE"],
-                                )
-                            p3["save"].assert_not_called()
-                            assert caplog.text == ""
-                            # 2. best_model_file exists and does not contain same best model as log_collection
-                            mock_exists.return_value = True
-                            p2["LogCollection"].from_json.return_value = log_collection
-                            # log_collection[0] is not best model (read will be used to open best_model_file)
-                            file_open.return_value.read.return_value = json.dumps(log_collection[0].to_dict())
-                            with caplog.at_level(logging.DEBUG):
-                                trainer.serialize_best_model(
-                                    model=model,
-                                    all_weights=all_weights,
-                                    split=DataSplit.VALIDATION,
-                                    best_model_selection=["energy_MAE", "forces_MAE"],
-                                )
-                            p3["save"].assert_called_once()
-                            assert "Identified new best model" in caplog.text
-                            assert "Saved best model" in caplog.text
-                            assert p3["save"].call_args.args[1] == pathlib.Path("test_dir/best_ckpt.pt")
-                            p3["save"].reset_mock()
-                            # 3. best_model_file does not exist
-                            mock_exists.return_value = False
-                            p2["LogCollection"].from_json.return_value = log_collection
-                            with caplog.at_level(logging.DEBUG):
-                                trainer.serialize_best_model(
-                                    model=model,
-                                    all_weights=all_weights,
-                                    split=DataSplit.VALIDATION,
-                                    best_model_selection=["energy_MAE", "forces_MAE"],
-                                )
-                            p3["save"].assert_called_once()
-                            assert "Identified new best model" in caplog.text
-                            assert "Saved best model" in caplog.text
-                            assert p3["save"].call_args.args[1] == pathlib.Path("test_dir/best_ckpt.pt")
+        with (
+            patch.object(pathlib.Path, 'exists') as mock_exists,
+            mocked_gnn("cpu", torch.float32),
+            patch.multiple("franken.trainers.base", LogCollection=DEFAULT) as p2,
+            patch.multiple("torch", load=DEFAULT, save=DEFAULT) as p3,
+            patch("builtins.open", mock_open()) as file_open,
+        ):
+            trainer = RandomFeaturesTrainer(
+                train_dataloader=None, # type: ignore
+                training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+                l2_penalty=[1e-6],
+                target_weight={},
+                random_features_normalization=None,
+                log_dir=pathlib.Path("test_dir"),
+                save_every_model=False,
+                device="cpu",
+                dtype=torch.float32
+            )
+            model = FrankenPotential(
+                gnn_config=MaceBackboneConfig("test"),
+                rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0)
+            ).to("cpu")
+            all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
+            # 1. best_model_file exists but contains same best model as log_collection
+            mock_exists.return_value = True
+            p2["LogCollection"].from_json.return_value = log_collection
+            # log_collection[1] is best model (read will be used to open best_model_file)
+            file_open.return_value.read.return_value = json.dumps(log_collection[1].to_dict())
+            with caplog.at_level(logging.DEBUG):
+                trainer.serialize_best_model(
+                    model=model,
+                    all_weights=all_weights,
+                    split=DataSplit.VALIDATION,
+                    best_model_selection=["energy_MAE", "forces_MAE"],
+                )
+            p3["save"].assert_not_called()
+            assert caplog.text == ""
+            # 2. best_model_file exists and does not contain same best model as log_collection
+            mock_exists.return_value = True
+            p2["LogCollection"].from_json.return_value = log_collection
+            # log_collection[0] is not best model (read will be used to open best_model_file)
+            file_open.return_value.read.return_value = json.dumps(log_collection[0].to_dict())
+            with caplog.at_level(logging.DEBUG):
+                trainer.serialize_best_model(
+                    model=model,
+                    all_weights=all_weights,
+                    split=DataSplit.VALIDATION,
+                    best_model_selection=["energy_MAE", "forces_MAE"],
+                )
+            p3["save"].assert_called_once()
+            assert "Identified new best model" in caplog.text
+            assert "Saved best model" in caplog.text
+            assert p3["save"].call_args.args[1] == pathlib.Path("test_dir/best_ckpt.pt")
+            p3["save"].reset_mock()
+            # 3. best_model_file does not exist
+            mock_exists.return_value = False
+            p2["LogCollection"].from_json.return_value = log_collection
+            with caplog.at_level(logging.DEBUG):
+                trainer.serialize_best_model(
+                    model=model,
+                    all_weights=all_weights,
+                    split=DataSplit.VALIDATION,
+                    best_model_selection=["energy_MAE", "forces_MAE"],
+                )
+            p3["save"].assert_called_once()
+            assert "Identified new best model" in caplog.text
+            assert "Saved best model" in caplog.text
+            assert p3["save"].call_args.args[1] == pathlib.Path("test_dir/best_ckpt.pt")
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     def test_dtype_correct(self, dtype, log_collection):
