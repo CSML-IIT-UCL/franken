@@ -226,6 +226,7 @@ def compute_dataset_statistics(
     gnn,
     device: torch.device,
 ):
+    gnn = gnn.to(device)
     gnn_features_stats = Statistics()
     pbar = tqdm(
         total=len(dataset),
