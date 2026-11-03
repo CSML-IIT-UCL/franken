@@ -396,6 +396,9 @@ def get_arg_groups():
                     Argument.from_dataclass(
                         MaceBackboneConfig, "interaction_block", "interaction-block"
                     ),
+                    Argument.from_dataclass(
+                        MaceBackboneConfig, "use_cueq", "use-cueq", default=False
+                    ),
                 ],
             ),
             MutuallyExclusiveArgumentGroup(

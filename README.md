@@ -24,24 +24,38 @@ A full documentation including several examples is available: [https://franken.r
 
 ## Install
 
-To install the latest release of `franken`, you can simply do:
+Python 3.11 or newer is required. The default installation includes the MACE
+backbone, so it can run the training example below:
 
 ```bash
 pip install franken
 ```
 
-Several optional dependencies can be specified, to install packages required for certain operations:
- - `cuda` includes packages which speed up training on GPUs (note that `franken` will work on GPUs even without these dependencies thanks to pytorch).
- - `mace` installs the necessary dependencies to use a specific backbone.
- - `docs` and `develop` are only needed if you wish to build the documentation, or work on extending the library.
-
-They can be installed for example by running
+For a uv project:
 
 ```bash
-pip install franken[mace,cuda]
+uv add franken
 ```
 
-For more details read the [relevant documentation page](https://franken.readthedocs.io/topics/installation.html)
+MACE runs on CPUs and CUDA GPUs through PyTorch. Install a platform-specific
+PyTorch build first if you need a particular CUDA version; CuPy is optional.
+The old `franken[mace]` extra remains a compatibility alias.
+
+Optional dependencies include:
+
+- `cueq-cu12` or `cueq-cu13` for cuEquivariance CUDA kernels matching your
+  PyTorch CUDA version. Enable them with `--mace.use-cueq` during training.
+- `pet` for UPET through Metatomic/Metatrain.
+- `docs` and `develop` for documentation and development tools.
+
+For example, with a CUDA 13 PyTorch build:
+
+```bash
+pip install "franken[cueq-cu13]"
+```
+
+See the [installation guide](https://franken.readthedocs.io/topics/intro_installation.html)
+for GPU setup, optional CuPy acceleration, and cuEquivariance requirements.
 
 ## Quickstart
 

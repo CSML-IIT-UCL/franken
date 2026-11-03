@@ -16,7 +16,7 @@ from franken.data.base import TargetType
 from franken.rf.atomic_energies import AtomicEnergiesShift
 from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
-from franken.utils.jac import jacfwd, tune_jacfwd_chunksize
+from franken.utils.jac import jacfwd, jacobian_autograd, tune_jacfwd_chunksize
 
 logger = logging.getLogger("franken")
 
@@ -197,12 +197,21 @@ class FrankenPotential(torch.nn.Module):
             args = [data.atom_pos, displacement, data, weights]
         if (jacfn := self.jac_cache.get(cache_key)) is None:
             func = self._feature_map_aux if fmaps_func else self._energy_aux
-            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=(0, 1))
-            jacfn = jacfwd(
-                func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
-            )
+            if getattr(self.gnn, "use_cueq", False):
+                jacfn = jacobian_autograd(func, argnums=(0, 1), has_aux=True)
+            else:
+                jac_chunk_size = self._get_jacobian_chunk_size(
+                    func, args, argnums=(0, 1)
+                )
+                jacfn = jacfwd(
+                    func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
+                )
             self.jac_cache[cache_key] = jacfn
-        (force_fm, virial_fm), energy_fm = jacfn(*args)
+        old_pos, old_shifts = data.atom_pos, data.shifts
+        try:
+            (force_fm, virial_fm), energy_fm = jacfn(*args)
+        finally:
+            data.atom_pos, data.shifts = old_pos, old_shifts
         stress_fm = virial_to_stress(-virial_fm, data)
         return {
             franken.data.base.FORCES_TARGET_KEY: -force_fm,
@@ -225,10 +234,17 @@ class FrankenPotential(torch.nn.Module):
             args = [data.atom_pos, None, data, weights]
         if (jacfn := self.jac_cache.get(cache_key)) is None:
             func = self._feature_map_aux if fmaps_func else self._energy_aux
-            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
-            jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
+            if getattr(self.gnn, "use_cueq", False):
+                jacfn = jacobian_autograd(func, argnums=0, has_aux=True)
+            else:
+                jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
+                jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
             self.jac_cache[cache_key] = jacfn
-        force_fm, energy_fm = jacfn(*args)
+        old_pos, old_shifts = data.atom_pos, data.shifts
+        try:
+            force_fm, energy_fm = jacfn(*args)
+        finally:
+            data.atom_pos, data.shifts = old_pos, old_shifts
         return {
             franken.data.base.FORCES_TARGET_KEY: -force_fm,
             franken.data.base.ENERGY_TARGET_KEY: energy_fm,

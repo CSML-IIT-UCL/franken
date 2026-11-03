@@ -16,6 +16,79 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 from franken.utils.misc import garbage_collection_cuda, is_cuda_out_of_memory
 
 
+def jacobian_autograd(func, argnums=0, has_aux=False):
+    """Differentiate native kernels without requiring forward AD or functorch.
+
+    For many outputs, reuse a reverse-mode graph to compute Jacobian columns
+    by double backward. For few outputs, compute rows by ordinary backward.
+    This requires differentiable backward kernels, but never patches them.
+    Inputs and the differentiated output must be tensors; aux is a tensor.
+    Results are detached, as needed for fitting fixed random-feature maps.
+    """
+    indices = (argnums,) if isinstance(argnums, int) else tuple(argnums)
+
+    def wrapped(*args):
+        with torch.enable_grad():
+            inputs = tuple(
+                args[index].detach().requires_grad_(True) for index in indices
+            )
+            updated = list(args)
+            for index, value in zip(indices, inputs):
+                updated[index] = value
+            output = func(*updated)
+            aux = None
+            if has_aux:
+                output, aux = output
+                aux = aux.detach()
+            shapes = [output.shape + value.shape for value in inputs]
+            blocks = [output.new_zeros(shape) for shape in shapes]
+            if output.requires_grad:
+                if sum(value.numel() for value in inputs) < output.numel():
+                    cotangent = torch.zeros_like(output, requires_grad=True)
+                    vjp = torch.autograd.grad(
+                        output, inputs, cotangent, create_graph=True, allow_unused=True
+                    )
+                    for block, value, gradient in zip(blocks, inputs, vjp):
+                        if gradient is None:
+                            continue
+                        if not gradient.requires_grad:
+                            raise RuntimeError(
+                                "This kernel does not provide differentiable backward "
+                                "operations. Disable cuEquivariance for this model."
+                            )
+                        columns = block.reshape(output.numel(), value.numel())
+                        for coordinate in range(value.numel()):
+                            column = torch.autograd.grad(
+                                gradient.reshape(-1)[coordinate],
+                                cotangent,
+                                retain_graph=True,
+                                allow_unused=True,
+                            )[0]
+                            if column is None:
+                                raise RuntimeError(
+                                    "This kernel detached its backward inputs. "
+                                    "Disable cuEquivariance for this model."
+                                )
+                            columns[:, coordinate] = column.detach().reshape(-1)
+                else:
+                    for row in range(output.numel()):
+                        gradients = torch.autograd.grad(
+                            output.reshape(-1)[row],
+                            inputs,
+                            retain_graph=row + 1 < output.numel(),
+                            allow_unused=True,
+                        )
+                        for block, gradient in zip(blocks, gradients):
+                            if gradient is not None:
+                                block.reshape(output.numel(), -1)[
+                                    row
+                                ] = gradient.detach().reshape(-1)
+            result = blocks[0] if isinstance(argnums, int) else tuple(blocks)
+        return (result, aux) if has_aux else result
+
+    return wrapped
+
+
 def jacfwd(
     # drop-in replacement of torch.func.jacfwd accepting the chunk_size argument (as with jacrev)
     func: Callable,

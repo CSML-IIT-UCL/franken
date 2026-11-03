@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     import metatomic.torch
 
 
+def _uses_cueq(model: torch.nn.Module) -> bool:
+    return any(
+        type(module).__module__.startswith("cuequivariance_torch.")
+        for module in model.modules()
+    )
+
+
 def undo_script_mace(base: torch.jit.ScriptModule) -> MACE:
     from mace.modules.models import ScaleShiftMACE
     from mace.modules.blocks import (
@@ -194,14 +201,19 @@ class FrankenMACE(torch.nn.Module):
     """
 
     interaction_block: Final[int]
+    invariant_dims: List[int]
 
-    def __init__(self, base_model: MACE, interaction_block, gnn_backbone_id):
+    def __init__(
+        self, base_model: MACE, interaction_block, gnn_backbone_id, use_cueq=False
+    ):
         super().__init__()
         self.gnn_backbone_id = gnn_backbone_id
         self.interaction_block = interaction_block
         # Copy things from base model
         if isinstance(base_model, torch.jit.ScriptModule):
             base_model = undo_script_mace(base_model)
+        # Pre-converted checkpoints also need the autograd derivative path.
+        self.use_cueq = use_cueq or _uses_cueq(base_model)
         self.register_buffer(
             "atomic_numbers",
             torch.as_tensor(base_model.atomic_numbers, dtype=torch.int64),
@@ -217,6 +229,11 @@ class FrankenMACE(torch.nn.Module):
         self.radial_embedding = base_model.radial_embedding
         self.interactions = base_model.interactions[: self.interaction_block]
         self.products = base_model.products[: self.interaction_block]
+        # cuEquivariance's MulIrrep is iterable, while e3nn's is also indexable.
+        self.invariant_dims = []
+        for product in self.products:
+            multiplicity, irrep = next(iter(product.linear.irreps_out))
+            self.invariant_dims.append(int(multiplicity * irrep.dim))
         self.is_mace_v3_14 = Version(mace.__version__) >= Version("0.3.14")  # type: ignore
         self.is_mace_v3_13 = Version(mace.__version__) >= Version("0.3.13")  # type: ignore
 
@@ -227,6 +244,11 @@ class FrankenMACE(torch.nn.Module):
         }
 
     def descriptors(self, data: Configuration) -> torch.Tensor:
+        if self.use_cueq and not data.atom_pos.is_cuda:
+            raise RuntimeError(
+                "The cuEquivariance backend requires CUDA inputs. Move the "
+                "model and data to CUDA, or load it with use_cueq=False."
+            )
         # Process inputs
         edge_index = data.edge_index
         assert edge_index is not None
@@ -331,8 +353,7 @@ class FrankenMACE(torch.nn.Module):
             # as `mul * ir.dim` where `ir.dim == 2 * ir.l  + 1`
             # Note this is equivalent code, which does not support TorchScript.
             # invariant_slices = product.linear.irreps_out.slices()[0]
-            irreps = product.linear.irreps_out
-            invariant_slices = slice(0, irreps[0][0] * (2 * irreps[0][1][0] + 1))
+            invariant_slices = slice(0, self.invariant_dims[i])
             node_feats_list.append(node_feats[..., invariant_slices])
         return torch.cat(node_feats_list, dim=-1)
 
@@ -340,10 +361,7 @@ class FrankenMACE(torch.nn.Module):
         return sum(p.numel() for p in self.parameters())
 
     def feature_dim(self):
-        nfeat = 0
-        for p in self.products:
-            nfeat += p.linear.irreps_out[0][0] * (2 * p.linear.irreps_out[0][1][0] + 1)
-        return nfeat
+        return sum(self.invariant_dims)
 
     def cutoff_radius(self) -> float:
         return self.r_max.item()
@@ -413,13 +431,45 @@ class FrankenMACE(torch.nn.Module):
 
     @staticmethod
     def load_from_checkpoint(
-        trainer_ckpt, gnn_backbone_id: str, interaction_block: int, map_location=None
+        trainer_ckpt,
+        gnn_backbone_id: str,
+        interaction_block: int,
+        map_location=None,
+        use_cueq: bool = False,
     ) -> "FrankenMACE":
         mace = torch_load_maybejit(
             trainer_ckpt, map_location=map_location, weights_only=False
         ).to(dtype=torch.float32)
+        converted = _uses_cueq(mace)
+        use_cueq = use_cueq or converted
+        if use_cueq:
+            if not torch.cuda.is_available():
+                raise RuntimeError("The cuEquivariance backend requires a CUDA GPU.")
+            try:
+                from cuequivariance_torch.primitives.segmented_polynomial import (
+                    HAS_CUE_OPS,
+                )
+            except ImportError as error:
+                raise RuntimeError(
+                    "Install franken[cueq-cu12] or franken[cueq-cu13], matching "
+                    "your PyTorch CUDA build, before enabling --mace.use-cueq."
+                ) from error
+            if not HAS_CUE_OPS:
+                raise RuntimeError(
+                    "cuEquivariance CUDA kernels could not load. Check that the "
+                    "cueq extra matches torch.version.cuda and the NVIDIA driver."
+                )
+            from mace.cli.convert_e3nn_cueq import run as convert_to_cueq
+
+            if isinstance(mace, torch.jit.ScriptModule):
+                mace = undo_script_mace(mace)
+            # Keep convolution unfused: its additional kernels have different
+            # higher-order derivative support. Symmetric contractions are native.
+            if not converted:
+                mace = convert_to_cueq(mace, device="cpu", conv_fusion=False)
         return FrankenMACE(
             base_model=mace,
             gnn_backbone_id=gnn_backbone_id,
             interaction_block=interaction_block,
+            use_cueq=use_cueq,
         )

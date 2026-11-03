@@ -1,0 +1,61 @@
+name: Installation smoke tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python: '3.11'
+            manager: pip
+          - python: '3.13'
+            manager: uv
+    env:
+      FRANKEN_CACHE_DIR: ${{ runner.temp }}/franken-models
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build the package
+        run: |
+          python -m pip install uv
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheels"
+      - name: Install the default wheel with pip
+        if: matrix.manager == 'pip'
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv pip-smoke
+          pip-smoke/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip-smoke/bin/python -m pip install wheels/franken-*.whl
+          pip-smoke/bin/python -m pip check
+      - name: Add the default wheel to a uv project
+        if: matrix.manager == 'uv'
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv init --bare --python '${{ matrix.python }}' uv-smoke
+          cd uv-smoke
+          uv add torch --index pytorch-cpu=https://download.pytorch.org/whl/cpu
+          uv add "$RUNNER_TEMP"/wheels/franken-*.whl
+          uv pip check --python .venv/bin/python
+      - name: Train using only the default installation
+        working-directory: ${{ runner.temp }}
+        run: |
+          if [ '${{ matrix.manager }}' = pip ]; then
+            TRAINER="$RUNNER_TEMP/pip-smoke/bin/franken.autotune"
+          else
+            TRAINER="$RUNNER_TEMP/uv-smoke/.venv/bin/franken.autotune"
+          fi
+          "$TRAINER" --dataset-name test \
+            --backbone mace --mace.path-or-id mace_mp/small \
+            --rf gaussian --gaussian.num-rf 16 --gaussian.length-scale 1 \
+            --force-weight 0.5 --l2-penalty 0.0001 \
+            --jac-chunk-size 2 --run-dir "$RUNNER_TEMP/training"
+          test -n "$(find "$RUNNER_TEMP/training" -name best_ckpt.pt -print -quit)"
