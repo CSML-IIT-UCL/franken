@@ -103,6 +103,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.training_history: list[dict] = []
         self._les_optimizer = None
         self.fmaps: dict[TargetType, list[Tensor]] = {}
+        self._train_dataset_indices: list[int] = []
         self._shuffle_rng = torch.Generator().manual_seed(seed)
 
     def create_log_entry(self, model):
@@ -272,8 +273,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     def _backward_batch(self, model, indices, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
-        for index in indices:
-            data, targets = self.train_dataloader.dataset[index]
+        for fmap_index in indices:
+            dataset_index = self._train_dataset_indices[fmap_index]
+            data, targets = self.train_dataloader.dataset[dataset_index]
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
             if data.natoms.numel() != 1:
@@ -289,7 +291,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 # which can spoil a projected line search through cancellation.
                 fmaps = (
                     {
-                        target: self.fmaps[target][index]
+                        target: self.fmaps[target][fmap_index]
                         for target in self.training_targets
                     }
                     if self.fmaps
@@ -337,8 +339,15 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         normalization: dict[TargetType, Tensor] | None,
         proj_mat: Tensor | None = None,
     ):
-        n_samples = len(self.train_dataloader.dataset)  # type: ignore
-        if n_samples == 0:
+        local_n_samples = len(self._train_dataset_indices)
+        indices = list(range(local_n_samples))
+
+        for target in self.training_targets:
+            assert len(self.fmaps[target]) == local_n_samples, (
+                f"Inconsistent fmap length for {target}: "
+                f"{len(self.fmaps[target])} != {local_n_samples}"
+            )
+        if local_n_samples == 0:
             raise ValueError("LES requires a nonempty training dataset")
 
         params = list(model.les.parameters())
@@ -358,14 +367,14 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 optim = self._les_optimizer
                 for group in optim.param_groups:
                     group["lr"] = lr
-                batch_size = self.batch_size or n_samples
+                batch_size = self.batch_size or local_n_samples
                 for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
                     indices = (
-                        torch.randperm(n_samples, generator=self._shuffle_rng).tolist()
-                        if batch_size < n_samples
-                        else list(range(n_samples))
+                        torch.randperm(local_n_samples, generator=self._shuffle_rng).tolist()
+                        if batch_size < local_n_samples
+                        else list(range(local_n_samples))
                     )
-                    for start in range(0, n_samples, batch_size):
+                    for start in range(0, local_n_samples, batch_size):
                         optim.zero_grad(set_to_none=True)
                         self._backward_batch(
                             model, indices[start : start + batch_size], normalization
@@ -382,7 +391,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     tolerance_change=self.lbfgs_tolerance_change,
                     line_search_fn="strong_wolfe",
                 )
-                indices = list(range(n_samples))
+                indices = list(range(local_n_samples))
 
                 def closure():
                     if self.mode == "variable_projection":
@@ -397,7 +406,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         loss = loss + (
                             self.l2_penalty
                             * model.rf.weights.detach().square().sum()
-                            / n_samples
+                            / local_n_samples
                         )
                     return loss
 
@@ -462,10 +471,17 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self._shuffle_rng = torch.Generator().manual_seed(self.seed)
         self.on_fit_start(model)
 
+        self._train_dataset_indices = list(self.train_dataloader.sampler)
         covs, coeffs, normalization, proj_mat = None, None, None, None
         if self.mode != "joint":  # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
+            if self.fmaps and len(self._train_dataset_indices) != len(
+                self.fmaps[self.training_targets[0]]
+            ):
+                raise RuntimeError(
+                    "Training sampler indices and cached feature maps have different lengths"
+                )
             covs, coeffs, normalization = self._calc_cov_normalization(covs, coeffs)
             proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
@@ -507,70 +523,75 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         all_weights: torch.Tensor | None,
     ) -> LogCollection:
         self.patch_e3nn()
+        was_training = model.training
         model.eval()
         model.gnn.franken_val()
-        assert isinstance(dataloader.dataset, FrankenAtomsDataset)
-        tot_dset_size = len(dataloader.dataset)
-        metric_objects: list[BaseMetric] = self.get_metrics()
-        split_name = dataloader.dataset.split
+
         try:
-            split = DataSplit[split_name.upper()]
-        except KeyError:
-            logger.warning(f"Unrecognized split '{split_name}' in dataloader")
-            split = DataSplit.UNDEFINED
+            assert isinstance(dataloader.dataset, FrankenAtomsDataset)
+            tot_dset_size = len(dataloader.dataset)
+            metric_objects: list[BaseMetric] = self.get_metrics()
+            split_name = dataloader.dataset.split
+            try:
+                split = DataSplit[split_name.upper()]
+            except KeyError:
+                logger.warning(f"Unrecognized split '{split_name}' in dataloader")
+                split = DataSplit.UNDEFINED
 
-        progress_bar = throughput(
-            dataloader,
-            desc=f"{split.name.lower()} evaluation",
-            total=tot_dset_size,
-            device=self.device,
-        )
-        for i, (data, targets) in enumerate(progress_bar):
-            data = data.to(device=self.device)
-            targets = targets.to(device=self.device)
-            if all_weights is None or all_weights.shape[0] <= 100:
-                forces_mode = "torch.autograd"
-            else:
-                forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
-            predictions = model.predict(
-                targets=self.training_targets,  # type: ignore
-                data=data,
-                weights=all_weights,
-                differential_mode=forces_mode,
-                add_energy_shift=(False if split == DataSplit.TRAIN else True),
+            progress_bar = throughput(
+                dataloader,
+                desc=f"{split.name.lower()} evaluation",
+                total=tot_dset_size,
+                device=self.device,
             )
-            for tt, val in predictions.items():
-                if torch.any(torch.isnan(val)):
-                    logger.warning(
-                        f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
-                    )
-            for metric in metric_objects:
-                metric.update(Target.from_types(predictions), targets, data)  # type: ignore
-
-        num_models = (
-            all_weights.shape[0]
-            if all_weights is not None
-            else model.rf.weights.shape[0]
-        )
-
-        # list with one element for each model trained
-        for metric in metric_objects:
-            metric_values = metric.compute()
-            for metric_name, metric_value in metric_values:
-                assert metric_value.shape == (
-                    num_models,
-                ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
-                for model_idx in range(metric_value.shape[0]):
-                    log_entry = log_collection[model_idx]
-                    try:
-                        log_entry.add_metric(
-                            name=metric_name,
-                            value=metric_value[model_idx].item(),
-                            split=split,
+            for i, (data, targets) in enumerate(progress_bar):
+                data = data.to(device=self.device)
+                targets = targets.to(device=self.device)
+                if all_weights is None or all_weights.shape[0] <= 100:
+                    forces_mode = "torch.autograd"
+                else:
+                    forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
+                predictions = model.predict(
+                    targets=self.training_targets,  # type: ignore
+                    data=data,
+                    weights=all_weights,
+                    differential_mode=forces_mode,
+                    add_energy_shift=(False if split == DataSplit.TRAIN else True),
+                )
+                for tt, val in predictions.items():
+                    if torch.any(torch.isnan(val)):
+                        logger.warning(
+                            f"Configuration {i} - {split_name} has NaNs in {tt} predictions"
                         )
-                    except ValueError as e:
-                        logger.warning(f"Could not add metric: {str(e)}")
-        return log_collection
+                for metric in metric_objects:
+                    metric.update(Target.from_types(predictions), targets, data)  # type: ignore
+
+            num_models = (
+                all_weights.shape[0]
+                if all_weights is not None
+                else model.rf.weights.shape[0]
+            )
+
+            # list with one element for each model trained
+            for metric in metric_objects:
+                metric_values = metric.compute()
+                for metric_name, metric_value in metric_values:
+                    assert metric_value.shape == (
+                        num_models,
+                    ), f"Incorrect metric shape: {metric_value.shape=}, {num_models=}"
+                    for model_idx in range(metric_value.shape[0]):
+                        log_entry = log_collection[model_idx]
+                        try:
+                            log_entry.add_metric(
+                                name=metric_name,
+                                value=metric_value[model_idx].item(),
+                                split=split,
+                            )
+                        except ValueError as e:
+                            logger.warning(f"Could not add metric: {str(e)}")
+            return log_collection
+        finally:
+            model.train(was_training)
 
     @no_jit()
     @torch.no_grad()
@@ -580,7 +601,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dataloader: torch.utils.data.DataLoader,
         normalization: dict[TargetType, Tensor] | None,
     ):
-        n_samples = len(dataloader.dataset)  # type: ignore
+        #n_samples = len(dataloader.dataset)  # type: ignore
+        local_n_samples = len(self._train_dataset_indices)
         n_rf = model.rf.total_random_features
 
         coeffs = {
@@ -588,7 +610,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             for t in self.training_targets
         }
         progress_bar = throughput(
-            dataloader, "coeffs", total=n_samples, device=self.device
+            dataloader, "coeffs", total=local_n_samples, device=self.device
         )
         for i, (data, targets) in enumerate(progress_bar):
             assert isinstance(data, Configuration)
