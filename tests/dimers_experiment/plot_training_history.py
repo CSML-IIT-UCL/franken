@@ -11,7 +11,9 @@ def plot_training_history(path):
 
     RFF and LES steps are shown separately.
     """
-    json_file = path / "training_history.json"
+    json_file = path / "best_training_history.json"
+    if not json_file.exists():
+        json_file = path / "training_history.json"
     with open(json_file, "r") as f:
         history = json.load(f)
 
