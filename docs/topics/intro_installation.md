@@ -79,34 +79,54 @@ within MACE's supported dependency ranges. Native wheel availability and an
 appropriate NVIDIA driver are required. Choose one CUDA extra matching
 PyTorch; installing a CUDA extra does not replace a CPU-only PyTorch build.
 
-Enable the backend explicitly in a MACE training command:
+Training always uses the standard e3nn backend and its forward-mode feature
+derivatives. There is no cuEquivariance training flag. To accelerate a fitted
+MACE model during ASE inference:
 
-```bash
-franken.autotune \
-    --train-path train.xyz --val-path val.xyz \
-    --backbone mace --mace.path-or-id mace_mp/small --mace.use-cueq \
-    --rf gaussian --gaussian.num-rf 4096 --gaussian.length-scale 1 \
-    --force-weight 0.99 --l2-penalty 0.0001
+```python
+from franken.calculators import FrankenCalculator
+
+calc = FrankenCalculator(
+    "path/to/run/best_ckpt.pt", device="cuda", use_cueq=True
+)
+atoms.calc = calc
+energy = atoms.get_potential_energy()
+forces = atoms.get_forces()
 ```
 
-The Python equivalent is `MaceBackboneConfig("mace_mp/small", use_cueq=True)`.
-The saved Franken checkpoint retains this choice, so reloading it requires the
-same optional dependencies and a CUDA GPU. Leave `use_cueq` at its default of
-`False` for a model that can also run on CPUs.
+For direct model use:
 
-Native cuEquivariance kernels do not supply the forward-mode derivatives used
-by Franken's usual feature-map calculation. For this backend, Franken computes
-those derivatives with ordinary autograd, using double backward when there
-are many features. It does not modify upstream kernels or silently accept zero
-forward tangents. Convolution fusion stays disabled; native symmetric
-contractions are enabled. The first GPU evaluation may compile kernels and take several seconds.
-This path can be slower than the default backend,
-so benchmark your training workload before enabling it. `--jac-chunk-size`
-controls the default forward-mode backend, rather than this autograd path.
+```python
+from franken.rf.model import FrankenPotential
 
-A missing or incompatible native extension raises an error when this backend
-is requested. If you do not need cuEquivariance, omit the flag and use the
-standard MACE backend.
+model = FrankenPotential.load(
+    "path/to/run/best_ckpt.pt", map_location="cuda", use_cueq=True
+)
+# Or, for an existing fitted model:
+model.enable_cueq()
+```
+
+Conversion replaces the frozen backbone and preserves the fitted random-feature
+coefficients, input scaler and energy shifts. It uses the original registered
+backbone checkpoint and unmodified upstream MACE conversion. Standard reverse
+autograd computes inference forces and stress; no full training Jacobian or
+double-backward fallback is needed. Convolution fusion stays disabled; native
+symmetric contractions are enabled.
+
+A model saved after conversion records the inference backend. Pass
+`use_cueq=False` when loading to select e3nn again, or call
+`model.enable_cueq(False)` before fitting further. The same override is available
+in `FrankenCalculator`. With no override, the saved choice is preserved.
+`MaceBackboneConfig(..., use_cueq=True)` also selects an inference-only backbone;
+training and training feature-map requests reject it explicitly.
+
+The first GPU evaluation may compile kernels and take several seconds. Benchmark
+your inference workload before enabling acceleration. A missing or incompatible
+native extension raises an error rather than silently falling back. The supported
+cuEquivariance 0.10 wheels have no native kernels for Volta/V100 GPUs; use the
+e3nn backend on those devices. The default e3nn backend supports both CPU and GPU
+inference. Automatic backend selection is supported for eager Franken checkpoints,
+not existing TorchScript archives.
 
 ## Additional backbones and interfaces
 

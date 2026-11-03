@@ -2,11 +2,12 @@
 
 import logging
 import os
+from dataclasses import replace
 from typing import Callable, List, Literal, Mapping, Optional, Union, cast
 
 import torch
 
-from franken.config import BackboneConfig, RFConfig
+from franken.config import BackboneConfig, MaceBackboneConfig, RFConfig
 from franken.backbones.utils import load_checkpoint
 from franken.data import Configuration
 
@@ -16,7 +17,7 @@ from franken.data.base import TargetType
 from franken.rf.atomic_energies import AtomicEnergiesShift
 from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
-from franken.utils.jac import jacfwd, jacobian_autograd, tune_jacfwd_chunksize
+from franken.utils.jac import jacfwd, tune_jacfwd_chunksize
 
 logger = logging.getLogger("franken")
 
@@ -139,11 +140,20 @@ class FrankenPotential(torch.nn.Module):
         map_location=None,
         rf_weight_id: int | None = None,
         backbone_path_or_id: str | None = None,
+        use_cueq: bool | None = None,
     ):
         ckpt = torch.load(path, map_location=map_location, weights_only=False)
 
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
+        if use_cueq is not None:
+            if not isinstance(gnn_cfg, MaceBackboneConfig):
+                if use_cueq:
+                    raise ValueError(
+                        "cuEquivariance inference is only supported for MACE."
+                    )
+            else:
+                gnn_cfg.use_cueq = use_cueq
         if backbone_path_or_id is not None:
             logger.warning(
                 f"The backbone path/id changed from {gnn_cfg.path_or_id} to {backbone_path_or_id}. If this refers to a different backbone, unexpected results may occur."
@@ -177,6 +187,33 @@ class FrankenPotential(torch.nn.Module):
             return model
 
     @torch.jit.unused
+    def enable_cueq(self, enabled: bool = True):
+        """Select a MACE inference backend without changing the fitted RF head.
+
+        Rebuilds the frozen backbone from its original checkpoint. Training
+        feature maps require the e3nn backend; use ``enabled=False`` to return
+        to it. A CUDA GPU and matching native kernels are required to enable.
+        """
+        if not isinstance(self.gnn_config, MaceBackboneConfig):
+            raise ValueError("cuEquivariance inference is only supported for MACE.")
+        if getattr(self.gnn, "use_cueq", False) == enabled:
+            return self
+        config = replace(self.gnn_config, use_cueq=enabled)
+        backbone_tensor = next(self.gnn.parameters())
+        backbone = load_checkpoint(config).to(
+            device=backbone_tensor.device, dtype=backbone_tensor.dtype
+        )
+        if getattr(backbone, "use_cueq", False) != enabled:
+            raise ValueError(
+                "Use the original e3nn backbone checkpoint to disable cuEquivariance."
+            )
+        backbone.train(self.gnn.training)
+        self.gnn = backbone
+        self.gnn_config = config
+        self.jac_cache.clear()
+        return self
+
+    @torch.jit.unused
     @torch.no_grad
     def _compute_forces_stresses(
         self,
@@ -197,15 +234,10 @@ class FrankenPotential(torch.nn.Module):
             args = [data.atom_pos, displacement, data, weights]
         if (jacfn := self.jac_cache.get(cache_key)) is None:
             func = self._feature_map_aux if fmaps_func else self._energy_aux
-            if getattr(self.gnn, "use_cueq", False):
-                jacfn = jacobian_autograd(func, argnums=(0, 1), has_aux=True)
-            else:
-                jac_chunk_size = self._get_jacobian_chunk_size(
-                    func, args, argnums=(0, 1)
-                )
-                jacfn = jacfwd(
-                    func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
-                )
+            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=(0, 1))
+            jacfn = jacfwd(
+                func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
+            )
             self.jac_cache[cache_key] = jacfn
         old_pos, old_shifts = data.atom_pos, data.shifts
         try:
@@ -234,11 +266,8 @@ class FrankenPotential(torch.nn.Module):
             args = [data.atom_pos, None, data, weights]
         if (jacfn := self.jac_cache.get(cache_key)) is None:
             func = self._feature_map_aux if fmaps_func else self._energy_aux
-            if getattr(self.gnn, "use_cueq", False):
-                jacfn = jacobian_autograd(func, argnums=0, has_aux=True)
-            else:
-                jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
-                jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
+            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
+            jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
             self.jac_cache[cache_key] = jacfn
         old_pos, old_shifts = data.atom_pos, data.shifts
         try:
@@ -387,6 +416,11 @@ class FrankenPotential(torch.nn.Module):
             All feature maps have a first dimension of size `num_random_features`
             followed by the dimensions of the respective feature map.
         """
+        if getattr(self.gnn, "use_cueq", False):
+            raise ValueError(
+                "cuEquivariance is inference-only. Load with use_cueq=False "
+                "or call enable_cueq(False) before computing training feature maps."
+            )
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         out: dict[TargetType, torch.Tensor]
@@ -445,6 +479,10 @@ class FrankenPotential(torch.nn.Module):
         targets: list[str],
         mode: str,
     ) -> dict[str, torch.Tensor]:
+        if getattr(self.gnn, "use_cueq", False) and mode == "torch.func":
+            # Native kernels support reverse autograd, but not forward AD.
+            # Multiple inference heads can use ordinary backward one at a time.
+            mode = "torch.autograd"
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
         if compute_stress or (compute_force and compute_stress):

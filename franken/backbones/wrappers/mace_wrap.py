@@ -445,6 +445,11 @@ class FrankenMACE(torch.nn.Module):
         if use_cueq:
             if not torch.cuda.is_available():
                 raise RuntimeError("The cuEquivariance backend requires a CUDA GPU.")
+            if torch.cuda.get_device_capability() == (7, 0):
+                raise RuntimeError(
+                    "The supported cuEquivariance 0.10 native wheels do not "
+                    "provide kernels for Volta/V100 GPUs. Use the e3nn backend."
+                )
             try:
                 from cuequivariance_torch.primitives.segmented_polynomial import (
                     HAS_CUE_OPS,
@@ -452,7 +457,8 @@ class FrankenMACE(torch.nn.Module):
             except ImportError as error:
                 raise RuntimeError(
                     "Install franken[cueq-cu12] or franken[cueq-cu13], matching "
-                    "your PyTorch CUDA build, before enabling --mace.use-cueq."
+                    "your PyTorch CUDA build, before selecting use_cueq=True "
+                    "for inference."
                 ) from error
             if not HAS_CUE_OPS:
                 raise RuntimeError(
@@ -463,8 +469,8 @@ class FrankenMACE(torch.nn.Module):
 
             if isinstance(mace, torch.jit.ScriptModule):
                 mace = undo_script_mace(mace)
-            # Keep convolution unfused: its additional kernels have different
-            # higher-order derivative support. Symmetric contractions are native.
+            # Keep the descriptor wrapper's unfused interaction layout.
+            # Symmetric contractions still execute native CUDA kernels.
             if not converted:
                 mace = convert_to_cueq(mace, device="cpu", conv_fusion=False)
         return FrankenMACE(

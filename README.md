@@ -44,7 +44,8 @@ The old `franken[mace]` extra remains a compatibility alias.
 Optional dependencies include:
 
 - `cueq-cu12` or `cueq-cu13` for cuEquivariance CUDA kernels matching your
-  PyTorch CUDA version. Enable them with `--mace.use-cueq` during training.
+  PyTorch CUDA version. Enable inference with
+  `FrankenCalculator(..., use_cueq=True)`; training always uses e3nn.
 - `pet` for UPET through Metatomic/Metatrain.
 - `docs` and `develop` for documentation and development tools.
 

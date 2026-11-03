@@ -222,7 +222,7 @@ class MaceBackboneConfig(BackboneConfig):
     interaction_block: int = 2
     """GNN layer out of which the features are extracted."""
     use_cueq: bool = False
-    """Use native cuEquivariance CUDA kernels and autograd feature derivatives."""
+    """Use native cuEquivariance CUDA kernels for inference only."""
 
 
 @dataclass(slots=True)

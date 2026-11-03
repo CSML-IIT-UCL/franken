@@ -34,6 +34,7 @@ class FrankenCalculator(Calculator):
         rf_weight_id: int | None = None,
         gnn_config: BackboneConfig | None = None,
         dtype: torch.dtype | str | None = None,
+        use_cueq: bool | None = None,
         **calc_kwargs,
     ):
         """Initialize FrankenCalculator class from a franken model.
@@ -52,6 +53,9 @@ class FrankenCalculator(Calculator):
             dtype : Inference precision, either ``"float32"|torch.float32`` or ``"float64"|torch.float64``.
                 ``None`` preserves the model's precision and uses the backbone's
                 precision for inputs.
+            use_cueq : Enable or disable cuEquivariance for an eager MACE model.
+                ``None`` preserves the choice saved in the checkpoint. Training
+                remains on e3nn; this option changes only the frozen inference backbone.
         """
         if isinstance(dtype, str):
             dtype = {"float32": torch.float32, "float64": torch.float64}.get(
@@ -78,7 +82,15 @@ class FrankenCalculator(Calculator):
                     franken_ckpt,
                     map_location=device,
                     rf_weight_id=rf_weight_id,
+                    use_cueq=use_cueq,
                 )
+        if use_cueq is not None:
+            if not isinstance(self.franken, FrankenPotential):
+                raise ValueError(
+                    "Selecting cuEquivariance requires an eager FrankenPotential "
+                    "checkpoint, rather than a TorchScript archive."
+                )
+            self.franken.enable_cueq(use_cueq)
         # convert franken model to the requested dtype if specified.
         if dtype is not None:
             self.franken = self.franken.to(dtype=dtype)
