@@ -32,6 +32,19 @@ def gen_efmap_vals(num_feat, num_configs, num_atoms, device, dtype, targets):
     return out
 
 
+def make_dloader_from_dset(dataset):
+    def iterator(*args, **kwargs):
+        for x in dataset:
+            yield x
+    dloader = MagicMock()
+    dloader.__len__ = MagicMock(return_value=len(dataset))
+    dloader.__iter__ = iterator
+    dloader.dataset = dataset
+    dloader.dataset.__len__ = MagicMock(return_value=len(dataset))
+    dloader.dataset.split = "train"
+    return dloader
+
+
 def gen_data(num_configs, num_atoms, dtype, split="train", gen_stress=True):
     data = [
         (
@@ -51,15 +64,7 @@ def gen_data(num_configs, num_atoms, dtype, split="train", gen_stress=True):
         )
         for _ in range(num_configs)
     ]
-    def iterator(*args, **kwargs):
-        for x in data:
-            yield x
-    dl_mock = MagicMock()
-    dl_mock.__len__ = MagicMock(return_value=num_configs)
-    dl_mock.__iter__ = iterator
-    dl_mock.dataset.__len__ = MagicMock(return_value=num_configs)
-    dl_mock.dataset.split = split
-    return dl_mock
+    return make_dloader_from_dset(data)
 
 
 def init_mock_model(efmaps, device, dtype):
@@ -375,58 +380,6 @@ class TestTrainer:
 
 
 class TestSerializeBestModel:
-    @pytest.fixture
-    def log_collection(self):
-        return LogCollection(logs=[LogEntry.from_dict(log) for log in [{
-            "checkpoint": {"hash": "rand_uuid", "rf_weight_id": 0},
-            "timings": {"cov_coeffs": 1.0, "solve": 1.0},
-            "metrics": {
-                "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-                "validation": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-                "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-            },
-            "hyperparameters": {
-                "franken": {
-                    "gnn_backbone_id": "mace_mp/small",
-                    "interaction_block": 3,
-                    "kernel_type": "gaussian",
-                },
-                "random_features": {
-                    "num_random_features": 1024,
-                },
-                "input_scaler": {"scale_by_Z": True, "num_species": 2},
-                "solver": {
-                    "l2_penalty": 1e-6,
-                    "forces_weight": 0.1,
-                    "dtype": "torch.float64",
-                },
-            },
-        },{
-            "checkpoint": {"hash": "rand_uuid2", "rf_weight_id": 1},
-            "timings": {"cov_coeffs": 1.0, "solve": 1.0},
-            "metrics": {
-                "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-                "validation": {"energy_MAE": 1.0, "forces_MAE": 0.5, "forces_cosim": 1.0},
-                "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-            },
-            "hyperparameters": {
-                "franken": {
-                    "gnn_backbone_id": "mace_mp/small",
-                    "interaction_block": 3,
-                    "kernel_type": "gaussian",
-                },
-                "random_features": {
-                    "num_random_features": 1024,
-                },
-                "input_scaler": {"scale_by_Z": True, "num_species": 2},
-                "solver": {
-                    "l2_penalty": 1e-6,
-                    "forces_weight": 0.1,
-                    "dtype": "torch.float64",
-                },
-            },
-        }]])
-
     def test_should_save(self, log_collection, caplog):
         with (
             patch.object(pathlib.Path, 'exists') as mock_exists,
