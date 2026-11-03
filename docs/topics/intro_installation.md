@@ -110,8 +110,8 @@ Conversion replaces the frozen backbone and preserves the fitted random-feature
 coefficients, input scaler and energy shifts. It uses the original registered
 backbone checkpoint and unmodified upstream MACE conversion. Standard reverse
 autograd computes inference forces and stress; no full training Jacobian or
-double-backward fallback is needed. Convolution fusion stays disabled; native
-symmetric contractions are enabled.
+double-backward fallback is needed. Upstream convolution fusion and native
+symmetric contractions are enabled for CUDA inference.
 
 A model saved after conversion records the inference backend. Pass
 `use_cueq=False` when loading to select e3nn again, or call

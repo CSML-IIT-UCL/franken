@@ -469,10 +469,11 @@ class FrankenMACE(torch.nn.Module):
 
             if isinstance(mace, torch.jit.ScriptModule):
                 mace = undo_script_mace(mace)
-            # Keep the descriptor wrapper's unfused interaction layout.
-            # Symmetric contractions still execute native CUDA kernels.
+            # Inference needs only ordinary backward, so use upstream's native
+            # convolution fusion as well as symmetric contractions.
             if not converted:
-                mace = convert_to_cueq(mace, device="cpu", conv_fusion=False)
+                mace = convert_to_cueq(mace, device="cuda", conv_fusion=True)
+                mace = mace.to(device=map_location or "cpu")
         return FrankenMACE(
             base_model=mace,
             gnn_backbone_id=gnn_backbone_id,

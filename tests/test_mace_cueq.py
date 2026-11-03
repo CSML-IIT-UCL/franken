@@ -45,14 +45,14 @@ def test_fitted_model_cueq_inference_and_reload(model_id, tmp_path):
         num_species=1,
         jac_chunk_size=2,
     ).cuda()
-    with torch.no_grad():
-        classic.rf.weights.copy_(
-            torch.linspace(-0.4, 0.7, 32, device="cuda").reshape(1, -1)
-        )
+    classic.rf.weights = torch.linspace(
+        -0.4, 0.7, 32, device="cuda", dtype=torch.float64
+    ).reshape(1, -1)
     checkpoint = tmp_path / "fitted.pt"
     classic.save(checkpoint)
     native = FrankenPotential.load(checkpoint, map_location="cuda", use_cueq=True)
     assert native.gnn.use_cueq and native.gnn_config.use_cueq
+    assert native.rf.weights.dtype == torch.float64
     systems = [molecule("H2O"), bulk("Si", "diamond", a=5.43)]
     systems[0].set_cell(np.eye(3) * 12)
     for atoms in systems:
@@ -153,3 +153,28 @@ def test_training_cli_has_no_cueq_flag():
     assert parse_cli(args).backbone.use_cueq is False
     with pytest.raises(SystemExit):
         parse_cli(args + ["--mace.use-cueq"])
+
+
+def test_inference_checkpoint_can_override_to_cpu_without_cuda(tmp_path, monkeypatch):
+    classic = FrankenPotential(
+        MaceBackboneConfig("mace_mp/small"),
+        rf_config=GaussianRFConfig(
+            num_random_features=16, length_scale=2.0, rng_seed=17
+        ),
+        scale_by_Z=False,
+        num_species=1,
+    )
+    filename = tmp_path / "inference.pt"
+    classic.save(filename)
+    state = torch.load(filename, map_location="cpu", weights_only=False)
+    # The saved head is backend-independent; the inference choice is metadata.
+    state["gnn"]["config"]["use_cueq"] = True
+    torch.save(state, filename)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(RuntimeError, match="requires a CUDA GPU"):
+        FrankenPotential.load(filename, map_location="cpu")
+    portable = FrankenPotential.load(filename, map_location="cpu", use_cueq=False)
+    assert not portable.gnn.use_cueq
+    assert portable.rf.weights.device.type == "cpu"
+    for key, value in classic.rf.state_dict().items():
+        torch.testing.assert_close(portable.rf.state_dict()[key], value)
