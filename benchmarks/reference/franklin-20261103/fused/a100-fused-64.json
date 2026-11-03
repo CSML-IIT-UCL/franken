@@ -1,0 +1,425 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-03T22:05:01.476065+00:00",
+  "arguments": {
+    "backends": [
+      "e3nn",
+      "cueq"
+    ],
+    "source_revision": "94b71f0c1ed02653a1aa89bf1bbdea63012a6686",
+    "inference_only_cueq": false,
+    "models": [
+      "mace_mp/medium"
+    ],
+    "repeats": [
+      2
+    ],
+    "features": [
+      4096
+    ],
+    "train_frames": 4,
+    "trials": 3,
+    "inference_calls": 10,
+    "warmup": 2,
+    "threads": 2,
+    "jac_chunk_size": 4,
+    "seed": 1729,
+    "stress": false,
+    "label": "a100-fused-64",
+    "output": "/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/results/a100-fused-64.json"
+  },
+  "script_sha256": "60c547035f7007656d23690826afd7161e8073c25f6c14e0ff95c54598491806",
+  "source_revision": "94b71f0c1ed02653a1aa89bf1bbdea63012a6686",
+  "checkpoints": {
+    "mace_mp/medium": {
+      "filename": "2023-12-03-mace-128-L1_epoch-199.model",
+      "sha256": "01bfe22100139f424713cf921144e5509cbe353d67aa9fa1be9c6e1e0ed35845"
+    }
+  },
+  "cases": [
+    {
+      "model": "mace_mp/medium",
+      "repeat": 2,
+      "atoms": 64,
+      "features": 4096,
+      "train_frames": 4,
+      "targets": [
+        "energy",
+        "forces"
+      ],
+      "setup_seconds": {
+        "e3nn": 0.27905162796378136,
+        "cueq_checkpoint_load_and_conversion": 4.992689730599523,
+        "e3nn_ase_calculator": 0.18859535455703735,
+        "cueq_ase_calculator": 0.48137589544057846
+      },
+      "training_backend": "e3nn",
+      "phases": {
+        "training_feature_maps": {
+          "backends": {
+            "e3nn": {
+              "samples_seconds": [
+                2.2503389082849026,
+                2.2561780028045177,
+                2.2321777287870646
+              ],
+              "median_seconds": 2.2503389082849026,
+              "min_seconds": 2.2321777287870646,
+              "max_seconds": 2.2561780028045177,
+              "mean_seconds": 2.246231546625495,
+              "stdev_seconds": 0.012516233581996161,
+              "first_observed_seconds": 2.8445666190236807,
+              "memory": {
+                "baseline_allocated_bytes": 30761984,
+                "peak_allocated_bytes": 758406656,
+                "transient_peak_bytes": 721361920
+              },
+              "configurations_per_second": 0.4443775096801533,
+              "atoms_per_second": 28.440160619529813
+            }
+          },
+          "e3nn_over_cueq": null,
+          "paired_order": [
+            [
+              "e3nn"
+            ],
+            [
+              "e3nn"
+            ],
+            [
+              "e3nn"
+            ]
+          ],
+          "calls_per_timed_sample": 1
+        },
+        "fit": {
+          "backends": {
+            "e3nn": {
+              "samples_seconds": [
+                9.10439883545041,
+                9.122348453849554,
+                9.122898111119866
+              ],
+              "median_seconds": 9.122348453849554,
+              "min_seconds": 9.10439883545041,
+              "max_seconds": 9.122898111119866,
+              "mean_seconds": 9.116548466806611,
+              "stdev_seconds": 0.010525478010397575,
+              "first_observed_seconds": 9.382447866722941,
+              "memory": {
+                "baseline_allocated_bytes": 35368448,
+                "peak_allocated_bytes": 1031047168,
+                "transient_peak_bytes": 995613184
+              },
+              "configurations_per_second": 0.43848357911739644,
+              "atoms_per_second": 28.062949063513372
+            }
+          },
+          "e3nn_over_cueq": null,
+          "paired_order": [
+            [
+              "e3nn"
+            ],
+            [
+              "e3nn"
+            ],
+            [
+              "e3nn"
+            ]
+          ],
+          "calls_per_timed_sample": 1
+        },
+        "energy": {
+          "backends": {
+            "cueq": {
+              "samples_seconds": [
+                0.012153679691255092,
+                0.012967849895358086,
+                0.012086633406579495
+              ],
+              "median_seconds": 0.012153679691255092,
+              "min_seconds": 0.012086633406579495,
+              "max_seconds": 0.012967849895358086,
+              "mean_seconds": 0.012402720997730892,
+              "stdev_seconds": 0.0004905627424419806,
+              "first_observed_seconds": 10.154482426121831,
+              "memory": {
+                "baseline_allocated_bytes": 58551296,
+                "peak_allocated_bytes": 77035008,
+                "transient_peak_bytes": 18482688
+              },
+              "configurations_per_second": 82.2796079379587,
+              "atoms_per_second": 5265.894908029357
+            },
+            "e3nn": {
+              "samples_seconds": [
+                0.007759657129645348,
+                0.0071615871042013165,
+                0.007087579183280468
+              ],
+              "median_seconds": 0.0071615871042013165,
+              "min_seconds": 0.007087579183280468,
+              "max_seconds": 0.007759657129645348,
+              "mean_seconds": 0.007336274472375711,
+              "stdev_seconds": 0.0003685226573051932,
+              "first_observed_seconds": 0.009520096704363823,
+              "memory": {
+                "baseline_allocated_bytes": 58551808,
+                "peak_allocated_bytes": 199853568,
+                "transient_peak_bytes": 141301248
+              },
+              "configurations_per_second": 139.63385286668566,
+              "atoms_per_second": 8936.566583467882
+            }
+          },
+          "e3nn_over_cueq": 0.5892525791472254,
+          "paired_order": [
+            [
+              "e3nn",
+              "cueq"
+            ],
+            [
+              "e3nn",
+              "cueq"
+            ],
+            [
+              "e3nn",
+              "cueq"
+            ]
+          ],
+          "calls_per_timed_sample": 10
+        },
+        "energy_forces": {
+          "backends": {
+            "e3nn": {
+              "samples_seconds": [
+                0.022554727084934712,
+                0.022623706422746182,
+                0.023068123497068882
+              ],
+              "median_seconds": 0.022623706422746182,
+              "min_seconds": 0.022554727084934712,
+              "max_seconds": 0.023068123497068882,
+              "mean_seconds": 0.02274885233491659,
+              "stdev_seconds": 0.00027863971988534324,
+              "first_observed_seconds": 0.027794281020760536,
+              "memory": {
+                "baseline_allocated_bytes": 67072512,
+                "peak_allocated_bytes": 316901888,
+                "transient_peak_bytes": 249827840
+              },
+              "configurations_per_second": 44.20142223002799,
+              "atoms_per_second": 2828.891022721791
+            },
+            "cueq": {
+              "samples_seconds": [
+                0.03078703209757805,
+                0.030892558954656126,
+                0.03137106839567423
+              ],
+              "median_seconds": 0.030892558954656126,
+              "min_seconds": 0.03078703209757805,
+              "max_seconds": 0.03137106839567423,
+              "mean_seconds": 0.031016886482636136,
+              "stdev_seconds": 0.00031123560213074656,
+              "first_observed_seconds": 44.26363420300186,
+              "memory": {
+                "baseline_allocated_bytes": 58551296,
+                "peak_allocated_bytes": 124148224,
+                "transient_peak_bytes": 65596928
+              },
+              "configurations_per_second": 32.37025464506818,
+              "atoms_per_second": 2071.6962972843635
+            }
+          },
+          "e3nn_over_cueq": 0.7323351379195584,
+          "paired_order": [
+            [
+              "e3nn",
+              "cueq"
+            ],
+            [
+              "cueq",
+              "e3nn"
+            ],
+            [
+              "cueq",
+              "e3nn"
+            ]
+          ],
+          "calls_per_timed_sample": 10
+        },
+        "ase_energy_forces": {
+          "backends": {
+            "e3nn": {
+              "samples_seconds": [
+                0.026963315531611444,
+                0.02665310837328434,
+                0.026304097846150398
+              ],
+              "median_seconds": 0.02665310837328434,
+              "min_seconds": 0.026304097846150398,
+              "max_seconds": 0.026963315531611444,
+              "mean_seconds": 0.026640173917015394,
+              "stdev_seconds": 0.00032979912723563184,
+              "first_observed_seconds": 0.025139220058918,
+              "memory": {
+                "baseline_allocated_bytes": 67070976,
+                "peak_allocated_bytes": 317017088,
+                "transient_peak_bytes": 249946112
+              },
+              "configurations_per_second": 37.51907604901899,
+              "atoms_per_second": 2401.2208671372155
+            },
+            "cueq": {
+              "samples_seconds": [
+                0.03501963708549738,
+                0.03513515014201403,
+                0.03488699030131102
+              ],
+              "median_seconds": 0.03501963708549738,
+              "min_seconds": 0.03488699030131102,
+              "max_seconds": 0.03513515014201403,
+              "mean_seconds": 0.03501392584294081,
+              "stdev_seconds": 0.0001241784617117278,
+              "first_observed_seconds": 0.037586089223623276,
+              "memory": {
+                "baseline_allocated_bytes": 67070976,
+                "peak_allocated_bytes": 124047360,
+                "transient_peak_bytes": 56976384
+              },
+              "configurations_per_second": 28.555407286448673,
+              "atoms_per_second": 1827.546066332715
+            }
+          },
+          "e3nn_over_cueq": 0.7610903650489897,
+          "paired_order": [
+            [
+              "cueq",
+              "e3nn"
+            ],
+            [
+              "cueq",
+              "e3nn"
+            ],
+            [
+              "cueq",
+              "e3nn"
+            ]
+          ],
+          "calls_per_timed_sample": 10
+        }
+      },
+      "parity": {
+        "energy": {
+          "energy": {
+            "max_abs": 2.2043419178885415e-07,
+            "relative_norm": 1.4991119077716365e-08
+          }
+        },
+        "energy_forces": {
+          "forces": {
+            "max_abs": 1.51805579662323e-07,
+            "relative_norm": 1.7071673992867943e-06
+          },
+          "energy": {
+            "max_abs": 2.330504536018907e-07,
+            "relative_norm": 1.5849116123659365e-08
+          }
+        },
+        "ase_energy_forces": {
+          "energy": {
+            "max_abs": 0.0,
+            "relative_norm": 0.0
+          },
+          "forces": {
+            "max_abs": 2.2351741790771484e-07,
+            "relative_norm": 2.003224425543527e-06
+          }
+        }
+      },
+      "gpu_before": {
+        "gpu_fields": "uuid,name,driver_version,utilization.gpu,memory.used,clocks.sm,power.draw",
+        "gpu": "GPU-bb327493-ec1c-7f37-cc25-b5fafe0e0db1, NVIDIA A100-SXM4-80GB, 570.86.10, 0, 545, 1155, 69.18",
+        "processes": [
+          "GPU-bb327493-ec1c-7f37-cc25-b5fafe0e0db1, 3578203, /projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/bin/python, 536"
+        ]
+      },
+      "coefficient_dtype": "torch.float64",
+      "cueq_conv_fusion": true,
+      "native_profile_events": [
+        "cuequivariance::uniform_1d",
+        "GeneratedBackwardFor_cuequivariance_uniform_1d_default",
+        "segmented_polynomial_split1_of_2_algo1_4",
+        "segmented_polynomial_split2_of_2_algo1_4",
+        "segmented_polynomial_algo1_4",
+        "segmented_polynomial_algo1_2",
+        "autograd::engine::evaluate_function: GeneratedBackwardFor_cuequivariance_uniform_1d_defaultBackward",
+        "GeneratedBackwardFor_cuequivariance_uniform_1d_defaultBackward",
+        "segmented_polynomial_bwd_algo1_4",
+        "segmented_polynomial_bwd_algo1_1",
+        "segmented_polynomial_bwd_split1_of_2_algo1_4",
+        "segmented_polynomial_bwd_split2_of_2_algo1_4"
+      ],
+      "gpu_after": {
+        "gpu_fields": "uuid,name,driver_version,utilization.gpu,memory.used,clocks.sm,power.draw",
+        "gpu": "GPU-bb327493-ec1c-7f37-cc25-b5fafe0e0db1, NVIDIA A100-SXM4-80GB, 570.86.10, 0, 2191, 1155, 69.51",
+        "processes": [
+          "GPU-bb327493-ec1c-7f37-cc25-b5fafe0e0db1, 3578203, /projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/bin/python, 2182"
+        ]
+      },
+      "status": "passed",
+      "elapsed_seconds": 154.7394702322781
+    }
+  ],
+  "status": "complete",
+  "environment": {
+    "versions": {
+      "franken": "0.7.0",
+      "torch": "2.10.0+cu126",
+      "mace-torch": "0.3.17",
+      "e3nn": "0.4.4",
+      "cuequivariance": "0.10.0",
+      "cuequivariance-torch": "0.10.0",
+      "cuequivariance-ops-torch-cu12": "0.10.0",
+      "numpy": "2.5.4",
+      "ase": "3.29.0"
+    },
+    "python": "3.12.12",
+    "host": "afnode01.priv.franklin.lan",
+    "platform": "Linux-5.14.0-427.42.1.el9_4.x86_64-x86_64-with-glibc2.34",
+    "cpu": "Architecture:                         x86_64\nCPU op-mode(s):                       32-bit, 64-bit\nAddress sizes:                        48 bits physical, 48 bits virtual\nByte Order:                           Little Endian\nCPU(s):                               128\nOn-line CPU(s) list:                  0-127\nVendor ID:                            AuthenticAMD\nModel name:                           AMD EPYC 7713 64-Core Processor\nCPU family:                           25\nModel:                                1\nThread(s) per core:                   1\nCore(s) per socket:                   64\nSocket(s):                            2\nStepping:                             1\nFrequency boost:                      enabled\nCPU(s) scaling MHz:                   60%\nCPU max MHz:                          3720.7029\nCPU min MHz:                          1500.0000\nBogoMIPS:                             3999.71\nFlags:                                fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpb cat_l3 cdp_l3 hw_pstate ssbd mba ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin brs arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload vgif v_spec_ctrl umip pku ospke vaes vpclmulqdq rdpid overflow_recov succor smca fsrm debug_swap\nVirtualization:                       AMD-V\nL1d cache:                            4 MiB (128 instances)\nL1i cache:                            4 MiB (128 instances)\nL2 cache:                             64 MiB (128 instances)\nL3 cache:                             512 MiB (16 instances)\nNUMA node(s):                         2\nNUMA node0 CPU(s):                    0-63\nNUMA node1 CPU(s):                    64-127\nVulnerability Gather data sampling:   Not affected\nVulnerability Itlb multihit:          Not affected\nVulnerability L1tf:                   Not affected\nVulnerability Mds:                    Not affected\nVulnerability Meltdown:               Not affected\nVulnerability Mmio stale data:        Not affected\nVulnerability Reg file data sampling: Not affected\nVulnerability Retbleed:               Not affected\nVulnerability Spec rstack overflow:   Mitigation; Safe RET\nVulnerability Spec store bypass:      Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:             Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:             Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                  Not affected\nVulnerability Tsx async abort:        Not affected",
+    "gpu": "NVIDIA A100-SXM4-80GB",
+    "gpu_uuid": "bb327493-ec1c-7f37-cc25-b5fafe0e0db1",
+    "vram_bytes": 85095874560,
+    "compute_capability": [
+      8,
+      0
+    ],
+    "torch_cuda": "12.6",
+    "torch_arch_list": [
+      "sm_50",
+      "sm_60",
+      "sm_70",
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90"
+    ],
+    "tf32_matmul": false,
+    "tf32_cudnn": false,
+    "slurm": {
+      "SLURM_JOB_ID": "483764",
+      "SLURM_JOB_PARTITION": "gpua",
+      "SLURM_CPUS_PER_TASK": "2",
+      "SLURM_JOB_GPUS": "4",
+      "CUDA_VISIBLE_DEVICES": "0"
+    },
+    "gpu_snapshot": {
+      "gpu_fields": "uuid,name,driver_version,utilization.gpu,memory.used,clocks.sm,power.draw",
+      "gpu": "GPU-bb327493-ec1c-7f37-cc25-b5fafe0e0db1, NVIDIA A100-SXM4-80GB, 570.86.10, 0, 4, 720, 64.33",
+      "processes": []
+    }
+  },
+  "completed_utc": "2026-11-03T22:07:37.764447+00:00"
+}
