@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from time import perf_counter
 from typing import Literal, Mapping, Sequence, cast
+import warnings
 
 import torch
 import torch.utils.data
@@ -84,6 +85,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     f"RandomFeaturesEwaldsTrainer does not support grid-search over hyperparameters. "
                     f"Multiple values were found for hyperparameter {k}, but only a single value is supported."
                 )
+        if not save_fmaps and mode == "variable_projection":
+            warnings.warn(
+                "save_fmaps is False. This requires many extra passes through the GNN backbone. "
+                "If GPU memory allows it, set `save_fmaps=True`."
+            )
         self.mode: Literal["alternating", "variable_projection", "joint"] = mode
         self.val_dataloader: torch.utils.data.DataLoader | None = None
         self.l2_penalty = l2_penalty
@@ -384,16 +390,23 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                         optim.step()
             else:
                 # RFF refits change this objective: do not reuse curvature history.
-                optim = torch.optim.LBFGS(
-                    params,
-                    lr=self.lbfgs_learning_rate * self.lr_decay**epoch,
-                    max_iter=self.lbfgs_max_iter,
-                    history_size=self.lbfgs_history_size,
-                    tolerance_grad=self.lbfgs_tolerance_grad,
-                    tolerance_change=self.lbfgs_tolerance_change,
-                    line_search_fn="strong_wolfe",
-                )
-                indices = list(range(local_n_samples))
+                lr = self.lbfgs_learning_rate * self.lr_decay**epoch
+                if self._les_optimizer is None or self.mode != "variable_projection":
+                    print("Initializing")
+                    self._les_optimizer = torch.optim.LBFGS(
+                        params,
+                        lr=lr,
+                        max_eval=100,
+                        max_iter=self.lbfgs_max_iter,
+                        history_size=self.lbfgs_history_size,
+                        tolerance_grad=self.lbfgs_tolerance_grad,
+                        tolerance_change=self.lbfgs_tolerance_change,
+                        line_search_fn="strong_wolfe",
+                    )
+                optim = self._les_optimizer
+                for group in optim.param_groups:
+                    group["lr"] = lr
+                indices = list(range(n_samples))
 
                 def closure():
                     if self.mode == "variable_projection":
@@ -416,7 +429,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 if self.mode == "variable_projection":
                     # The last closure may have evaluated a rejected trial.
                     assert proj_mat is not None
-                    self._refit_projected_rff(model, proj_mat, normalization)
+                    # GIAC: Test without this last call
+                    # self._refit_projected_rff(model, proj_mat, normalization)
         finally:
             for p, requires_grad in previous_flags:
                 p.requires_grad_(requires_grad)
@@ -494,7 +508,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             if self.mode in {"alternating", "variable_projection"}:
                 assert covs is not None
                 assert proj_mat is not None
-                rf_weights = self._fit_rff(model, proj_mat, normalization)
+                rf_weights = self._fit_rff(
+                    model,
+                    proj_mat,
+                    normalization,
+                    direct_coeffs=coeffs if outer_it == 0 else None,
+                )
                 if torch.any(torch.isnan(rf_weights)):
                     logger.warning(
                         f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."

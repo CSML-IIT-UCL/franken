@@ -6,11 +6,16 @@ from pathlib import Path
 import pathlib
 import tempfile
 from types import SimpleNamespace
-from unittest.mock import Mock, mock_open, patch, DEFAULT
+from unittest.mock import MagicMock, Mock, mock_open, patch, DEFAULT
 
 import pytest
 import torch
 
+from franken.data.dataset import FrankenAtomsDataset
+from franken.datasets.registry import DATASET_REGISTRY
+from tests.test_trainer import make_dloader_from_dset
+
+from .conftest import DEFAULT_GNN_CONFIGS, do_random_seed, random_seed
 from franken.autotune.cli import parse_cli
 from franken.config import GaussianRFConfig, LESConfig, MaceBackboneConfig
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, Configuration, Target
@@ -43,17 +48,16 @@ class ToyModel(torch.nn.Module):
 
 
 def make_trainer(
-    cfg: LESConfig, 
-    device="cpu", 
+    cfg: LESConfig,
+    device="cpu",
     targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
-    dtype=torch.float32, 
-    save_fmaps=False, 
-    dataset=None, 
+    dtype=torch.float32,
+    save_fmaps=False,
+    dataset=None,
     n=5
 ):
     if dataset is None:
-        dataset = [
-            (
+        dataset = [(
                 Configuration(
                     torch.tensor([[float(i), 0, 0]], dtype=torch.float64),
                     torch.tensor([1]),
@@ -63,10 +67,11 @@ def make_trainer(
             )
             for i in range(1, n + 1)
         ]
+    dloader = make_dloader_from_dset(dataset)
     trainer = RandomFeaturesEwaldsTrainer(
-        train_dataloader=SimpleNamespace(dataset=dataset), # type: ignore
+        train_dataloader=dloader,
         training_targets=targets,
-        l2_penalty=1e-6,
+        l2_penalty=1e-1,
         target_weight={ENERGY_TARGET_KEY: 1.0, FORCES_TARGET_KEY: 1.0},
         optimizer=cfg.optimizer,
         num_cycles=cfg.num_cycles, # type: ignore
@@ -242,6 +247,50 @@ def test_accumulated_gradient_with_energy_and_force_losses():
     torch.testing.assert_close(
         model.les.weight.grad.squeeze(), -x.square().mean() - 4.5
     )
+
+
+@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
+def test_varproj_maxiter(gnn_cfg):
+    """Test for checking save and load methods of FrankenPotential"""
+    rf_cfg = GaussianRFConfig(num_random_features=128, length_scale=1.0)
+    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+    dataset = FrankenAtomsDataset(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_cfg,
+    )
+    do_random_seed(1)
+    tr1 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=8), dataset=dataset)
+    m1 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc1, w1 = tr1.fit(m1)
+    do_random_seed(1)
+    print("\n")
+    tr2 = make_trainer(LESConfig(mode="variable_projection", num_cycles=2, lbfgs_max_iter=4), dataset=dataset)
+    m2 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc2, w2 = tr2.fit(m2)
+    # do_random_seed(1)
+    # tr3 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=1), dataset=dataset)
+    # m3 = LESFrankenPotential(
+    #     gnn_config=gnn_cfg,
+    #     rf_config=rf_cfg,
+    #     les_config=LESConfig(),
+    #     num_species=dataset.num_species, # type: ignore
+    # )
+    # lc3, w3 = tr3.fit(m3)
+    print(w1)
+    print(w2)
+    # print(w3)
+
 
 
 class PolynomialModel(torch.nn.Module):
@@ -696,59 +745,6 @@ class TestLESTrainingHistory():
             assert trainer.evaluate.call_count == 2
             assert trainer.training_history == []
             assert list(Path(tmp).iterdir()) == []
-
-
-@pytest.fixture
-def log_collection():
-    return LogCollection(logs=[LogEntry.from_dict(log) for log in [{
-        "checkpoint": {"hash": "rand_uuid", "rf_weight_id": 0},
-        "timings": {"cov_coeffs": 1.0, "solve": 1.0},
-        "metrics": {
-            "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-            "validation": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-            "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-        },
-        "hyperparameters": {
-            "franken": {
-                "gnn_backbone_id": "mace_mp/small",
-                "interaction_block": 3,
-                "kernel_type": "gaussian",
-            },
-            "random_features": {
-                "num_random_features": 1024,
-            },
-            "input_scaler": {"scale_by_Z": True, "num_species": 2},
-            "solver": {
-                "l2_penalty": 1e-6,
-                "forces_weight": 0.1,
-                "dtype": "torch.float64",
-            },
-        },
-    },{
-        "checkpoint": {"hash": "rand_uuid2", "rf_weight_id": 1},
-        "timings": {"cov_coeffs": 1.0, "solve": 1.0},
-        "metrics": {
-            "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-            "validation": {"energy_MAE": 1.0, "forces_MAE": 0.5, "forces_cosim": 1.0},
-            "test": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
-        },
-        "hyperparameters": {
-            "franken": {
-                "gnn_backbone_id": "mace_mp/small",
-                "interaction_block": 3,
-                "kernel_type": "gaussian",
-            },
-            "random_features": {
-                "num_random_features": 1024,
-            },
-            "input_scaler": {"scale_by_Z": True, "num_species": 2},
-            "solver": {
-                "l2_penalty": 1e-6,
-                "forces_weight": 0.1,
-                "dtype": "torch.float64",
-            },
-        },
-    }]])
 
 
 def test_serialize_best_model(log_collection):
