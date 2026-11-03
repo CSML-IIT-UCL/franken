@@ -254,28 +254,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             raise ValueError("At least one training target must have positive weight")
         return {t: w / total_weight for t, w in weights.items()}
 
-    def _fit_rff(
-        self,
-        model: LESFrankenPotential,
-        proj_mat: Tensor,
-        normalization: dict[TargetType, Tensor] | None,
-        direct_coeffs: dict[TargetType, Tensor] | None = None,
-    ) -> Tensor:
-        if direct_coeffs is not None:
-            coeffs = direct_coeffs
-        else:
-            coeffs = self.residual_coeffs(
-                model, self.train_dataloader, normalization=normalization
-            )
-        target_weights = self.rel_tgt_weight
-        weighted_coeffs: Tensor = cast(
-            Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
-        )
-        solution = torch.cholesky_solve(weighted_coeffs[:, None], proj_mat, upper=True)
-        # weights from [n_rf, 1] to [1, n_rf]
-        solution = solution.unsqueeze(0).squeeze(-1)
-        return solution
-
     def _backward_batch(self, model, indices, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
@@ -392,7 +370,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 # RFF refits change this objective: do not reuse curvature history.
                 lr = self.lbfgs_learning_rate * self.lr_decay**epoch
                 if self._les_optimizer is None or self.mode != "variable_projection":
-                    print("Initializing")
                     self._les_optimizer = torch.optim.LBFGS(
                         params,
                         lr=lr,
@@ -457,16 +434,25 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         model: LESFrankenPotential,
         proj_mat: Tensor,
         normalization: dict[TargetType, Tensor] | None,
-    ) -> None:
+        direct_coeffs: dict[TargetType, Tensor] | None = None,
+    ) -> Tensor:
+        if direct_coeffs is not None:
+            coeffs = direct_coeffs
+        else:
+            coeffs = self.residual_coeffs(
+                model, self.train_dataloader, normalization=normalization
+            )
         target_weights = self.rel_tgt_weight
         coeffs = self.residual_coeffs(model, self.train_dataloader, normalization)
-        rhs: Tensor = cast(
+        weighted_coeffs: Tensor = cast(
             Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
         )
-        solution = torch.cholesky_solve(rhs[:, None], proj_mat, upper=True)
+        solution = torch.cholesky_solve(weighted_coeffs[:, None], proj_mat, upper=True)
         # weights from [n_rf, 1] to [1, n_rf]
         solution = solution.unsqueeze(0).squeeze(-1)
-        model.rf.weights.copy_(solution)
+        model.rf.weights = torch.nn.Parameter(solution)
+        # model.rf.weights.copy_(solution)
+        return solution
 
     @no_jit()
     def fit(  # pyright: ignore[reportIncompatibleMethodOverride]
@@ -502,30 +488,51 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
 
-        for outer_it in range(self.num_cycles):
-            # 1. Fit the residual of the current LES head, including its
-            #    nonzero random initialization in the first cycle.
-            if self.mode in {"alternating", "variable_projection"}:
-                assert covs is not None
-                assert proj_mat is not None
-                rf_weights = self._fit_rff(
-                    model,
-                    proj_mat,
-                    normalization,
-                    direct_coeffs=coeffs if outer_it == 0 else None,
-                )
-                if torch.any(torch.isnan(rf_weights)):
-                    logger.warning(
-                        f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
-                    )
-                    break
-                model.rf.weights = torch.nn.Parameter(rf_weights)
-                self._print_eval(model, outer_it, step="rff")
-            # 2. Train LES on residuals from RFF training
-            #    or in joint mode, train also RFF coefficients jointly.
-            self._fit_les(
-                model, epoch=outer_it, normalization=normalization, proj_mat=proj_mat
+        if self.mode == "variable_projection":
+            assert covs is not None
+            assert proj_mat is not None
+            rf_weights = self._refit_projected_rff(
+                model,
+                proj_mat,
+                normalization,
+                direct_coeffs=coeffs,
             )
+            # model.rf.weights = torch.nn.Parameter(rf_weights)
+            for outer_it in range(self.num_cycles):
+                self._fit_les(
+                    model,
+                    epoch=outer_it,
+                    normalization=normalization,
+                    proj_mat=proj_mat,
+                )
+        else:
+            for outer_it in range(self.num_cycles):
+                # 1. Fit the residual of the current LES head, including its
+                #    nonzero random initialization in the first cycle.
+                if self.mode == "alternating":
+                    assert covs is not None
+                    assert proj_mat is not None
+                    rf_weights = self._refit_projected_rff(
+                        model,
+                        proj_mat,
+                        normalization,
+                        direct_coeffs=coeffs if outer_it == 0 else None,
+                    )
+                    if torch.any(torch.isnan(rf_weights)):
+                        logger.warning(
+                            f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
+                        )
+                        break
+                    # model.rf.weights = torch.nn.Parameter(rf_weights)
+                    self._print_eval(model, outer_it, step="rff")
+                # 2. Train LES on residuals from RFF training
+                #    or in joint mode, train also RFF coefficients jointly.
+                self._fit_les(
+                    model,
+                    epoch=outer_it,
+                    normalization=normalization,
+                    proj_mat=proj_mat,
+                )
 
         # Optimizer moments correspond to the last stage, not the restored model.
         self._les_optimizer = None
