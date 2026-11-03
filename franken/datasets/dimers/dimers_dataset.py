@@ -7,7 +7,6 @@ import ase.io
 from franken.datasets.registry import DATASET_REGISTRY, BaseRegisteredDataset
 from franken.utils.file_utils import download_file
 
-
 DIMER_LABELS = ("AA", "CA", "CC", "CP", "PA", "PP")
 DIMER_DATASETS = {
     name: (label, first_only)

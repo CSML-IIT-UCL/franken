@@ -370,7 +370,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 batch_size = self.batch_size or local_n_samples
                 for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
                     indices = (
-                        torch.randperm(local_n_samples, generator=self._shuffle_rng).tolist()
+                        torch.randperm(
+                            local_n_samples, generator=self._shuffle_rng
+                        ).tolist()
                         if batch_size < local_n_samples
                         else list(range(local_n_samples))
                     )
@@ -601,7 +603,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dataloader: torch.utils.data.DataLoader,
         normalization: dict[TargetType, Tensor] | None,
     ):
-        #n_samples = len(dataloader.dataset)  # type: ignore
+        # n_samples = len(dataloader.dataset)  # type: ignore
         local_n_samples = len(self._train_dataset_indices)
         n_rf = model.rf.total_random_features
 

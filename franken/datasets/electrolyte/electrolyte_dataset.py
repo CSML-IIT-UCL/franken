@@ -12,7 +12,6 @@ import numpy as np
 from franken.datasets.registry import DATASET_REGISTRY, BaseRegisteredDataset
 from franken.utils.file_utils import download_file
 
-
 ELECTROLYTE_GROUPS = {
     f"electrolyte_{geometry}_{pairs}": (geometry, pairs)
     for geometry, counts in (("bulk", range(6)), ("interface", (1, 2, 10)))
