@@ -484,6 +484,10 @@ def init_les_trainer(
         raise ValueError(
             f"lbfgs_max_iter must be a single int for LES trainer. Found {les_cfg.lbfgs_max_iter}"
         )
+    if not isinstance(les_cfg.lbfgs_max_eval, int):
+        raise ValueError(
+            f"lbfgs_max_eval must be a single int for LES trainer. Found {les_cfg.lbfgs_max_eval}"
+        )
     if not isinstance(les_cfg.lbfgs_learning_rate, (int, float)):
         raise ValueError(
             f"lbfgs_learning_rate must be a single float for LES trainer. Found {les_cfg.lbfgs_learning_rate}"
@@ -521,10 +525,10 @@ def init_les_trainer(
         optimizer=les_cfg.optimizer,
         num_cycles=les_cfg.num_cycles,
         epochs_per_cycle=les_cfg.epochs_per_cycle,
-        batch_size=les_cfg.batch_size,
         learning_rate=les_cfg.learning_rate,
         lr_decay=les_cfg.lr_decay,
         lbfgs_max_iter=les_cfg.lbfgs_max_iter,
+        lbfgs_max_eval=les_cfg.lbfgs_max_eval,
         lbfgs_learning_rate=les_cfg.lbfgs_learning_rate,
         lbfgs_history_size=les_cfg.lbfgs_history_size,
         lbfgs_tolerance_grad=les_cfg.lbfgs_tolerance_grad,

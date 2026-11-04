@@ -527,11 +527,6 @@ def get_arg_groups():
             ),
             Argument.from_dataclass(
                 LESConfig,
-                "batch_size",
-                "batch-size",
-            ),
-            Argument.from_dataclass(
-                LESConfig,
                 "learning_rate",
                 "learning-rate",
                 metavar="HYPERPARAMETER",
@@ -548,6 +543,13 @@ def get_arg_groups():
                 LESConfig,
                 "lbfgs_max_iter",
                 "lbfgs-max-iter",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_max_eval",
+                "lbfgs-max-eval",
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
             ),
