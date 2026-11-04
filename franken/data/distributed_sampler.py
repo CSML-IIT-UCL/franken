@@ -4,6 +4,14 @@ from torch.utils.data import Sampler, Dataset
 import torch.distributed as dist
 
 
+def calc_distributed_indices(num_samples: int, world_size: int, rank: int) -> list[int]:
+    assert rank < world_size
+    indices = list(range(num_samples))
+    # subsample
+    indices = indices[rank:num_samples:world_size]
+    return indices
+
+
 class SimpleUnevenDistributedSampler(Sampler):
     def __init__(
         self,
@@ -32,12 +40,10 @@ class SimpleUnevenDistributedSampler(Sampler):
         self.num_samples = len(range(self.rank, self.total_size, self.num_replicas))
 
     def __iter__(self) -> Iterator:
-        indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
-
-        # subsample
-        indices = indices[self.rank : self.total_size : self.num_replicas]
+        indices = calc_distributed_indices(
+            num_samples=self.total_size, world_size=self.num_replicas, rank=self.rank
+        )
         assert len(indices) == self.num_samples
-
         return iter(indices)
 
     def __len__(self) -> int:
