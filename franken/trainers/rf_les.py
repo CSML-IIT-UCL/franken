@@ -251,7 +251,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     def _full_gradient(self, model, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
-        n_samples = len(self.train_dataloader.dataset)
+        n_samples = len(self.train_dataloader.dataset)  # type: ignore
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
         # Each device will process its own subset of the dataset.
         for i, (data, targets) in enumerate(self.train_dataloader):
@@ -313,16 +313,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         normalization: dict[TargetType, Tensor] | None,
         proj_mat: Tensor | None = None,
     ):
-        local_n_samples = len(self._train_dataset_indices)
-
-        for target in self.training_targets:
-            assert len(self.fmaps[target]) == local_n_samples, (
-                f"Inconsistent fmap length for {target}: "
-                f"{len(self.fmaps[target])} != {local_n_samples}"
-            )
-        if local_n_samples == 0:
-            raise ValueError("LES requires a nonempty training dataset")
-
+        n_samples = len(self.train_dataloader.dataset)  # type: ignore
         params = list(model.les.parameters())
         if self.mode == "joint":
             params += list(model.rf.parameters())
@@ -438,17 +429,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self._les_optimizer = None
         self.on_fit_start(model)
 
-        self._train_dataset_indices = list(self.train_dataloader.sampler)
         covs, coeffs, normalization, proj_mat = None, None, None, None
         if self.mode != "joint":  # Joint doesn't need covariance!
             t_cov = perf_counter()
             covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
-            if self.fmaps and len(self._train_dataset_indices) != len(
-                self.fmaps[self.training_targets[0]]
-            ):
-                raise RuntimeError(
-                    "Training sampler indices and cached feature maps have different lengths"
-                )
             covs, coeffs, normalization = self._calc_cov_normalization(covs, coeffs)
             proj_mat = self._prepare_projection(covs)
             t_cov = perf_counter() - t_cov
@@ -585,8 +569,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dataloader: torch.utils.data.DataLoader,
         normalization: dict[TargetType, Tensor] | None,
     ):
-        # n_samples = len(dataloader.dataset)  # type: ignore
-        local_n_samples = len(self._train_dataset_indices)
+        n_samples = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
 
         coeffs = {
@@ -594,7 +577,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             for t in self.training_targets
         }
         progress_bar = throughput(
-            dataloader, "coeffs", total=local_n_samples, device=self.device
+            dataloader, "coeffs", total=n_samples, device=self.device
         )
         for i, (data, targets) in enumerate(progress_bar):
             assert isinstance(data, Configuration)
