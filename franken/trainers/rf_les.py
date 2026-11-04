@@ -14,6 +14,7 @@ from torch import Tensor
 import tqdm
 
 from franken.data.dataset import FrankenAtomsDataset
+from franken.data.distributed_sampler import calc_distributed_indices
 from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
@@ -257,9 +258,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
     def _backward_batch(self, model, indices, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
-        for fmap_index in indices:
-            dataset_index = self._train_dataset_indices[fmap_index]
-            data, targets = self.train_dataloader.dataset[dataset_index]
+        # TODO: remove indices and just iterate through the dataloader. This allows to get
+        #       correct distributed behavior easily.
+        for index in indices:
+            data, targets = self.train_dataloader.dataset[index]
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
             if data.natoms.numel() != 1:
@@ -314,6 +316,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             loss = loss / len(indices)
             loss.backward()
             total += loss.detach()
+        dist_utils.all_sum(total)
+        grads = [p.grad for p in model.parameters() if p.grad is not None]
+        dist_utils.all_sum_coalesced(grads)
         return total
 
     def _fit_les(
@@ -383,7 +388,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 optim = self._les_optimizer
                 for group in optim.param_groups:
                     group["lr"] = lr
-                indices = list(range(n_samples))
+                indices = calc_distributed_indices(
+                    n_samples, dist_utils.get_world_size(), dist_utils.get_rank()
+                )
 
                 def closure():
                     if self.mode == "variable_projection":
@@ -472,6 +479,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self._les_optimizer = None
         self._shuffle_rng = torch.Generator().manual_seed(self.seed)
         self.on_fit_start(model)
+        # TODO[Distributed] ensure that the model is the same on each device
 
         self._train_dataset_indices = list(self.train_dataloader.sampler)
         covs, coeffs, normalization, proj_mat = None, None, None, None

@@ -105,6 +105,7 @@ class throughput(Generic[T]):
         total: int | None = None,
         device=None,
         leave: bool = False,
+        quiet: bool = False,
     ):
         self.iterable = iterable
         self.update_interval = update_interval
@@ -125,6 +126,7 @@ class throughput(Generic[T]):
         self.hardware = get_device_name(device)
         self.total = total
         self.leave = leave
+        self.quiet = quiet
 
     def __iter__(self) -> Generator[T, None, None]:
         if self.process_rank != 0:
@@ -143,13 +145,16 @@ class throughput(Generic[T]):
                 if self.should_print():
                     self.display()
         finally:
-            self.display()
-            if self.leave:
-                print()
-            else:
-                print("\r", end="")
+            if not self.quiet:
+                self.display()
+                if self.leave:
+                    print()
+                else:
+                    print("\r", end="")
 
     def should_print(self):
+        if self.quiet:
+            return False
         self.now = perf_counter()
         return self.now - self.last_update > self.update_interval
 

@@ -5,6 +5,7 @@ from socket import gethostname
 
 import torch
 import torch.distributed
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 from . import hostlist
 
@@ -96,6 +97,15 @@ def all_sum(tensor: torch.Tensor) -> None:
     if torch.distributed.is_initialized():
         torch.distributed.all_reduce(tensor, torch.distributed.ReduceOp.SUM)
     return None
+
+
+def all_sum_coalesced(tensors: list[torch.Tensor]) -> None:
+    """Sum a list of tensors across all ranks using one collective call."""
+    if torch.distributed.is_initialized():
+        flat = _flatten_dense_tensors(tensors)
+        torch.distributed.all_reduce(flat, torch.distributed.ReduceOp.SUM)
+        for t, synced in zip(tensors, _unflatten_dense_tensors(flat, tensors)):
+            t.copy_(synced)
 
 
 def broadcast_obj(obj, src=0):
