@@ -14,7 +14,6 @@ from torch import Tensor
 import tqdm
 
 from franken.data.dataset import FrankenAtomsDataset
-from franken.data.distributed_sampler import calc_distributed_indices
 from franken.metrics.base import BaseMetric
 from franken.rf.les_model import LESFrankenPotential
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
@@ -48,10 +47,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         optimizer: Literal["adam", "lbfgs"],
         num_cycles: int,
         epochs_per_cycle: int,
-        batch_size: int | None,
         learning_rate: float,
         lr_decay: float,
         lbfgs_max_iter: int,
+        lbfgs_max_eval: int,
         lbfgs_learning_rate: float,
         lbfgs_history_size: int,
         lbfgs_tolerance_grad: float,
@@ -64,7 +63,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
-        seed: int = 1337,
     ):
         super().__init__(
             train_dataloader,
@@ -98,20 +96,17 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.optimizer = optimizer
         self.num_cycles = num_cycles
         self.epochs_per_cycle = epochs_per_cycle
-        self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.lr_decay = lr_decay
         self.lbfgs_max_iter = lbfgs_max_iter
+        self.lbfgs_max_eval = lbfgs_max_eval
         self.lbfgs_learning_rate = lbfgs_learning_rate
         self.lbfgs_history_size = lbfgs_history_size
         self.lbfgs_tolerance_grad = lbfgs_tolerance_grad
         self.lbfgs_tolerance_change = lbfgs_tolerance_change
-        self.seed = seed
         self.training_history: list[dict] = []
         self._les_optimizer = None
         self.fmaps: dict[TargetType, list[Tensor]] = {}
-        self._train_dataset_indices: list[int] = []
-        self._shuffle_rng = torch.Generator().manual_seed(seed)
 
     def create_log_entry(self, model):
         solver_hps = {
@@ -120,7 +115,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             "optimizer": self.optimizer,
             "num_cycles": self.num_cycles,
             "epochs_per_cycle": self.epochs_per_cycle,
-            "batch_size": self.batch_size,
             "learning_rate": self.learning_rate,
             "lr_decay": self.lr_decay,
             "lbfgs_max_iter": self.lbfgs_max_iter,
@@ -255,19 +249,15 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             raise ValueError("At least one training target must have positive weight")
         return {t: w / total_weight for t, w in weights.items()}
 
-    def _backward_batch(self, model, indices, normalization):
+    def _backward_batch(self, model, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
+        n_samples = len(self.train_dataloader.dataset)
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
-        # TODO: remove indices and just iterate through the dataloader. This allows to get
-        #       correct distributed behavior easily.
-        for index in indices:
-            data, targets = self.train_dataloader.dataset[index]
+        for i, (data, targets) in enumerate(self.train_dataloader):
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
             if data.natoms.numel() != 1:
                 raise ValueError("LES accumulation expects individual configurations")
-            # Zero-weight targets are still evaluated for reporting, but need not
-            # create costly force/stress derivative graphs during optimization.
             if self.mode == "variable_projection" or (
                 self.fmaps and self.mode != "joint"
             ):
@@ -276,10 +266,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 # energy instead rounds the RFF force back to descriptor dtype,
                 # which can spoil a projected line search through cancellation.
                 fmaps = (
-                    {
-                        target: self.fmaps[target][fmap_index]
-                        for target in self.training_targets
-                    }
+                    {target: self.fmaps[target][i] for target in self.training_targets}
                     if self.fmaps
                     else model.grad_feature_map(data, list(self.training_targets))
                 )
@@ -313,7 +300,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 if normalization is not None:
                     squared_error = squared_error / normalization[target].squeeze()
                 loss = loss + weight * squared_error
-            loss = loss / len(indices)
+            loss = loss / n_samples
             loss.backward()
             total += loss.detach()
         dist_utils.all_sum(total)
@@ -342,82 +329,58 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         params = list(model.les.parameters())
         if self.mode == "joint":
             params += list(model.rf.parameters())
-        trainable_ids = {id(p) for p in params}
-        previous_flags = [(p, p.requires_grad) for p in model.parameters()]
-        # Position gradients remain enabled for forces; only parameter gradients
-        # outside the selected head(s) are disabled.
-        for p, _ in previous_flags:
-            p.requires_grad_(id(p) in trainable_ids)
-        try:
-            if self.optimizer == "adam":
-                lr = self.learning_rate * self.lr_decay**epoch
-                if self._les_optimizer is None:
-                    self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
-                optim = self._les_optimizer
-                for group in optim.param_groups:
-                    group["lr"] = lr
-                batch_size = self.batch_size or local_n_samples
-                for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
-                    indices = (
-                        torch.randperm(
-                            local_n_samples, generator=self._shuffle_rng
-                        ).tolist()
-                        if batch_size < local_n_samples
-                        else list(range(local_n_samples))
-                    )
-                    for start in range(0, local_n_samples, batch_size):
-                        optim.zero_grad(set_to_none=True)
-                        self._backward_batch(
-                            model, indices[start : start + batch_size], normalization
-                        )
-                        optim.step()
-            else:
-                # RFF refits change this objective: do not reuse curvature history.
-                lr = self.lbfgs_learning_rate * self.lr_decay**epoch
-                if self._les_optimizer is None or self.mode != "variable_projection":
-                    self._les_optimizer = torch.optim.LBFGS(
-                        params,
-                        lr=lr,
-                        max_eval=100,
-                        max_iter=self.lbfgs_max_iter,
-                        history_size=self.lbfgs_history_size,
-                        tolerance_grad=self.lbfgs_tolerance_grad,
-                        tolerance_change=self.lbfgs_tolerance_change,
-                        line_search_fn="strong_wolfe",
-                    )
-                optim = self._les_optimizer
-                for group in optim.param_groups:
-                    group["lr"] = lr
-                indices = calc_distributed_indices(
-                    n_samples, dist_utils.get_world_size(), dist_utils.get_rank()
+        if self.optimizer == "adam":
+            lr = self.learning_rate * self.lr_decay**epoch
+            if self._les_optimizer is None:
+                self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
+            optim = self._les_optimizer
+            for group in optim.param_groups:
+                group["lr"] = lr
+            for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
+                optim.zero_grad(set_to_none=True)
+                self._backward_batch(model, normalization)
+                optim.step()
+        else:
+            # RFF refits change this objective: do not reuse curvature history.
+            lr = self.lbfgs_learning_rate * self.lr_decay**epoch
+            if self._les_optimizer is None or self.mode != "variable_projection":
+                self._les_optimizer = torch.optim.LBFGS(
+                    params,
+                    lr=lr,
+                    max_eval=self.lbfgs_max_eval,
+                    max_iter=self.lbfgs_max_iter,
+                    history_size=self.lbfgs_history_size,
+                    tolerance_grad=self.lbfgs_tolerance_grad,
+                    tolerance_change=self.lbfgs_tolerance_change,
+                    line_search_fn="strong_wolfe",
                 )
+            optim = self._les_optimizer
+            for group in optim.param_groups:
+                group["lr"] = lr
 
-                def closure():
-                    if self.mode == "variable_projection":
-                        assert proj_mat is not None
-                        self._refit_projected_rff(model, proj_mat, normalization)
-                    optim.zero_grad(set_to_none=True)
-                    loss = self._backward_batch(model, indices, normalization)
-                    if self.mode == "variable_projection":
-                        # Envelope theorem: no derivative through the exact RFF
-                        # minimizer is needed. Its ridge cost is still needed by
-                        # the line search, since it changes between trial points.
-                        loss = loss + (
-                            self.l2_penalty
-                            * model.rf.weights.detach().square().sum()
-                            / local_n_samples
-                        )
-                    return loss
-
-                optim.step(closure)
+            def closure():
                 if self.mode == "variable_projection":
-                    # The last closure may have evaluated a rejected trial.
                     assert proj_mat is not None
-                    # GIAC: Test without this last call
-                    # self._refit_projected_rff(model, proj_mat, normalization)
-        finally:
-            for p, requires_grad in previous_flags:
-                p.requires_grad_(requires_grad)
+                    self._refit_projected_rff(model, proj_mat, normalization)
+                optim.zero_grad(set_to_none=True)
+                loss = self._backward_batch(model, normalization)
+                if self.mode == "variable_projection":
+                    # Envelope theorem: no derivative through the exact RFF
+                    # minimizer is needed. Its ridge cost is still needed by
+                    # the line search, since it changes between trial points.
+                    loss = loss + (
+                        self.l2_penalty
+                        * model.rf.weights.detach().square().sum()
+                        / n_samples
+                    )
+                return loss
+
+            optim.step(closure)
+            if self.mode == "variable_projection":
+                # The last closure may have evaluated a rejected trial.
+                assert proj_mat is not None
+                # GIAC: Test without this last call
+                # self._refit_projected_rff(model, proj_mat, normalization)
 
         self._print_eval(
             model,
@@ -477,7 +440,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.patch_e3nn()
         self.training_history = []
         self._les_optimizer = None
-        self._shuffle_rng = torch.Generator().manual_seed(self.seed)
         self.on_fit_start(model)
         # TODO[Distributed] ensure that the model is the same on each device
 

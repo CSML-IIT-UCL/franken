@@ -260,7 +260,10 @@ def test_varproj_maxiter(gnn_cfg):
         gnn_config=gnn_cfg,
     )
     do_random_seed(1)
-    tr1 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=8), dataset=dataset)
+    tr1 = make_trainer(LESConfig(
+        mode="variable_projection", num_cycles=1, lbfgs_max_iter=8, lbfgs_max_eval=50), 
+        dataset=dataset
+    )
     m1 = LESFrankenPotential(
         gnn_config=gnn_cfg,
         rf_config=rf_cfg,
@@ -270,7 +273,10 @@ def test_varproj_maxiter(gnn_cfg):
     lc1, w1 = tr1.fit(m1)
     do_random_seed(1)
     print("\n")
-    tr2 = make_trainer(LESConfig(mode="variable_projection", num_cycles=2, lbfgs_max_iter=4), dataset=dataset)
+    tr2 = make_trainer(LESConfig(
+        mode="variable_projection", num_cycles=2, lbfgs_max_iter=4, lbfgs_max_eval=50), 
+        dataset=dataset
+    )
     m2 = LESFrankenPotential(
         gnn_config=gnn_cfg,
         rf_config=rf_cfg,
@@ -278,19 +284,17 @@ def test_varproj_maxiter(gnn_cfg):
         num_species=dataset.num_species, # type: ignore
     )
     lc2, w2 = tr2.fit(m2)
-    # do_random_seed(1)
-    # tr3 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=1), dataset=dataset)
-    # m3 = LESFrankenPotential(
-    #     gnn_config=gnn_cfg,
-    #     rf_config=rf_cfg,
-    #     les_config=LESConfig(),
-    #     num_species=dataset.num_species, # type: ignore
-    # )
-    # lc3, w3 = tr3.fit(m3)
-    print(w1)
-    print(w2)
-    # print(w3)
-
+    do_random_seed(1)
+    tr3 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=1), dataset=dataset)
+    m3 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc3, w3 = tr3.fit(m3)
+    torch.testing.assert_close(w1, w2)
+    assert not torch.isclose(w1, w3)
 
 
 class PolynomialModel(torch.nn.Module):
