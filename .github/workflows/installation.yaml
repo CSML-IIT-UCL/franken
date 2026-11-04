@@ -1,4 +1,4 @@
-name: Installation smoke tests
+name: MACE installation
 
 on:
   pull_request:
@@ -7,6 +7,7 @@ on:
 
 jobs:
   install:
+    name: Install and train (${{ matrix.manager }}, Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,7 +17,6 @@ jobs:
           - python: '3.13'
             manager: uv
     env:
-      FRANKEN_CACHE_DIR: ${{ runner.temp }}/franken-models
       OMP_NUM_THREADS: '2'
       MKL_NUM_THREADS: '2'
     steps:
@@ -49,6 +49,8 @@ jobs:
           uv add "$RUNNER_TEMP"/wheels/franken-*.whl
           uv pip check --python .venv/bin/python
       - name: Train using only the default installation
+        env:
+          FRANKEN_CACHE_DIR: ${{ runner.temp }}/franken-models
         working-directory: ${{ runner.temp }}
         run: |
           if [ '${{ matrix.manager }}' = pip ]; then
