@@ -42,7 +42,10 @@ jobs:
         run: |
           uv init --bare --python '${{ matrix.python }}' uv-smoke
           cd uv-smoke
+          uv venv --python '${{ matrix.python }}'
           uv add torch --index pytorch-cpu=https://download.pytorch.org/whl/cpu
+          # Restrict this index to torch, so other packages come from PyPI.
+          python -c "from pathlib import Path; p = Path('pyproject.toml'); p.write_text(p.read_text() + '\nexplicit = true\n')"
           uv add "$RUNNER_TEMP"/wheels/franken-*.whl
           uv pip check --python .venv/bin/python
       - name: Train using only the default installation
@@ -59,3 +62,24 @@ jobs:
             --force-weight 0.5 --l2-penalty 0.0001 \
             --jac-chunk-size 2 --run-dir "$RUNNER_TEMP/training"
           test -n "$(find "$RUNNER_TEMP/training" -name best_ckpt.pt -print -quit)"
+      - name: Resolve all extras with uv
+        run: |
+          uv pip compile pyproject.toml --all-extras \
+            --python-version '${{ matrix.python }}' \
+            --output-file "$RUNNER_TEMP/all-extras.txt"
+      - name: Resolve extras with pip
+        if: matrix.manager == 'pip'
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel=(wheels/franken-*.whl)
+          for cuda in cueq-cu12 cueq-cu13; do
+            pip-smoke/bin/python -m pip install --dry-run \
+              "${wheel[0]}[pet,metatomic,torch-sim,develop,docs,cuda,$cuda]"
+          done
+      - name: Add extras to a uv project without installing GPU wheels
+        if: matrix.manager == 'uv'
+        working-directory: ${{ runner.temp }}/uv-smoke
+        run: |
+          uv add --no-sync --extra pet --extra metatomic --extra torch-sim \
+            --extra develop --extra docs --extra cuda --extra cueq-cu12 \
+            "$RUNNER_TEMP"/wheels/franken-*.whl

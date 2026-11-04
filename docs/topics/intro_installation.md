@@ -17,7 +17,7 @@ uv add franken
 ```
 
 Franken uses the supported MACE 0.3 release series, starting at 0.3.17. The
-`franken[mace]` extra remains an alias for existing installation commands.
+separate `mace` extra is no longer needed or provided.
 There is no additional backbone package to install for the MACE examples.
 Pretrained checkpoints download on first use, which requires network access.
 

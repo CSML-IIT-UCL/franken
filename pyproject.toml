@@ -57,8 +57,6 @@ develop = [
     "pytest",
     "packaging",
 ]
-# Compatibility alias: MACE is included in the base installation.
-mace = []
 # Keep frontend, core and native ops on one MACE-supported release series.
 # CUDA wheels are opt-in because installers cannot inspect torch.version.cuda.
 cueq-cu12 = [

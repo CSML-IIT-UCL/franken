@@ -39,7 +39,7 @@ uv add franken
 
 MACE runs on CPUs and CUDA GPUs through PyTorch. Install a platform-specific
 PyTorch build first if you need a particular CUDA version; CuPy is optional.
-The old `franken[mace]` extra remains a compatibility alias.
+MACE is included in the default installation; no backbone extra is needed.
 
 Optional dependencies include:
 
