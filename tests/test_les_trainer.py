@@ -154,7 +154,7 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
     )
     if save_fmaps:
         trainer.fmaps = {"forces": [-torch.ones(2, 3, dtype=dt)]}
-    loss = trainer._backward_batch(model, [0], None)
+    loss = trainer._full_gradient(model, None)
     torch.testing.assert_close(loss, torch.tensor(3.0, dtype=dt))
     torch.testing.assert_close(model.les.weight.grad, torch.tensor([[6.0]]))
     # TODO: The following should be a different test.
@@ -223,24 +223,11 @@ def test_les_force_and_parameter_derivatives(periodic):
     )
 
 
-def test_accumulated_gradient_matches_full_mean_and_partial_batch():
-    trainer = make_trainer(LESConfig(mode="alternating"))
-    model = ToyModel()
-    for indices in ([0, 1, 2, 3, 4], [4]):
-        model.zero_grad()
-        loss = trainer._backward_batch(model, indices, {"energy": 1.0})
-        x = torch.tensor([i + 1.0 for i in indices], dtype=torch.float64)
-        torch.testing.assert_close(loss, (2 * x).square().mean())
-        torch.testing.assert_close(
-            model.les.weight.grad.squeeze(), -4 * x.square().mean()
-        )
-
-
 def test_accumulated_gradient_with_energy_and_force_losses():
     trainer = make_trainer(LESConfig(mode="alternating"))
     model = ToyModel()
-    loss = trainer._backward_batch(
-        model, list(range(5)), {"energy": 0.25, "forces": 0.75}
+    loss = trainer._full_gradient(
+        model, {"energy": 0.25, "forces": 0.75}
     )
     x = torch.arange(1, 6, dtype=torch.float64)
     torch.testing.assert_close(loss, 0.25 * (2 * x).square().mean() + 3 * 0.75)
@@ -367,7 +354,7 @@ def test_les_gradient_matches_rff_normal_equations(normalization):
     weights = {"energy": 1 / 1.2, "forces": 0.2 / 1.2}
     with torch.no_grad():
         model.rf.weights.normal_()
-    trainer._backward_batch(model, list(range(len(dataset))), weights)
+    trainer._full_gradient(model, weights)
     expected = sum(
         weights[t] * (covs[t] @ model.rf.weights.detach().flatten() - coeffs[t])
         for t in weights
@@ -383,7 +370,7 @@ def test_les_gradient_matches_rff_normal_equations(normalization):
     with torch.no_grad():
         model.rf.weights.copy_(solution.reshape(1, -1))
     model.zero_grad()
-    trainer._backward_batch(model, list(range(len(dataset))), weights)
+    trainer._full_gradient(model, weights)
     torch.testing.assert_close(
         model.les.weight.grad.flatten() + 2 * 0.03 * solution / len(dataset),
         torch.zeros_like(solution),
@@ -512,7 +499,7 @@ def test_adam_epochs_and_persistent_state(batch_size, steps):
     )
     model = ToyModel()
     with patch.object(
-        trainer, "_backward_batch", wraps=trainer._backward_batch
+        trainer, "_backward_batch", wraps=trainer._full_gradient
     ) as batch:
         trainer._fit_les(model, 0, HPS)
         seen = [call.args[1] for call in batch.call_args_list]
@@ -543,7 +530,7 @@ def test_lbfgs_reduces_loss_uses_fixed_dataset_and_resets_history():
     real_optimizer = torch.optim.LBFGS
     with patch("torch.optim.LBFGS", wraps=real_optimizer) as construct:
         with patch.object(
-            trainer, "_backward_batch", wraps=trainer._backward_batch
+            trainer, "_backward_batch", wraps=trainer._full_gradient
         ) as batch:
             trainer._fit_les(model, 0, HPS)
             trainer._fit_les(model, 1, HPS)

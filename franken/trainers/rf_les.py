@@ -249,10 +249,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             raise ValueError("At least one training target must have positive weight")
         return {t: w / total_weight for t, w in weights.items()}
 
-    def _backward_batch(self, model, normalization):
+    def _full_gradient(self, model, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         n_samples = len(self.train_dataloader.dataset)
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
+        # Each device will process its own subset of the dataset.
         for i, (data, targets) in enumerate(self.train_dataloader):
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
@@ -286,10 +287,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     data=data,
                     add_energy_shift=False,
                 )
-            # Match the RFF normal equations: all feature maps and targets
-            # represent the observable divided by N, and vector components
-            # are summed (not averaged). Covariance normalization must also
-            # be shared by the two alternating subproblems.
             loss = total.new_zeros(())
             for target, weight in self.rel_tgt_weight.items():
                 residual = (
@@ -304,6 +301,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             loss.backward()
             total += loss.detach()
         dist_utils.all_sum(total)
+        # Sum gradients over all devices
         grads = [p.grad for p in model.parameters() if p.grad is not None]
         dist_utils.all_sum_coalesced(grads)
         return total
@@ -316,7 +314,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         proj_mat: Tensor | None = None,
     ):
         local_n_samples = len(self._train_dataset_indices)
-        indices = list(range(local_n_samples))
 
         for target in self.training_targets:
             assert len(self.fmaps[target]) == local_n_samples, (
@@ -338,7 +335,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 group["lr"] = lr
             for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
                 optim.zero_grad(set_to_none=True)
-                self._backward_batch(model, normalization)
+                self._full_gradient(model, normalization)
                 optim.step()
         else:
             # RFF refits change this objective: do not reuse curvature history.
@@ -361,9 +358,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             def closure():
                 if self.mode == "variable_projection":
                     assert proj_mat is not None
-                    self._refit_projected_rff(model, proj_mat, normalization)
+                    self._fit_projected_rff(model, proj_mat, normalization)
                 optim.zero_grad(set_to_none=True)
-                loss = self._backward_batch(model, normalization)
+                loss = self._full_gradient(model, normalization)
                 if self.mode == "variable_projection":
                     # Envelope theorem: no derivative through the exact RFF
                     # minimizer is needed. Its ridge cost is still needed by
@@ -399,7 +396,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         return torch.linalg.cholesky(matrix, upper=True)
 
     @torch.no_grad()
-    def _refit_projected_rff(
+    def _fit_projected_rff(
         self,
         model: LESFrankenPotential,
         proj_mat: Tensor,
@@ -421,7 +418,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         # weights from [n_rf, 1] to [1, n_rf]
         solution = solution.unsqueeze(0).squeeze(-1)
         model.rf.weights = torch.nn.Parameter(solution)
-        # model.rf.weights.copy_(solution)
         return solution
 
     @no_jit()
@@ -441,7 +437,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.training_history = []
         self._les_optimizer = None
         self.on_fit_start(model)
-        # TODO[Distributed] ensure that the model is the same on each device
 
         self._train_dataset_indices = list(self.train_dataloader.sampler)
         covs, coeffs, normalization, proj_mat = None, None, None, None
@@ -461,13 +456,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         if self.mode == "variable_projection":
             assert covs is not None
             assert proj_mat is not None
-            rf_weights = self._refit_projected_rff(
+            rf_weights = self._fit_projected_rff(
                 model,
                 proj_mat,
                 normalization,
                 direct_coeffs=coeffs,
             )
-            # model.rf.weights = torch.nn.Parameter(rf_weights)
             for outer_it in range(self.num_cycles):
                 self._fit_les(
                     model,
@@ -482,7 +476,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 if self.mode == "alternating":
                     assert covs is not None
                     assert proj_mat is not None
-                    rf_weights = self._refit_projected_rff(
+                    rf_weights = self._fit_projected_rff(
                         model,
                         proj_mat,
                         normalization,
@@ -493,7 +487,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                             f"NaNs encountered in training after RFF step. Stopping at cycle {outer_it}."
                         )
                         break
-                    # model.rf.weights = torch.nn.Parameter(rf_weights)
                     self._print_eval(model, outer_it, step="rff")
                 # 2. Train LES on residuals from RFF training
                 #    or in joint mode, train also RFF coefficients jointly.
@@ -504,11 +497,8 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                     proj_mat=proj_mat,
                 )
 
-        # Optimizer moments correspond to the last stage, not the restored model.
         self._les_optimizer = None
-
         log_collection = LogCollection([self.create_log_entry(model)])
-
         return log_collection, model.rf.weights.detach()
 
     @no_jit()
@@ -545,15 +535,11 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             for i, (data, targets) in enumerate(progress_bar):
                 data = data.to(device=self.device)
                 targets = targets.to(device=self.device)
-                if all_weights is None or all_weights.shape[0] <= 100:
-                    forces_mode = "torch.autograd"
-                else:
-                    forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
                 predictions = model.predict(
                     targets=self.training_targets,  # type: ignore
                     data=data,
                     weights=all_weights,
-                    differential_mode=forces_mode,
+                    differential_mode="torch.autograd",
                     add_energy_shift=(False if split == DataSplit.TRAIN else True),
                 )
                 for tt, val in predictions.items():
