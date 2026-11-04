@@ -287,14 +287,14 @@ class LESConfig:
     """Number of alternating RFF/LES cycles."""
     epochs_per_cycle: HPSearchConfig | list[int] | int = 50
     """Adam passes through the complete training set per LES stage."""
-    batch_size: int | None = None
-    """Configurations per Adam update; None accumulates the full training set."""
     learning_rate: HPSearchConfig | list[float] | float = 1e-4
     """Adam learning rate."""
     lr_decay: HPSearchConfig | list[float] | float = 1.0
     """Multiply the learning rate by this factor after each alternating cycle."""
     lbfgs_max_iter: HPSearchConfig | list[int] | int = 20
     """Maximum L-BFGS iterations per LES stage (each can evaluate multiple closures)."""
+    lbfgs_max_eval: HPSearchConfig | list[int] | int = 40
+    """Maximum number of closure evaluations for each L-BFGS run (each run consists of `lbfgs_max_iter` iterations)."""
     lbfgs_learning_rate: HPSearchConfig | list[float] | float = 1.0
     lbfgs_history_size: HPSearchConfig | list[int] | int = 20
     lbfgs_tolerance_grad: HPSearchConfig | list[float] | float = 1e-10
@@ -304,7 +304,6 @@ class LESConfig:
     """Variable projection refits RFF at every L-BFGS trial point."""
 
     def __post_init__(self):
-        return
         if self.optimizer not in {"adam", "lbfgs"}:
             raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
         if self.mode not in {"alternating", "variable_projection"}:
@@ -320,12 +319,6 @@ class LESConfig:
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        if self.batch_size is not None and (
-            not isinstance(self.batch_size, int)
-            or isinstance(self.batch_size, bool)
-            or self.batch_size < 1
-        ):
-            raise ValueError("batch_size must be a positive integer or None")
         for name in (
             "learning_rate",
             "lbfgs_learning_rate",
@@ -336,8 +329,6 @@ class LESConfig:
             value = getattr(self, name)
             if not 0 < value < float("inf"):
                 raise ValueError(f"{name} must be positive and finite")
-        if self.optimizer == "lbfgs" and self.batch_size is not None:
-            raise ValueError("L-BFGS requires batch_size=None (full training set)")
 
     def to_ckpt(self):
         return dataclasses.asdict(self)
