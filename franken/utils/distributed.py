@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple, Union
+from typing import Container, List, Tuple, Union
 import warnings
 from socket import gethostname
 
@@ -160,3 +160,49 @@ def all_gather_object(obj) -> List:
 def print0(*args, **kwargs):
     if get_rank() == 0:
         print(*args, **kwargs)
+
+
+def sync_module_states(
+    module: torch.nn.Module,
+    params_and_buffers_to_ignore: Container[str],
+    broadcast_buffers: bool = True,
+) -> None:
+    """
+    Sync ``module``'s parameters and buffers state.
+
+    Syncs ``module``'s parameters and buffers state so that all ranks contain
+    the same module state across all ranks. Note that this API assumes that all
+    parameter shapes are consistent before running the synchronization. This can
+    be checked with ``_verify_param_shape_across_processes``.
+    """
+    if not torch.distributed.is_initialized():
+        return
+    module_states: list[torch.Tensor] = []
+    for name, param in module.named_parameters():
+        if name not in params_and_buffers_to_ignore:
+            module_states.append(param.detach())
+
+    if broadcast_buffers:
+        for name, buffer in module.named_buffers():
+            if name not in params_and_buffers_to_ignore:
+                module_states.append(buffer.detach())
+
+    _sync_params_and_buffers(
+        process_group=torch.distributed.group.WORLD,
+        module_states=module_states,
+        broadcast_bucket_size=250 * 1024 * 1024,
+        src=0,
+    )
+
+
+def _sync_params_and_buffers(
+    process_group: torch.distributed.ProcessGroup,
+    module_states: list[torch.Tensor],
+    broadcast_bucket_size: int,
+    src: int,
+) -> None:
+    """Synchronize ``module_states`` (list of tensors) across all processes by broadcasting them from rank 0."""
+    if len(module_states) > 0:
+        torch.distributed._broadcast_coalesced(
+            process_group, module_states, broadcast_bucket_size, src
+        )

@@ -113,6 +113,7 @@ class RandomFeaturesTrainer(BaseTrainer):
 
     def on_fit_start(self, model: FrankenPotential):
         model.to(self.device)
+        dist_utils.sync_module_states(model, [], True)
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
