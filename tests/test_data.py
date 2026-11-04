@@ -6,6 +6,7 @@ import torch.distributed
 from torch.multiprocessing import Process, Pipe, SimpleQueue
 
 from franken.data import Configuration, FrankenAtomsDataset
+from franken.data.distributed_sampler import calc_distributed_indices
 from franken.datasets.registry import DATASET_REGISTRY
 
 
@@ -65,65 +66,70 @@ def mocked_dataset(num_atoms, dtype, device, num_configs: int = 1):
     return data
 
 
-def distributed_length_inner_fn(num_samples):
-    data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-    dataset = FrankenAtomsDataset(
-        data_path,
-        split="train",
-        num_random_subsamples=num_samples,
-        subsample_rng=None,
-        gnn_config=None,
-    )
-    assert len(dataset) == num_samples
-    dataloader = dataset.get_dataloader(True)
-    rank = torch.distributed.get_rank()
-    ws = torch.distributed.get_world_size()
-    assert len(dataloader) == (len(dataset) // ws) + int(len(dataset) % ws > rank)
-
-
-@pytest.mark.parametrize("num_samples", [1, 7, 19])
-@pytest.mark.parametrize("num_procs", [1, 4])
-def test_distributed_dataloader_length(num_samples, num_procs):
-    fn_ = partial(distributed_length_inner_fn, num_samples)
-    init_distributed_cpu(num_procs, fn_)
-
-
-def distributed_order_inner_fn(num_samples, num_procs, ids_queue):
-    data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
-    dataset = FrankenAtomsDataset(
-        data_path,
-        split="train",
-        num_random_subsamples=num_samples,
-        subsample_rng=None,
-        gnn_config=None
-    )
-    assert len(dataset) == num_samples
-    dataloader = dataset.get_dataloader(True)
-    rank = torch.distributed.get_rank()
-    dl_elements = [el for el in dataloader]
-    dl_id = 0
-    for i in range(rank, num_samples, num_procs):
-        expected = dataset[i]
-        assert isinstance(expected, tuple)
-        torch.testing.assert_close(
-            dl_elements[dl_id][0].atom_pos, expected[0].atom_pos
+class TestDistributedDataloader:
+    def distributed_length_inner_fn(self, num_samples):
+        data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path,
+            split="train",
+            num_random_subsamples=num_samples,
+            subsample_rng=None,
+            gnn_config=None,
         )
-        torch.testing.assert_close(
-            dl_elements[dl_id][1].forces, expected[1].forces
+        assert len(dataset) == num_samples
+        dataloader = dataset.get_dataloader(True)
+        rank = torch.distributed.get_rank()
+        ws = torch.distributed.get_world_size()
+        assert len(dataloader) == (len(dataset) // ws) + int(len(dataset) % ws > rank)
+
+    @pytest.mark.parametrize("num_samples", [1, 7, 19])
+    @pytest.mark.parametrize("num_procs", [1, 4])
+    def test_distributed_dataloader_length(self, num_samples, num_procs):
+        fn_ = partial(self.distributed_length_inner_fn, num_samples)
+        init_distributed_cpu(num_procs, fn_)
+
+    def distributed_order_inner_fn(self, num_samples, num_procs, ids_queue):
+        data_path = DATASET_REGISTRY.get_path("test", "long", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path,
+            split="train",
+            num_random_subsamples=num_samples,
+            subsample_rng=None,
+            gnn_config=None
         )
-        dl_id += 1
-        ids_queue.put(i)
-    assert dl_id == len(dl_elements)
+        assert len(dataset) == num_samples
+        dataloader = dataset.get_dataloader(True)
+        rank = torch.distributed.get_rank()
+        dl_elements = [el for el in dataloader]
+        dl_id = 0
+        for i in range(rank, num_samples, num_procs):
+            expected = dataset[i]
+            assert isinstance(expected, tuple)
+            torch.testing.assert_close(
+                dl_elements[dl_id][0].atom_pos, expected[0].atom_pos
+            )
+            torch.testing.assert_close(
+                dl_elements[dl_id][1].forces, expected[1].forces
+            )
+            dl_id += 1
+            ids_queue.put(i)
+        assert dl_id == len(dl_elements)
 
+    def test_distributed_dataloader_order(self):
+        num_samples = 7
+        num_procs = 3
+        ids_queue = SimpleQueue()
+        fn_ = partial(self.distributed_order_inner_fn, num_samples, num_procs, ids_queue)
+        init_distributed_cpu(num_procs, fn_)
+        # Assert all IDs were processed - only once
+        all_ids = []
+        while not ids_queue.empty():
+            all_ids.append(ids_queue.get())
+        assert sorted(all_ids) == list(range(num_samples))
 
-def test_distributed_dataloader_order():
-    num_samples = 7
-    num_procs = 3
-    ids_queue = SimpleQueue()
-    fn_ = partial(distributed_order_inner_fn, num_samples, num_procs, ids_queue)
-    init_distributed_cpu(num_procs, fn_)
-    # Assert all IDs were processed - only once
-    all_ids = []
-    while not ids_queue.empty():
-        all_ids.append(ids_queue.get())
-    assert sorted(all_ids) == list(range(num_samples))
+    def test_distributed_indices_1proc(self):
+        ids = calc_distributed_indices(5, 1, 0)
+        assert ids == [0, 1, 2, 3, 4]
+
+        with pytest.raises(AssertionError):
+            ids = calc_distributed_indices(5, 1, 1)
