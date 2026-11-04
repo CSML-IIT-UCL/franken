@@ -1,0 +1,38 @@
+{
+  "status": "queued",
+  "preparation_job": 483907,
+  "benchmark_job": 483913,
+  "superseded_pending_job": 483908,
+  "remote_results": "/projects/dynrepr/franken-inference-20261104-1793779987660/results",
+  "hardware": "one dedicated A100 80GB",
+  "cpus": 2,
+  "host_memory": "16G",
+  "walltime_minutes": 5,
+  "cells": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    8,
+    10
+  ],
+  "atoms": [
+    8,
+    64,
+    216,
+    512,
+    1000,
+    1728,
+    4096,
+    8000
+  ],
+  "warmup": 2,
+  "timed_repeats": 5,
+  "features": 4096,
+  "benchmark_sha256": "d71a1652774fc2857aaaa002e9955ded922a12bd88ac5f51976aa274e93c6c56",
+  "cleanup": "Slurm batch exit trap removes isolated environment, models, scripts and caches; deliberate results are retained.",
+  "package_source_revision": "202f00f",
+  "wheel_sha256": "11b753289fb84bef6504e254f633f42fd1c614b90d30deb8b7bf7535d5821a20"
+}

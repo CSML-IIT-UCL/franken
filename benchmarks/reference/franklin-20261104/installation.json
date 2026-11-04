@@ -1,0 +1,32 @@
+{
+  "pip_default": {
+    "python": "3.11.14",
+    "mace": "0.3.17",
+    "torch": "2.10.0+cpu",
+    "pip_check": "passed",
+    "training": "best_ckpt.pt produced",
+    "cueq_installed": false,
+    "mace_extra_present": false,
+    "manager_version": "26.3"
+  },
+  "uv_default": {
+    "python": "3.13.11",
+    "torch": "2.10.0+cpu",
+    "mace": "0.3.17",
+    "training": "best_ckpt.pt produced",
+    "manager_version": "uv 0.9.28",
+    "dependency_check": "passed on Python 3.13.11"
+  },
+  "resolution": {
+    "pip_dry_run": [
+      "pet,metatomic,torch-sim,develop,docs,cuda,cueq-cu12",
+      "pet,metatomic,torch-sim,develop,docs,cuda,cueq-cu13"
+    ],
+    "uv_compile_all_extras_python": [
+      "3.11",
+      "3.13"
+    ],
+    "uv_add_no_sync_extras": "pet,metatomic,torch-sim,develop,docs,cuda,cueq-cu12",
+    "note": "PyTorch CPU index restricted to torch with explicit=true; checks resolve extras, not native execution."
+  }
+}
