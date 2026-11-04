@@ -39,7 +39,6 @@ State = Literal["CC", "CP", "PP"]
 ENERGY = franken.data.base.ENERGY_TARGET_KEY
 FORCES = franken.data.base.FORCES_TARGET_KEY
 SCRIPT_DIR = Path(__file__).parent
-DATASET_NAME = "dimers_CC_0"
 
 
 @dataclass
@@ -52,11 +51,11 @@ class DimersDataset:
     distances: list[float]
 
 
-def load_dataset() -> DimersDataset:
+def load_dataset(name) -> DimersDataset:
     """Load the registered train/validation splits for the first CC scan."""
     data = []
     for split in ("train", "val"):
-        path = DATASET_REGISTRY.get_path(DATASET_NAME, split, CacheDir.get())
+        path = DATASET_REGISTRY.get_path(name, split, CacheDir.get())
         data.extend(read(path, index=":"))
     first = data[0]
     return DimersDataset(
@@ -70,7 +69,7 @@ def load_dataset() -> DimersDataset:
 
 
 def train_model(
-    dset: DimersDataset,
+    dset: DatasetConfig,
     solver: SolverConfig,
     backbone: BackboneConfig,
     rfs: RFConfig,
@@ -81,14 +80,14 @@ def train_model(
     """Run the short-range fit or the alternating RFF + LES fit."""
     kind = "les" if use_les else "franken"
     config = AutotuneConfig(
-        dataset=DatasetConfig(name=DATASET_NAME),
+        dataset=dset,
         solver=solver,
         backbone=backbone,
         rfs=rfs,
         les=les_config if use_les else None,
         best_model_selection=["energy_MAE", "forces_MAE"],
         eval_splits=["val"],
-        run_dir=str(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}"),
+        run_dir=str(SCRIPT_DIR / f"{kind}_outputs/{dset.name}"),
         # Match the explicit weights used by train_les_fresh.py. Spectral
         # normalization changes the relative energy/force weighting.
         rf_normalization=None,
@@ -176,8 +175,8 @@ def evaluate_and_plot(dset: DimersDataset, *, use_les: bool) -> None:
 
 
 if __name__ == "__main__":
-    datasets = [load_dataset()]
-    print(f"Loaded {len(datasets)} datasets")
+    dset_name = "dimers_CC_0"
+    dset = load_dataset(dset_name)
 
     backbone = MaceBackboneConfig("mace_mp/small")
     rfs = MultiscaleGaussianRFConfig(
@@ -202,45 +201,28 @@ if __name__ == "__main__":
         N_max=20,
         optimizer="lbfgs",
         mode="variable_projection",
-        num_cycles=5,
+        num_cycles=10,
         batch_size=None,
         lbfgs_learning_rate=1.0,
-        lbfgs_max_iter=20,  # [10, 20, 40, 80],
+        lbfgs_max_iter=80,  # [10, 20, 40, 80],
         lbfgs_history_size=20,  # [20, 80]
     )
+    train_model(
+        DatasetConfig(dset_name),
+        SolverConfig(
+            l2_penalty=[1e-6],
+            energy_weight=1.0,
+            force_weight=[0.1],
+        ),
+        backbone,
+        rfs,
+        use_les=True,
+        les_config=les_config,
+    )
+    evaluate_and_plot(dset, use_les=True)
 
-    for dset in datasets:
-        # train_model(
-        #     dset,
-        #     SolverConfig(
-        #         l2_penalty=[1e-8, 1e-6],
-        #         force_weight=[1.0, 0.1],
-        #     ),
-        #     backbone,
-        #     rfs,
-        #     use_les=False,
-        # )
-        # evaluate_and_plot(dset, use_les=False)
-
-        # sr_run = newest_run(SCRIPT_DIR / f"franken_outputs/dimer_{dset.id}")
-        # with (sr_run / "best.json").open() as file:
-        #     best_solver = json.load(file)["hyperparameters"]["solver"]
-        train_model(
-            dset,
-            SolverConfig(
-                l2_penalty=[1e-8, 1e-6],
-                energy_weight=1.0,
-                force_weight=[1.0, 0.1],
-            ),
-            backbone,
-            rfs,
-            use_les=True,
-            les_config=les_config,
-        )
-        evaluate_and_plot(dset, use_les=True)
-
-        kind = "les"
-        run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
-        hyperparameter_1 = "forces_weight"
-        hyperparameter_2 = "l2_penalty"
-        plot_HPGridSearch(run, hyperparameter_1, hyperparameter_2, kind)
+    kind = "les"
+    run = newest_run(SCRIPT_DIR / f"{kind}_outputs/dimer_{dset.id}")
+    hyperparameter_1 = "forces_weight"
+    hyperparameter_2 = "l2_penalty"
+    #plot_HPGridSearch(run, hyperparameter_1, hyperparameter_2, kind)
