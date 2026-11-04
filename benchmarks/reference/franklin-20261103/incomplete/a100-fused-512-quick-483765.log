@@ -1,31 +1,0 @@
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/e3nn/o3/_wigner.py:10: UserWarning: Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.
-  _Jd, _W3j_flat, _W3j_indices = torch.load(os.path.join(os.path.dirname(__file__), 'constants.pt'))
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_script.py:1480: DeprecationWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-ASE -> Franken (train):   0%|          | 0/2 [00:00<?, ?it/s]ASE -> Franken (train): 100%|██████████| 2/2 [00:00<00:00, 20.57it/s]
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_script.py:1480: DeprecationWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
-  warnings.warn(
-Computing dataset statistics:   0%|          | 0/2 [00:00<?, ?it/s]Computing dataset statistics: 100%|██████████| 2/2 [00:00<00:00,  5.19it/s]
-Computing dataset statistics:   0%|          | 0/2 [00:00<?, ?it/s]Computing dataset statistics: 100%|██████████| 2/2 [00:00<00:00,  6.00it/s]
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/torch/jit/_serialization.py:176: DeprecationWarning: `torch.jit.load` is deprecated. Please switch to `torch.export`.
-  warnings.warn(
-/projects/dynrepr/franken-cueq-benchmark-20261103T211756Z/environment/lib/python3.12/site-packages/mace/modules/models.py:87: UserWarning: To copy construct from a tensor, it is recommended to use sourceTensor.detach().clone() or sourceTensor.detach().clone().requires_grad_(True), rather than torch.tensor(sourceTensor).
-  "atomic_numbers", torch.tensor(atomic_numbers, dtype=torch.int64)
-srun: got SIGCONT
-slurmstepd: error: *** JOB 483765 ON afnode01 CANCELLED AT 2026-11-03T23:13:50 ***
-srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
-srun: forcing job termination
