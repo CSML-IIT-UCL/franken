@@ -7,9 +7,8 @@
 This interface enables to use Franken models in [torch-sim](https://github.com/TorchSim/torch-sim).
 
 ## What is supported
-- Outputs: `energy`, `forces`
+- Outputs: `energy`, `forces`, and optional `stress` (`compute_stress=True`)
 - Batched evaluation
-- Stress/virials: not supported in this interface
 
 ## Installation
 
@@ -46,6 +45,20 @@ from franken.rf.model import FrankenPotential
 franken = FrankenPotential.load("path/to/best_ckpt.pt", map_location="cuda")
 model = FrankenTorchSimModel(franken, device="cuda", dtype=torch.float32)
 ```
+
+For cuEquivariance inference with a MACE backbone, install the matching
+`cueq-cu12` or `cueq-cu13` extra alongside `torch-sim`, then select the backend
+when loading the Franken model:
+
+```python
+franken = FrankenPotential.load(
+    "path/to/best_ckpt.pt", map_location="cuda", use_cueq=True
+)
+model = FrankenTorchSimModel(franken, device="cuda")
+```
+
+This requires a supported NVIDIA GPU and the {ref}`matching CUDA installation
+<choosing-a-pytorch-build>`. Training continues to use e3nn.
 
 ## Run 
 

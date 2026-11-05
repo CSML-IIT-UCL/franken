@@ -37,6 +37,15 @@ uv add franken
 In an existing environment or uv project, only the last command is needed.
 The installer will choose a PyTorch build automatically; if you prefer choosing your own, see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
 
+With `conda` , use:
+
+```bash
+conda create -n franken python=3.13 pip
+conda activate franken
+python -m pip install franken
+```
+
+
 ## Extras
 
 Franken supports a wide range of integrations, which can be installed as extras:
@@ -45,12 +54,13 @@ Franken supports a wide range of integrations, which can be installed as extras:
 |---|---|
 | `metatomic` | [PET/UPET](https://lab-cosmo.github.io/upet/) backbones and inference with [Metatomic](https://docs.metatensor.org/) |
 | `torch-sim` | Inference through [TorchSim](https://torchsim.github.io/torch-sim/) |
-| `cueq-cu<12/13>` | [cuEquivariance](https://docs.nvidia.com/cuda/cuequivariance/) CUDA 12/13 inference kernels |
-| `cuda` | Memory-efficient solvers, through [CuPy](https://cupy.dev/) **source build** (requires a local CUDA toolkit) |
+| `cueq-cu12` / `cueq-cu13` | [cuEquivariance](https://docs.nvidia.com/cuda/cuequivariance/) CUDA 12/13 inference kernels |
+| `cupy-cu12` / `cupy-cu13` | [CuPy](https://cupy.dev/) binary wheels and CUDA components for the low-memory solver |
 
-For the cuEquivariance extras, first select the matching CUDA PyTorch build
-using the recipes below. For CuPy, the {ref}`binary-wheel recipe <cupy-for-the-low-memory-solver>`
-is usually easier than the legacy `cuda` extra.
+Choose one CUDA family matching your PyTorch build for the cuEquivariance and
+CuPy extras, using the recipes below. CuPy accelerates the low-memory training
+solver; cuEquivariance accelerates MACE inference. They can be installed
+independently or together.
 
 You can combine the extras you want in one requirement, for example:
 
@@ -91,14 +101,14 @@ For CUDA 12.8 with cuEquivariance and binary CuPy:
 
 ```bash
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    "torch==2.11.0+cu128" "franken[cueq-cu12]" "cupy-cuda12x[ctk]"
+    "torch==2.11.0+cu128" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 For CUDA 13.0:
 
 ```bash
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 \
-    "torch==2.14.1+cu130" "franken[cueq-cu13]" "cupy-cuda13x[ctk]"
+    "torch==2.14.1+cu130" "franken[cueq-cu13,cupy-cu13]"
 ```
 
 These pip recipes select a PyTorch build explicitly.
@@ -128,13 +138,13 @@ For CUDA 12.8, change the index URL to
 `https://download.pytorch.org/whl/cu128` and run:
 
 ```bash
-uv add "torch>=2.5" "franken[cueq-cu12]" "cupy-cuda12x[ctk]"
+uv add "torch>=2.5" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 For CUDA 13.0, use `https://download.pytorch.org/whl/cu130` and run:
 
 ```bash
-uv add "torch>=2.5" "franken[cueq-cu13]" "cupy-cuda13x[ctk]"
+uv add "torch>=2.5" "franken[cueq-cu13,cupy-cu13]"
 ```
 
 The explicit index binds PyTorch to the selected build while leaving other
@@ -152,31 +162,32 @@ In uv, prefix this command with `uv run`. `torch.version.cuda` is `None` for a
 CPU-only build, `12.x` for a CUDA 12 build, and `13.x` for a CUDA 13 build.
 `torch.cuda.is_available()` must be true to execute on the GPU. Installing a
 cuEquivariance extra does not turn a CPU-only PyTorch into a CUDA build.
+  
+## Supported Accelerators
 
 (cupy-for-the-low-memory-solver)=
-## CuPy for the low-memory solver
+### CuPy for the low-memory solver
 
 CuPy is optional acceleration for the low-memory solver; ordinary GPU training
 does not require it. Install one binary distribution matching your CUDA family:
 
 ```bash
-python -m pip install "cupy-cuda12x[ctk]"
+python -m pip install "franken[cupy-cu12]"
 # Or, for CUDA 13:
-python -m pip install "cupy-cuda13x[ctk]"
+python -m pip install "franken[cupy-cu13]"
 ```
 
-In uv, use `uv add` in place of `python -m pip install`. The `[ctk]` extra installs
+In uv, use `uv add` in place of `python -m pip install`. These extras install
+`cupy-cuda12x[ctk]` or `cupy-cuda13x[ctk]`, respectively. The `[ctk]` dependency installs
 CUDA runtime/compiler components as Python wheels, so a system-wide CUDA toolkit
 is not needed. A compatible NVIDIA driver is still required. See the
 [CuPy installation guide](https://docs.cupy.dev/en/stable/install.html).
 
-Do not install `cupy`, `cupy-cuda12x` and `cupy-cuda13x` together: they provide
-the same Python module. In particular, do not add `franken[cuda]` on top of a
-binary CuPy installation. The legacy `cuda` extra requests the source package
-`cupy`; it requires a working local CUDA toolkit and compiler. Its dependency
-constraints are checked in CI, but its source compilation is not.
+Install only one CuPy distribution in an environment: both CUDA variants provide
+the same Python module. Combine extras only within the same CUDA family, such as
+`franken[cueq-cu12,cupy-cu12]`.
 
-## Enable cuEquivariance for inference
+### Enable cuEquivariance for inference
 
 After installing the matching CUDA build and `cueq-cu12` or `cueq-cu13` extra,
 request cuEquivariance explicitly when loading a fitted MACE model:
@@ -201,44 +212,4 @@ model = FrankenPotential.load(
     "path/to/run/best_ckpt.pt", map_location="cuda", use_cueq=True
 )
 ```
-
-Conversion uses unmodified upstream MACE, enables convolution fusion, and
-preserves the fitted random features, coefficients and scaler. Training always
-uses e3nn; cuEquivariance is inference-only. The first evaluation can compile
-kernels, so benchmark after warmup. Smaller systems may be faster with e3nn.
-
-Choose one CUDA variant matching PyTorch. Native cuEquivariance 0.10 kernels were
-verified on Franklin's A100 with PyTorch 2.10/CUDA 12.6; the tested wheel
-fails on Volta/V100. Use e3nn on V100. Pass `use_cueq=False` when loading to override a saved cuEquivariance choice.
-Backend switching applies to eager checkpoints, not existing TorchScript archives.
-
-## Check a training run
-
-Pretrained checkpoints download on first use, which requires network access.
-Run this small installation check with the bundled test data:
-
-```bash
-franken.autotune \
-    --dataset-name test \
-    --backbone mace --mace.path-or-id mace_mp/small \
-    --rf gaussian --gaussian.num-rf 16 --gaussian.length-scale 1 \
-    --force-weight 0.5 --l2-penalty 0.0001 \
-    --jac-chunk-size 2 --run-dir installation-check
-```
-
-In uv, use `uv run franken.autotune ...`. The check writes a fitted checkpoint
-under `installation-check`; the tiny dataset is not an accuracy benchmark.
-Use `python -m pip check` or `uv pip check` to check installed dependencies.
-
-## Conda environments
-
-Conda can provide Python while pip installs Franken and its extras:
-
-```bash
-conda create -n franken python=3.13 pip
-conda activate franken
-python -m pip install "franken[metatomic,torch-sim]"
-```
-
-Follow the same pip recipes for selecting a PyTorch build. Conda environment
-creation is not part of the GitHub installation workflow.
+The first evaluation can compile kernels, so benchmark after warmup. Smaller systems may be faster with `use_cueq=False`.

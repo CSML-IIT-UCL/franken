@@ -47,6 +47,9 @@ Optional dependencies include:
   PyTorch CUDA version. Enable inference with
   `FrankenCalculator(..., use_cueq=True)`; training always uses e3nn.
 - `metatomic` for PET/UPET backbones through Metatomic/Metatrain.
+- `torch-sim` for the TorchSim inference interface.
+- `cupy-cu12` or `cupy-cu13` for CuPy acceleration of the low-memory solver,
+  matching your PyTorch CUDA family.
 - `docs` and `develop` for documentation and development tools.
 
 For example, with a CUDA 13 PyTorch build:

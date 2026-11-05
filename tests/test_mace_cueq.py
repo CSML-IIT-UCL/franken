@@ -133,6 +133,69 @@ def test_fitted_model_cueq_inference_and_reload(model_id, tmp_path):
     )
 
 
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="native cuEquivariance requires CUDA"
+)
+@pytest.mark.parametrize("periodic", [False, True])
+def test_torchsim_cueq_batched_inference(periodic):
+    ts = pytest.importorskip("torch_sim")
+    pytest.importorskip("cuequivariance_torch")
+    if torch.cuda.get_device_capability() == (7, 0):
+        pytest.skip("cuEquivariance 0.10 wheels do not support Volta")
+    from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
+
+    classic = (
+        FrankenPotential(
+            MaceBackboneConfig("mace_mp/small"),
+            GaussianRFConfig(num_random_features=32, length_scale=2.0, rng_seed=17),
+            scale_by_Z=False,
+            num_species=1,
+        )
+        .cuda()
+        .eval()
+    )
+    classic.rf.weights = torch.linspace(
+        -0.4, 0.7, 32, device="cuda", dtype=torch.float64
+    ).reshape(1, -1)
+    atoms = bulk("Si", "diamond", a=5.43) if periodic else molecule("H2O")
+    if not periodic:
+        atoms.center(vacuum=6.0)
+    distorted = atoms.copy()
+    distorted.positions[0, 0] += 0.03
+    systems = [atoms, distorted]
+    state = ts.io.atoms_to_state(
+        systems, device=torch.device("cuda"), dtype=torch.float32
+    )
+    positions = state.positions.clone()
+    adapter = FrankenTorchSimModel(classic, device="cuda", compute_stress=periodic)
+    reference = adapter(state)
+    # Check the adapter against direct predictions, not just against itself.
+    for i, system in enumerate(systems):
+        direct = classic.predict(list(reference), graph(system, classic))
+        for key in reference:
+            actual = (
+                reference[key][state.system_idx == i]
+                if key == "forces"
+                else reference[key][i]
+            )
+            torch.testing.assert_close(
+                actual,
+                direct[key][0] if key == "forces" else direct[key][0, 0],
+                atol=1e-4,
+                rtol=3e-4,
+            )
+    classic.enable_cueq(True)
+    assert adapter.model.gnn.use_cueq
+    for _ in range(2):
+        actual = adapter(state)
+        for key in reference:
+            torch.testing.assert_close(
+                actual[key], reference[key], atol=1e-4, rtol=3e-4
+            )
+            assert not actual[key].requires_grad
+    torch.testing.assert_close(state.positions, positions)
+
+
 def test_training_cli_has_no_cueq_flag():
     from franken.autotune.cli import parse_cli
 

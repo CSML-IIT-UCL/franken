@@ -92,17 +92,19 @@ jobs:
             uv pip check --python "$install_python"
           done
           "$install_python" -c 'import mace, metatomic.torch, metatrain, torch_sim, sphinx, pytest'
-      - name: Resolve legacy source extra and all optional dependency constraints
+      - name: Resolve optional dependencies for each CUDA family
         if: matrix.scenario == 'combined-extras'
         run: |
-          # Includes cuda (source CuPy) and both cueq variants; resolution only.
-          # Actual source compilation requires a CUDA toolkit and is not tested here.
-          uv pip compile pyproject.toml --all-extras \
-            --python-version '${{ matrix.python }}' \
-            --output-file "$RUNNER_TEMP/all-extras.txt"
+          for cuda in 12 13; do
+            uv pip compile pyproject.toml \
+              --extra metatomic --extra torch-sim --extra docs --extra develop \
+              --extra "cupy-cu$cuda" --extra "cueq-cu$cuda" \
+              --python-version '${{ matrix.python }}' \
+              --output-file "$RUNNER_TEMP/extras-cu$cuda.txt"
+          done
 
   pytorch-build:
-    name: ${{ matrix.manager }} / PyTorch ${{ matrix.build.index }} installation
+    name: ${{ matrix.manager }} / PyTorch ${{ matrix.build.index }} / ${{ matrix.build.extras }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -112,17 +114,22 @@ jobs:
         build:
           - index: cpu
             extras: metatomic,torch-sim
-            cupy: ''
             cuda: ''
             torch: ''
           - index: cu128
-            extras: cueq-cu12
-            cupy: cupy-cuda12x[ctk]
+            extras: cupy-cu12
+            cuda: '12'
+            torch: torch==2.11.0+cu128
+          - index: cu128
+            extras: cueq-cu12,cupy-cu12
             cuda: '12'
             torch: torch==2.11.0+cu128
           - index: cu130
-            extras: cueq-cu13
-            cupy: cupy-cuda13x[ctk]
+            extras: cupy-cu13
+            cuda: '13'
+            torch: torch==2.14.1+cu130
+          - index: cu130
+            extras: cueq-cu13,cupy-cu13
             cuda: '13'
             torch: torch==2.14.1+cu130
     steps:
@@ -138,15 +145,11 @@ jobs:
         working-directory: ${{ runner.temp }}
         env:
           TORCH_INDEX: https://download.pytorch.org/whl/${{ matrix.build.index }}
-          CUPY_PACKAGE: ${{ matrix.build.cupy }}
           TORCH_PACKAGE: ${{ matrix.build.torch }}
         run: |
           wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
           package="${wheel[0]}[${{ matrix.build.extras }}]"
           packages=("$package")
-          if [ -n "$CUPY_PACKAGE" ]; then
-            packages+=("$CUPY_PACKAGE")
-          fi
           if [ '${{ matrix.manager }}' = pip ]; then
             python -m venv install-env
             install-env/bin/python -m pip install --upgrade pip
@@ -175,6 +178,7 @@ jobs:
       - name: Check installed packages and the selected build
         env:
           EXPECTED_CUDA: ${{ matrix.build.cuda }}
+          EXPECTED_CUEQ: ${{ contains(matrix.build.extras, 'cueq-') }}
         working-directory: ${{ runner.temp }}
         run: |
           if [ '${{ matrix.manager }}' = pip ]; then
@@ -191,9 +195,11 @@ jobs:
           expected = os.environ['EXPECTED_CUDA']
           if expected:
               assert torch.version.cuda and torch.version.cuda.split('.')[0] == expected, torch.version.cuda
-              import cuequivariance_torch
               import cupy
-              print(version('cuequivariance-ops-torch-cu' + expected), cupy.__version__)
+              print(version('cupy-cuda' + expected + 'x'), cupy.__version__)
+              if os.environ['EXPECTED_CUEQ'] == 'true':
+                  import cuequivariance_torch
+                  print(version('cuequivariance-ops-torch-cu' + expected))
           else:
               assert torch.version.cuda is None, torch.version.cuda
               import metatomic.torch, metatrain, torch_sim

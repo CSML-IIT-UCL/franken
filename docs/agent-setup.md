@@ -73,6 +73,8 @@ Use these requirement names with `python -m pip install` or `uv add`:
 | `franken[torch-sim]` | TorchSim interface dependencies |
 | `franken[cueq-cu12]` | Optional cuEquivariance inference with CUDA 12 |
 | `franken[cueq-cu13]` | Optional cuEquivariance inference with CUDA 13 |
+| `franken[cupy-cu12]` | CuPy binary wheels and CUDA 12 components for the low-memory solver |
+| `franken[cupy-cu13]` | CuPy binary wheels and CUDA 13 components for the low-memory solver |
 
 Combine extras in one requirement when useful:
 
@@ -98,7 +100,7 @@ use `--no-deps` to conceal conflicts, or maintain a patched MACE/cuEquivariance.
 
 ## 4. Choose an explicit CPU or CUDA build when needed
 
-These recipes were checked on Linux x86-64. For other platforms, consult the
+These recipes target Linux x86-64. For other platforms, consult the
 PyTorch installer at https://pytorch.org/get-started/locally/ rather than guessing
 wheel names. A CUDA wheel installation alone does not prove GPU execution works.
 
@@ -115,20 +117,20 @@ CUDA 12.8 with optional cuEquivariance and binary CuPy:
 
 ```bash
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    "torch==2.11.0+cu128" "franken[cueq-cu12]" "cupy-cuda12x[ctk]"
+    "torch==2.11.0+cu128" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 CUDA 13.0:
 
 ```bash
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 \
-    "torch==2.14.1+cu130" "franken[cueq-cu13]" "cupy-cuda13x[ctk]"
+    "torch==2.14.1+cu130" "franken[cueq-cu13,cupy-cu13]"
 ```
 
-The explicit PyTorch build tags in these tested pip recipes prevent backtracking
+The explicit PyTorch build tags in these pip recipes prevent backtracking
 from silently choosing a different CUDA family. Different indexes publish
 different version sets. Verify availability and compatibility before substituting
-versions. Omit CuPy if the user does not need its low-memory solver acceleration;
+versions. Omit the CuPy extra if the user does not need low-memory solver acceleration;
 omit the cuEquivariance extra if native inference was not requested.
 
 ### uv recipes
@@ -155,13 +157,13 @@ uv add "torch>=2.5" "franken[metatomic,torch-sim]"
 For CUDA 12.8, change the URL to `https://download.pytorch.org/whl/cu128` and run:
 
 ```bash
-uv add "torch>=2.5" "franken[cueq-cu12]" "cupy-cuda12x[ctk]"
+uv add "torch>=2.5" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 For CUDA 13.0, use `https://download.pytorch.org/whl/cu130` and run:
 
 ```bash
-uv add "torch>=2.5" "franken[cueq-cu13]" "cupy-cuda13x[ctk]"
+uv add "torch>=2.5" "franken[cueq-cu13,cupy-cu13]"
 ```
 
 The explicit index applies only to PyTorch; other packages come from PyPI.
@@ -174,13 +176,11 @@ https://docs.astral.sh/uv/guides/integration/pytorch/ for the upstream explanati
   `torch.cuda.is_available()` in the selected environment. Confirm the build
   matches the requested CUDA family. If GPU use was requested, verify a small
   GPU operation inside an appropriate allocation before reporting GPU success.
-- Install only one of `cupy`, `cupy-cuda12x`, and `cupy-cuda13x`: they provide the
-  same module. The binary distributions' `[ctk]` extras install CUDA components
+- Select one CUDA family for both CuPy and cuEquivariance extras. Install only
+  one CuPy distribution: `cupy-cuda12x` and `cupy-cuda13x` provide the same module.
+  Franken's `cupy-cu12` and `cupy-cu13` extras install the corresponding binary
+  distribution with `[ctk]`, which installs CUDA components
   as Python wheels, but still require a compatible NVIDIA driver.
-- The legacy `franken[cuda]` extra requests a **CuPy source build** requiring a
-  local CUDA toolkit and compiler. Do not select it for a simple binary setup,
-  or combine it with binary CuPy. Refer to https://docs.cupy.dev/en/stable/install.html
-  if the user specifically requested a source build.
 - cuEquivariance is **inference-only**. Training and training feature maps must
   use e3nn. Select native inference explicitly on a compatible fitted checkpoint
   with `FrankenCalculator(..., device="cuda", use_cueq=True)` or

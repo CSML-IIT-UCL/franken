@@ -73,7 +73,9 @@ metatomic = [
     "metatrain >= 2026.4",
 ]
 
-cuda = ["cupy"]
+# Require CuPy wheels with the ctk extra for CUDA component installation.
+cupy-cu12 = ["cupy-cuda12x[ctk] >= 14"]
+cupy-cu13 = ["cupy-cuda13x[ctk] >= 14"]
 docs = [
     "ipython",
     "Sphinx",
@@ -122,6 +124,15 @@ exclude = [
     "franken/datasets/split_data.py",
     "franken/datasets/download_and_process_all.sh",
     "franken/datasets/readme",
+]
+
+[tool.uv]
+# Resolve each CUDA family separately; its runtime wheels cannot be mixed.
+conflicts = [
+    [{ extra = "cupy-cu12" }, { extra = "cupy-cu13" }],
+    [{ extra = "cupy-cu12" }, { extra = "cueq-cu13" }],
+    [{ extra = "cueq-cu12" }, { extra = "cupy-cu13" }],
+    [{ extra = "cueq-cu12" }, { extra = "cueq-cu13" }],
 ]
 
 [tool.black]

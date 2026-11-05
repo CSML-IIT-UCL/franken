@@ -2,8 +2,9 @@ import importlib.resources
 import json
 import logging
 import os
-from pathlib import Path
 import time
+from pathlib import Path
+
 import requests
 
 from franken.backbones.wrappers.base import AtomisticModelWrapper
@@ -38,7 +39,7 @@ class CacheDir:
         if cache_dir is None:
             env_cache_dir = os.environ.get("FRANKEN_CACHE_DIR", None)
             if env_cache_dir is None:
-                logger.info(f"Initializing default cache directory at {default_cache}")
+                logger.debug(f"Initializing default cache directory at {default_cache}")
                 cache_dir = default_cache
             else:
                 logger.info(

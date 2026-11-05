@@ -3,13 +3,15 @@
 Run from the repository root with a fitted MACE checkpoint and a cueq extra:
     python tests/benchmarks/mace_inference.py fitted.pt --plot throughput.png
 
-Batch size is one. Neighbor lists and transfers are outside the timings, as is
-training. Both backends use the same fitted head and ordinary reverse autograd.
+Batch size is one. Direct calls exclude neighbor lists; TorchSim, when installed,
+includes its neighbor lists. Transfers and training are outside both timings.
+Both backends use the same fitted head and ordinary reverse autograd.
 """
 
 import argparse
 import csv
 from importlib.metadata import version
+from importlib.util import find_spec
 from pathlib import Path
 from statistics import median
 from time import perf_counter
@@ -39,25 +41,28 @@ def predict(model, data):
     return model.predict(["energy", "forces"], data)
 
 
-def compare(models, data, warmup, repeats):
+def compare(calls, warmup, repeats, reference):
     outputs = {}
-    for name, model in models.items():
+    for name, call in calls.items():
         for _ in range(max(1, warmup)):
-            outputs[name] = predict(model, data)
-    for key in ["energy", "forces"]:
-        torch.testing.assert_close(
-            outputs["cueq"][key], outputs["e3nn"][key], atol=1e-4, rtol=3e-4
-        )
+            outputs[name] = call()
+        for key in ["energy", "forces"]:
+            torch.testing.assert_close(
+                outputs[name][key].reshape(-1),
+                reference[key].reshape(-1),
+                atol=1e-4,
+                rtol=3e-4,
+            )
     del outputs
-    samples = {name: [] for name in models}
+    samples = {name: [] for name in calls}
     for iteration in range(repeats):
-        names = list(models)
+        names = list(calls)
         if iteration % 2:
             names.reverse()
         for name in names:
             torch.cuda.synchronize()
             start = perf_counter()
-            output = predict(models[name], data)
+            output = calls[name]()
             torch.cuda.synchronize()
             samples[name].append(perf_counter() - start)
             del output
@@ -93,6 +98,21 @@ def main():
         type(module).__name__ == "CueqConvFusionWrapper"
         for module in models["cueq"].gnn.modules()
     ), "upstream cuEquivariance convolution fusion must be active"
+    adapters = {}
+    if find_spec("torch_sim") is not None:
+        import torch_sim as ts
+        from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
+
+        adapters = {
+            name: FrankenTorchSimModel(model, device="cuda")
+            for name, model in models.items()
+        }
+        print(
+            f"TorchSim {version('torch-sim-atomistic')}: including neighbor lists",
+            flush=True,
+        )
+    else:
+        print("TorchSim not installed; skipping its comparison", flush=True)
     print(f"GPU: {torch.cuda.get_device_name()}; torch {torch.__version__}", flush=True)
     print(
         f"MACE {version('mace-torch')}; cuEq {version('cuequivariance-torch')}",
@@ -102,7 +122,10 @@ def main():
         f"Backbone: {models['e3nn'].gnn_config.path_or_id}; RFs: {models['e3nn'].rf.total_random_features}",
         flush=True,
     )
-    print(f"{'Atoms':>8} {'e3nn ms':>12} {'cuEq ms':>12} {'Speedup':>10}", flush=True)
+    print(
+        f"{'Engine':>10} {'Atoms':>8} {'e3nn ms':>12} {'cuEq ms':>12} {'Speedup':>10}",
+        flush=True,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     with args.output.open("w", newline="") as stream:
@@ -110,6 +133,7 @@ def main():
             stream,
             fieldnames=[
                 "atoms",
+                "engine",
                 "backend",
                 "seconds",
                 "atoms_per_second",
@@ -124,43 +148,76 @@ def main():
                 0, 0.03, atoms.positions.shape
             )
             data = graph(atoms, models["e3nn"])
-            times = compare(models, data, args.warmup, args.repeats)
-            for name, seconds in times.items():
-                row = dict(
-                    atoms=len(atoms),
-                    backend=name,
-                    seconds=seconds,
-                    atoms_per_second=len(atoms) / seconds,
-                    configurations_per_second=1 / seconds,
+            reference = predict(models["e3nn"], data)
+            engines = {
+                "direct": {
+                    name: lambda model=model, data=data: predict(model, data)
+                    for name, model in models.items()
+                }
+            }
+            if adapters:
+                state = ts.io.atoms_to_state(
+                    [atoms], device=torch.device("cuda"), dtype=torch.float32
                 )
-                writer.writerow(row)
-                rows.append(row)
-            stream.flush()
-            print(
-                f"{len(atoms):8d} {times['e3nn'] * 1000:12.3f} {times['cueq'] * 1000:12.3f} {times['e3nn'] / times['cueq']:9.2f}x",
-                flush=True,
-            )
+                engines["torchsim"] = {
+                    name: lambda adapter=adapter: adapter(state)
+                    for name, adapter in adapters.items()
+                }
+            for engine, calls in engines.items():
+                times = compare(calls, args.warmup, args.repeats, reference)
+                for name, seconds in times.items():
+                    row = dict(
+                        atoms=len(atoms),
+                        engine=engine,
+                        backend=name,
+                        seconds=seconds,
+                        atoms_per_second=len(atoms) / seconds,
+                        configurations_per_second=1 / seconds,
+                    )
+                    writer.writerow(row)
+                    rows.append(row)
+                stream.flush()
+                print(
+                    f"{engine:>10} {len(atoms):8d} {times['e3nn'] * 1000:12.3f} {times['cueq'] * 1000:12.3f} {times['e3nn'] / times['cueq']:9.2f}x",
+                    flush=True,
+                )
             del data
     if args.plot:
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(figsize=(6, 4), layout="constrained")
-        for name in models:
-            series = [row for row in rows if row["backend"] == name]
-            ax.plot(
-                [row["atoms"] for row in series],
-                [row["atoms_per_second"] for row in series],
-                "o-",
-                label=name,
-            )
-        ax.set(
-            xlabel="Atoms per configuration",
-            ylabel="Throughput (atoms/s)",
-            title="Franken energy + forces, batch size 1",
-            xscale="log",
+        fig, axes = plt.subplots(
+            1,
+            len(engines),
+            figsize=(6 * len(engines), 4),
+            squeeze=False,
+            layout="constrained",
         )
-        ax.grid(alpha=0.25)
-        ax.legend()
+        for ax, engine in zip(axes[0], engines):
+            for name in models:
+                series = [
+                    row
+                    for row in rows
+                    if row["backend"] == name and row["engine"] == engine
+                ]
+                ax.plot(
+                    [row["atoms"] for row in series],
+                    [row["atoms_per_second"] for row in series],
+                    "o-",
+                    label=name,
+                )
+            ax.set(
+                xlabel="Atoms per configuration",
+                ylabel="Throughput (atoms/s)",
+                title=(
+                    "Direct (precomputed neighbors)"
+                    if engine == "direct"
+                    else "TorchSim (including neighbors)"
+                ),
+                xscale="log",
+            )
+            ax.grid(alpha=0.25)
+            ax.legend()
+        fig.suptitle("Franken energy + forces, batch size 1")
         args.plot.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(args.plot, dpi=180)
         plt.close(fig)
