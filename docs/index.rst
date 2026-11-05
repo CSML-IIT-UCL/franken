@@ -86,6 +86,7 @@ workflow.
    topics/interface_overview.md
    topics/interface_ase.md
    Tutorial: MD with ASE <notebooks/molecular_dynamics>
+   Tutorial: Faster Inference with cuEquivariance <notebooks/cuequivariance_inference>
    topics/interface_mace_lammps.md
    topics/interface_metatomic.md
    topics/interface_torchsim.md
