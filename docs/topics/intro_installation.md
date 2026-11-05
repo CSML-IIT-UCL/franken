@@ -1,72 +1,215 @@
 (installation)=
 # Installation
-
-```{warning}
-It is better to install **PyTorch** first. If you haven't installed it yet, please follow the [Official PyTorch Installation Guide](https://pytorch.org/get-started/locally/#linux-pip).
+Franken requires Python 3.11 or newer, [MACE](https://github.com/acesuit/mace) support is included in the default
+installation.
+```{raw} html
+<button type="button" class="agent-onboarding__copy" data-agent-guide="../agent-setup.md" aria-live="polite">
+  <span class="agent-onboarding__icons" aria-hidden="true">
+    <img src="../_static/agent-icons/claude.svg" alt="" width="20" height="20">
+    <img src="../_static/agent-icons/codex.svg" alt="" width="20" height="20" class="agent-onboarding__adaptive-icon">
+    <img src="../_static/agent-icons/opencode.svg" alt="" width="20" height="20" class="agent-onboarding__adaptive-icon">
+  </span>
+  <span data-copy-label>Copy setup prompt</span>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+</button>
 ```
 
-### Minimal installation
 
-The basic installation of *franken* comes without any GNN backbone installed:
-```bash
-pip install franken
-```
+## Default installation
 
-To enable CUDA support (highly-recommended):
-```bash
-pip install franken[cuda]
-```
-
-### Install Franken+backbones (recommended)
-
-The currently supported backbones are [MACE](https://github.com/ACEsuit/mace) and [UPET](https://github.com/lab-cosmo/upet/tree/main). You can install them alongside `franken` using the corresponding extras.
-
-#### MACE
-
-To install `franken` with CUDA support and the MACE backbone:
+With `pip`, create an environment and install Franken:
 
 ```bash
-pip install franken[cuda,mace]
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install franken
 ```
 
-If you already have `franken` installed, you can add MACE by installing `mace-torch` in the same environment:
+With [uv](https://docs.astral.sh/uv/), create a project and add Franken:
 
 ```bash
-pip install mace-torch
+uv init --bare --python 3.13 my-franken-project
+cd my-franken-project
+uv add franken
 ```
 
-Further details can be found in the [MACE documentation](https://mace-docs.readthedocs.io/en/latest/guide/installation.html).
- 
-#### PET
+In an existing environment or uv project, only the last command is needed.
+The installer will choose a PyTorch build automatically; if you prefer choosing your own, see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
 
-The [UPET](https://github.com/lab-cosmo/upet/tree/main) models are available through the Metatomic/Metatrain ecosystem. To install `franken` with CUDA support and the PET backbone:
+With `conda` , use:
 
 ```bash
-pip install franken[cuda,pet]
+conda create -n franken python=3.13 pip
+conda activate franken
+python -m pip install franken
 ```
 
-For further installation details, see the [Metatomic](https://docs.metatensor.org/metatomic/latest/installation.html) and [Metatrain](https://docs.metatensor.org/metatrain/latest/installation.html) documentation.
 
-```{warning}
-The backbones may have incompatible requirements, particularly for `e3nn` and PyTorch. If you wish to use multiple backbones, we recommend creating a separate Python environment for each.
+## Extras
 
-In particular, `mace-torch` requires an older version of `e3nn` (0.4.4), which may conflict with other backbones. If you encounter model-loading errors, check the required `e3nn` version for your chosen backbone before changing it.
-```
+Franken supports a wide range of integrations, which can be installed as extras:
 
-### Example Environment Setup (Conda)
+| Name | Integration |
+|---|---|
+| `metatomic` | [PET/UPET](https://lab-cosmo.github.io/upet/) backbones and inference with [Metatomic](https://docs.metatensor.org/) |
+| `torch-sim` | Inference through [TorchSim](https://torchsim.github.io/torch-sim/) |
+| `cueq-cu12` / `cueq-cu13` | [cuEquivariance](https://docs.nvidia.com/cuda/cuequivariance/) CUDA 12/13 inference kernels |
+| `cupy-cu12` / `cupy-cu13` | [CuPy](https://cupy.dev/) binary wheels and CUDA components for the low-memory solver |
 
-If you are setting up a clean GPU environment from scratch, you can use Conda to install the dependencies:
+Choose one CUDA family matching your PyTorch build for the cuEquivariance and
+CuPy extras, using the recipes below. CuPy accelerates the low-memory training
+solver; cuEquivariance accelerates MACE inference. They can be installed
+independently or together.
+
+You can combine the extras you want in one requirement, for example:
 
 ```bash
-# 1. Prepare environment utilities
-conda install pip setuptools wheel
-
-# 2. Install PyTorch with CUDA 12.6 (adjust according to your system)
-conda install pytorch pytorch-cuda=12.1 -c pytorch -c nvidia
-
-# 3. Install CuPy (required for GPU/CUDA backbones)
-conda install -c conda-forge cupy
-
-# 4. Install franken with your preferred backbone
-pip install franken[cuda,mace]
+python -m pip install "franken[metatomic,torch-sim]"
+# In a uv project:
+uv add "franken[metatomic,torch-sim]"
 ```
+
+If you previously ran `uv add torch`, uv may have saved a lower bound matching
+the newest PyTorch release. If that version is newer than Metatomic supports,
+replace the direct requirement with Franken's supported lower bound while adding
+the extra:
+
+```bash
+uv add "torch>=2.5" "franken[metatomic]"
+```
+
+This lets uv choose a compatible version. If another dependency requires an
+incompatible PyTorch or e3nn version, use a separate environment. See the
+[Metatomic installation guide](https://docs.metatensor.org/metatomic/latest/installation.html)
+for its supported PyTorch versions.
+
+(choosing-a-pytorch-build)=
+## Choosing a PyTorch build
+
+### pip
+
+Use the PyTorch CPU index alongside PyPI to install a CPU-only environment,
+including any extras you need:
+
+```bash
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+    "franken[metatomic,torch-sim]"
+```
+
+For CUDA 12.8 with cuEquivariance and binary CuPy:
+
+```bash
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
+    "torch==2.11.0+cu128" "franken[cueq-cu12,cupy-cu12]"
+```
+
+For CUDA 13.0:
+
+```bash
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 \
+    "torch==2.14.1+cu130" "franken[cueq-cu13,cupy-cu13]"
+```
+
+These pip recipes select a PyTorch build explicitly.
+
+### uv
+
+In a uv project, add this configuration to `pyproject.toml`. Merge entries if
+you already have a sources or index table:
+
+```toml
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+```
+
+Then install the CPU-only build and your extras together:
+
+```bash
+uv add "torch>=2.5" "franken[metatomic,torch-sim]"
+```
+
+For CUDA 12.8, change the index URL to
+`https://download.pytorch.org/whl/cu128` and run:
+
+```bash
+uv add "torch>=2.5" "franken[cueq-cu12,cupy-cu12]"
+```
+
+For CUDA 13.0, use `https://download.pytorch.org/whl/cu130` and run:
+
+```bash
+uv add "torch>=2.5" "franken[cueq-cu13,cupy-cu13]"
+```
+
+The explicit index binds PyTorch to the selected build while leaving other
+packages on PyPI. The `torch>=2.5` requirement allows extras to select a compatible
+version instead of fixing the project to the newest release. See
+[uv's PyTorch guide](https://docs.astral.sh/uv/guides/integration/pytorch/).
+
+### Check the selected build
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
+In uv, prefix this command with `uv run`. `torch.version.cuda` is `None` for a
+CPU-only build, `12.x` for a CUDA 12 build, and `13.x` for a CUDA 13 build.
+`torch.cuda.is_available()` must be true to execute on the GPU. Installing a
+cuEquivariance extra does not turn a CPU-only PyTorch into a CUDA build.
+  
+## Supported Accelerators
+
+(cupy-for-the-low-memory-solver)=
+### CuPy for the low-memory solver
+
+CuPy is optional acceleration for the low-memory solver; ordinary GPU training
+does not require it. Install one binary distribution matching your CUDA family:
+
+```bash
+python -m pip install "franken[cupy-cu12]"
+# Or, for CUDA 13:
+python -m pip install "franken[cupy-cu13]"
+```
+
+In uv, use `uv add` in place of `python -m pip install`. These extras install
+`cupy-cuda12x[ctk]` or `cupy-cuda13x[ctk]`, respectively. The `[ctk]` dependency installs
+CUDA runtime/compiler components as Python wheels, so a system-wide CUDA toolkit
+is not needed. A compatible NVIDIA driver is still required. See the
+[CuPy installation guide](https://docs.cupy.dev/en/stable/install.html).
+
+Install only one CuPy distribution in an environment: both CUDA variants provide
+the same Python module. Combine extras only within the same CUDA family, such as
+`franken[cueq-cu12,cupy-cu12]`.
+
+### Enable cuEquivariance for inference
+
+After installing the matching CUDA build and `cueq-cu12` or `cueq-cu13` extra,
+request cuEquivariance explicitly when loading a fitted MACE model:
+
+```python
+from franken.calculators import FrankenCalculator
+
+calc = FrankenCalculator(
+    "path/to/run/best_ckpt.pt", device="cuda", use_cueq=True
+)
+atoms.calc = calc
+energy = atoms.get_potential_energy()
+forces = atoms.get_forces()
+```
+
+For direct model use:
+
+```python
+from franken.rf.model import FrankenPotential
+
+model = FrankenPotential.load(
+    "path/to/run/best_ckpt.pt", map_location="cuda", use_cueq=True
+)
+```
+The first evaluation can compile kernels, so benchmark after warmup. Smaller systems may be faster with `use_cueq=False`.

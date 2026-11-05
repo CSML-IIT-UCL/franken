@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   docs:
-    environment:  # for deployment to pages only!
+    environment:
       name: ghpg
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: https://franken.readthedocs.io/
     env:
       ENV_NAME: readthedocs
       PYTHON_VERSION: "3.12"
@@ -65,7 +65,7 @@ jobs:
         run: |
           eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
-          python -m pip install .[develop,mace,pet,docs]
+          python -m pip install .[develop,metatomic,docs]
 
       - name: Verify environment
         run: |

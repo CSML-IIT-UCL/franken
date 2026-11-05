@@ -40,8 +40,9 @@ def rank1_update(
         return _lowmemcov_rank1_update(cov, diag, vec, upper)
     warnings.warn(
         "low-memory covariance updates cannot be used "
-        "because `cupy` is not available. Install `cupy` "
-        "if you encounter memory problems."
+        "because `cupy` is not available. Install franken[cupy-cu12] or "
+        "franken[cupy-cu13], matching your PyTorch CUDA family, "
+        "for low-memory acceleration."
     )
     return _rank1_update(cov, diag, vec, upper)
 
@@ -129,8 +130,9 @@ def rankk_update(
         return _lowmemcov_rankk_update(cov, diag, update, upper)
     warnings.warn(
         "low-memory covariance updates cannot be used "
-        "because `cupy` is not available. Install `cupy` "
-        "if you encounter memory problems."
+        "because `cupy` is not available. Install franken[cupy-cu12] or "
+        "franken[cupy-cu13], matching your PyTorch CUDA family, "
+        "for low-memory acceleration."
     )
     return _rankk_update(cov, diag, update, upper)
 

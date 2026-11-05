@@ -185,3 +185,5 @@ slurm*
 *baseline_/
 *.out
 .history/
+reports/
+results/

@@ -20,7 +20,16 @@ Franken's ingredients
 
 #. **Energy and Force Prediction:** The final step involves predicting atomic energies and forces with a simple linear regression in the RF space, making the optimization process deterministic and efficient (minutes instead of hours or days).
 
-.. figure:: _static/diagram_part1.png
+.. figure:: _static/diagram-light.png
+   :figclass: only-light
+   :class: rounded-image
+   :width: 95%
+   :align: center
+
+   The three-step pipeline at the heart of :tt:`franken`.
+
+.. figure:: _static/diagram-dark.png
+   :figclass: only-dark
    :class: rounded-image
    :width: 95%
    :align: center
@@ -77,6 +86,7 @@ workflow.
    topics/interface_overview.md
    topics/interface_ase.md
    Tutorial: MD with ASE <notebooks/molecular_dynamics>
+   Tutorial: Faster Inference with cuEquivariance <notebooks/cuequivariance_inference>
    topics/interface_mace_lammps.md
    topics/interface_metatomic.md
    topics/interface_torchsim.md

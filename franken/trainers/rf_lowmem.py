@@ -106,7 +106,8 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             if cov.device.type == "cuda":
                 warnings.warn(
                     "low-memory solver cannot be used because `cupy` is not available. "
-                    "Install `cupy` if you encounter memory problems."
+                    "Install franken[cupy-cu12] or franken[cupy-cu13], matching "
+                    "your PyTorch CUDA family, for low-memory acceleration."
                 )
             return super().psd_solve(cov, rhs, penalty, return_cho_factor)
 
