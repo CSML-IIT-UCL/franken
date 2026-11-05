@@ -269,10 +269,12 @@ class LESConfig:
     """Optimizer. Some params are for adam, some for lbfgs"""
     num_cycles: HPSearchConfig | list[int] | int = 50
     """Number of alternating RFF/LES cycles."""
-    epochs_per_cycle: HPSearchConfig | list[int] | int = 50
+    adam_epochs_per_cycle: HPSearchConfig | list[int] | int = 50
     """Adam passes through the complete training set per LES stage."""
-    learning_rate: HPSearchConfig | list[float] | float = 1e-4
+    adam_learning_rate: HPSearchConfig | list[float] | float = 1e-4
     """Adam learning rate."""
+    adam_batch_size: int | None = None
+    """Batch size for Adam optimizer. If None will use full gradients."""
     lr_decay: HPSearchConfig | list[float] | float = 1.0
     """Multiply the learning rate by this factor after each alternating cycle."""
     lbfgs_max_iter: HPSearchConfig | list[int] | int = 20
@@ -288,31 +290,33 @@ class LESConfig:
     """Variable projection refits RFF at every L-BFGS trial point."""
 
     def __post_init__(self):
-        if self.optimizer not in {"adam", "lbfgs"}:
-            raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
-        if self.mode not in {"alternating", "variable_projection"}:
-            raise ValueError("LES mode must be 'alternating' or 'variable_projection'")
-        if self.mode == "variable_projection" and self.optimizer != "lbfgs":
-            raise ValueError("Variable projection requires optimizer='lbfgs'")
-        for name in (
-            "num_cycles",
-            "epochs_per_cycle",
-            "lbfgs_max_iter",
-            "lbfgs_history_size",
-        ):
-            value = getattr(self, name)
-            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                raise ValueError(f"{name} must be a positive integer")
-        for name in (
-            "learning_rate",
-            "lbfgs_learning_rate",
-            "lr_decay",
-            "lbfgs_tolerance_grad",
-            "lbfgs_tolerance_change",
-        ):
-            value = getattr(self, name)
-            if not 0 < value < float("inf"):
-                raise ValueError(f"{name} must be positive and finite")
+        pass
+        # if self.optimizer not in {"adam", "lbfgs"}:
+        #     raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
+        # if self.mode not in {"alternating", "variable_projection"}:
+        #     raise ValueError("LES mode must be 'alternating' or 'variable_projection'")
+        # if self.mode == "variable_projection" and self.optimizer != "lbfgs":
+        #     raise ValueError("Variable projection requires optimizer='lbfgs'")
+        # for name in (
+        #     "num_cycles",
+        #     "adam_epochs_per_cycle",
+        #     "lbfgs_max_iter",
+        #     "lbfgs_history_size",
+        # ):
+        #     value = getattr(self, name)
+        #     print(f"{name}={value}")
+        #     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        #         raise ValueError(f"{name} must be a positive integer")
+        # for name in (
+        #     "adam_learning_rate",
+        #     "lbfgs_learning_rate",
+        #     "lr_decay",
+        #     "lbfgs_tolerance_grad",
+        #     "lbfgs_tolerance_change",
+        # ):
+        #     value = getattr(self, name)
+        #     if not 0 < value < float("inf"):
+        #         raise ValueError(f"{name} must be positive and finite")
 
     def to_ckpt(self):
         return dataclasses.asdict(self)

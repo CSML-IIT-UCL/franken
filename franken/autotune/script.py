@@ -508,13 +508,13 @@ def init_les_trainer(
         raise ValueError(
             f"lbfgs_tolerance_change must be a single float for LES trainer. Found {les_cfg.lbfgs_tolerance_change}"
         )
-    if not isinstance(les_cfg.epochs_per_cycle, (int)):
+    if not isinstance(les_cfg.adam_epochs_per_cycle, (int)):
         raise ValueError(
-            f"epochs_per_cycle must be a single int for LES trainer. Found {les_cfg.epochs_per_cycle}"
+            f"adam_epochs_per_cycle must be a single int for LES trainer. Found {les_cfg.adam_epochs_per_cycle}"
         )
-    if not isinstance(les_cfg.learning_rate, (int, float)):
+    if not isinstance(les_cfg.adam_learning_rate, (int, float)):
         raise ValueError(
-            f"learning_rate must be a single float for LES trainer. Found {les_cfg.learning_rate}"
+            f"learning_rate must be a single float for LES trainer. Found {les_cfg.adam_learning_rate}"
         )
 
     trainer = RandomFeaturesEwaldsTrainer(
@@ -524,8 +524,9 @@ def init_les_trainer(
         target_weight=tgt_weights,
         optimizer=les_cfg.optimizer,
         num_cycles=les_cfg.num_cycles,
-        epochs_per_cycle=les_cfg.epochs_per_cycle,
-        learning_rate=les_cfg.learning_rate,
+        adam_epochs_per_cycle=les_cfg.adam_epochs_per_cycle,
+        adam_learning_rate=les_cfg.adam_learning_rate,
+        adam_batch_size=les_cfg.adam_batch_size,
         lr_decay=les_cfg.lr_decay,
         lbfgs_max_iter=les_cfg.lbfgs_max_iter,
         lbfgs_max_eval=les_cfg.lbfgs_max_eval,

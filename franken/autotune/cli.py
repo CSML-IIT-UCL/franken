@@ -520,17 +520,22 @@ def get_arg_groups():
             ),
             Argument.from_dataclass(
                 LESConfig,
-                "epochs_per_cycle",
-                "epochs-per-cycle",
+                "adam_epochs_per_cycle",
+                "adam-epochs-per-cycle",
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
             ),
             Argument.from_dataclass(
                 LESConfig,
-                "learning_rate",
-                "learning-rate",
+                "adam_learning_rate",
+                "adam-learning-rate",
                 metavar="HYPERPARAMETER",
                 type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "adam_batch_size",
+                "adam-batch-size",
             ),
             Argument.from_dataclass(
                 LESConfig,
