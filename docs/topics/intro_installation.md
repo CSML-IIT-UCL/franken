@@ -26,7 +26,7 @@ uv add franken
 
 In an existing environment or uv project, only the last command is needed.
 You do not need to install PyTorch separately unless you want a particular
-CPU or CUDA build; see [Choosing a PyTorch build](#choosing-a-pytorch-build).
+CPU or CUDA build; see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
 
 These instructions describe the current version of Franken. The installation
 workflow tests the wheel built from the checkout. To install an unreleased
@@ -50,7 +50,7 @@ MACE installed. Use quotes around requirements containing brackets.
 | `cuda` | CuPy **source build**, requiring a local CUDA toolkit | `python -m pip install "franken[cuda]"` | `uv add "franken[cuda]"` |
 
 For the cuEquivariance extras, first select the matching CUDA PyTorch build
-using the recipes below. For CuPy, the [binary-wheel recipe](#cupy-for-the-low-memory-solver)
+using the recipes below. For CuPy, the {ref}`binary-wheel recipe <cupy-for-the-low-memory-solver>`
 is usually easier than the legacy `cuda` extra.
 
 Combine the extras you want in one requirement, for example:
