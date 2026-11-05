@@ -56,6 +56,8 @@ class FrankenPotential(torch.nn.Module):
         128 (for smaller systems).
     """
 
+    _cholesky_factor: torch.Tensor
+
     def __init__(
         self,
         gnn_config: BackboneConfig,
@@ -121,6 +123,7 @@ class FrankenPotential(torch.nn.Module):
                     f"Requested property '{req}' is not implemented in this model. "
                     f"Implemented properties are {impl}"
                 )
+
     @torch.jit.unused
     def get_cholesky_factor(self) -> torch.Tensor | None:
         """Return the upper factor U, where A + _l2_penalty * I = U.T @ U, and A is the covariance of training data."""
@@ -410,20 +413,23 @@ class FrankenPotential(torch.nn.Module):
     ) -> dict[str, torch.Tensor]:
         r"""Return posterior/prior standard-deviation ratios in [0, 1].
 
-        For the saved factor V = U / sqrt(lambda), the ratio is
-        ``||V^{-T} phi|| / ||phi||``. Energy and force components use their
+        For the saved unscaled factor U and penalty lambda, the ratio is
+        ``sqrt(lambda) * ||U^{-T} phi|| / ||phi||``. Energy and force components use their
         respective feature vectors; atom-count scaling cancels in the ratio.
         Zero feature vectors contribute no uncertainty and return zero.
         These dimensionless ratios describe how strongly training constrains
         each feature direction, not probabilities of prediction accuracy.
         """
-        factor = self.get_cho_factor()
+        factor = self.get_cholesky_factor()
         assert factor is not None
+        penalty = self._l2_penalty
+        if penalty is None or not 0 < penalty < float("inf"):
+            raise ValueError("GP uncertainty requires a finite positive l2_penalty.")
         out: dict[str, torch.Tensor] = {}
         for target, fmap in fmaps.items():
             features = fmap.to(factor)
             whitened = torch.linalg.solve_triangular(factor.T, features, upper=False)
-            posterior = torch.linalg.vector_norm(whitened, dim=0)
+            posterior = torch.linalg.vector_norm(whitened, dim=0) * penalty**0.5
             prior = torch.linalg.vector_norm(features, dim=0)
             # Avoid 0/0 for zero feature vectors; clamp roundoff at the theoretical bound.
             denominator = torch.where(prior > 0, prior, torch.ones_like(prior))
@@ -563,8 +569,7 @@ class FrankenPotential(torch.nn.Module):
         """
         self._check_properties(properties)
         if energy_uncertainty_per_atom and (
-            not compute_gp_uncertainty
-            or franken.data.base.ENERGY_KEY not in properties
+            not compute_gp_uncertainty or franken.data.base.ENERGY_KEY not in properties
         ):
             raise ValueError(
                 "energy_uncertainty_per_atom requires compute_gp_uncertainty=True "
