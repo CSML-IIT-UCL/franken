@@ -119,8 +119,8 @@ class MetatomicInferenceWrapper(torch.nn.Module):
         batch_ids = concat_data.batch_ids
         assert batch_ids is not None
         # Compute energy with underlying model. This is per-system energy
-        model_out = self.model([franken.data.base.ENERGY_TARGET_KEY], concat_data)
-        energy = model_out[franken.data.base.ENERGY_TARGET_KEY]
+        model_out = self.model([franken.data.base.ENERGY_KEY], concat_data)
+        energy = model_out[franken.data.base.ENERGY_KEY]
         # Convert it to per-atom energy
         energy = energy / concat_data.natoms[None, ...]  # [M, N]
         energy = torch.gather(energy, dim=1, index=batch_ids[None, ...])  # [M, A]

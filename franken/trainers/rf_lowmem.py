@@ -9,7 +9,7 @@ from torch import Tensor
 
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType, is_scalar_target
+from franken.data.base import Configuration, Target, PropertyType, is_scalar_property
 from franken.rf.model import FrankenPotential
 from franken.utils.linalg.cov import (
     lowmem_normalize_leading_eig,
@@ -44,8 +44,8 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         self,
         train_dataloader: torch.utils.data.DataLoader,
         l2_penalty: float | list[float],
-        training_targets: list[TargetType],
-        target_weight: Mapping[TargetType, float | list[float]],
+        training_targets: list[PropertyType],
+        target_weight: Mapping[PropertyType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -229,7 +229,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         #       They can only used correctly by iterating through the
         #       same dataloader as here, using the same method. Otherwise
         #       they may not be in the correct order
-        self.fmaps: dict[TargetType, list[Tensor]] = {
+        self.fmaps: dict[PropertyType, list[Tensor]] = {
             t: [] for t in self.training_targets
         }
         progress_bar = throughput(
@@ -257,7 +257,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
-                if is_scalar_target(tgt_name):
+                if is_scalar_property(tgt_name):
                     rank1_update(
                         covariance, diags[j], fmap.reshape(-1), upper=cov_upper[j]
                     )
@@ -299,8 +299,8 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
     @torch.no_grad()
     def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
-        covs: dict[TargetType, tuple[Tensor, Tensor, bool]],
-        coeffs: dict[TargetType, Tensor],
+        covs: dict[PropertyType, tuple[Tensor, Tensor, bool]],
+        coeffs: dict[PropertyType, Tensor],
         l2_penalty: float = 1e-6,
         return_cho_factor: bool = False,
         **weights,

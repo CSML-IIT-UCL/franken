@@ -7,9 +7,9 @@ import torch
 
 from franken.backbones.wrappers.base import AtomisticModelWrapper
 from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    STRESS_TARGET_KEY,
+    ENERGY_KEY,
+    FORCES_KEY,
+    STRESS_KEY,
     Configuration,
 )
 from franken.rf.model import FrankenPotential
@@ -161,17 +161,15 @@ else:
                 batch_ids=sim_state.system_idx,
                 pbc=sim_state.pbc,
             )
-            targets = [ENERGY_TARGET_KEY]
+            targets = [ENERGY_KEY]
             if self.compute_forces:
-                targets.append(FORCES_TARGET_KEY)
+                targets.append(FORCES_KEY)
             if self.compute_stress:
-                targets.append(STRESS_TARGET_KEY)
+                targets.append(STRESS_KEY)
             out = self.model(targets, data, weights=None, add_energy_shift=True)
-            results: dict[str, torch.Tensor] = {
-                "energy": out[ENERGY_TARGET_KEY].detach()
-            }
+            results: dict[str, torch.Tensor] = {"energy": out[ENERGY_KEY].detach()}
             if self.compute_forces:
-                results["forces"] = out[FORCES_TARGET_KEY].detach()
+                results["forces"] = out[FORCES_KEY].detach()
             if self.compute_stress:
-                results["stress"] = out[STRESS_TARGET_KEY].detach()
+                results["stress"] = out[STRESS_KEY].detach()
             return results

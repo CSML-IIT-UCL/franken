@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from franken.config import GaussianRFConfig, MaceBackboneConfig
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, Target, TargetType
+from franken.data.base import ENERGY_KEY, FORCES_KEY, STRESS_KEY, Configuration, Target, PropertyType
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.trainers import RandomFeaturesTrainer
@@ -22,12 +22,12 @@ def gen_efmap_vals(num_feat, num_configs, num_atoms, device, dtype, targets):
     out = []
     for _ in range(num_configs):
         od = {}
-        if ENERGY_TARGET_KEY in targets:
-            od[ENERGY_TARGET_KEY] = torch.randn(num_feat, 1, device=device, dtype=dtype)
-        if FORCES_TARGET_KEY in targets:
-            od[FORCES_TARGET_KEY] = torch.randn(num_feat, num_atoms * 3, device=device, dtype=dtype)
-        if STRESS_TARGET_KEY in targets:
-            od[STRESS_TARGET_KEY] = torch.randn(num_feat, 3 * 3, device=device, dtype=dtype)
+        if ENERGY_KEY in targets:
+            od[ENERGY_KEY] = torch.randn(num_feat, 1, device=device, dtype=dtype)
+        if FORCES_KEY in targets:
+            od[FORCES_KEY] = torch.randn(num_feat, num_atoms * 3, device=device, dtype=dtype)
+        if STRESS_KEY in targets:
+            od[STRESS_KEY] = torch.randn(num_feat, 3 * 3, device=device, dtype=dtype)
         out.append(od)
     return out
 
@@ -76,7 +76,7 @@ def init_mock_model(efmaps, device, dtype):
         if efmaps is not None:
             # will iterate through efmap_vals at every call
             model.grad_feature_map = MagicMock(side_effect=efmaps)
-            model.rf.total_random_features = efmaps[0][FORCES_TARGET_KEY].shape[0]
+            model.rf.total_random_features = efmaps[0][FORCES_KEY].shape[0]
         else:
             model.rf.total_random_features = underlying.rf.total_random_features
         return model
@@ -84,7 +84,7 @@ def init_mock_model(efmaps, device, dtype):
 
 @pytest.mark.parametrize("device", DEVICES)
 class TestLowMemTrainer:
-    EF_TGT = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
+    EF_TGT = [ENERGY_KEY, FORCES_KEY]
     num_configs = 3
     num_atoms = 10
     num_rf = 4
@@ -95,7 +95,7 @@ class TestLowMemTrainer:
             train_dataloader=None, # type: ignore
             l2_penalty=kwargs.pop("l2_penalty", [1.0]),
             target_weight=kwargs.pop("target_weight", {}),
-            training_targets=kwargs.pop("training_targets", [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]),
+            training_targets=kwargs.pop("training_targets", [ENERGY_KEY, FORCES_KEY]),
             random_features_normalization=None,
             log_dir=None,
             save_every_model=False,
@@ -106,26 +106,26 @@ class TestLowMemTrainer:
 
     def test_init_incorrect_tgts(self, device):
         with pytest.raises(ValueError, match="The low-memory trainer only works with 2 training targets."):
-            self.trainer(device, torch.float32, training_targets=[ENERGY_TARGET_KEY])
+            self.trainer(device, torch.float32, training_targets=[ENERGY_KEY])
         with pytest.raises(ValueError, match="The low-memory trainer only works with 2 training targets."):
-            self.trainer(device, torch.float32, training_targets=[ENERGY_TARGET_KEY, STRESS_TARGET_KEY, FORCES_TARGET_KEY])
+            self.trainer(device, torch.float32, training_targets=[ENERGY_KEY, STRESS_KEY, FORCES_KEY])
 
     def test_ok_more_data_provided(self, device):
         trainer = self.trainer(device, torch.float32)
         efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt,
-                                        [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY])
+                                        [ENERGY_KEY, FORCES_KEY, STRESS_KEY])
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
         covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
-        assert ENERGY_TARGET_KEY in covs
-        assert FORCES_TARGET_KEY in covs
-        assert ENERGY_TARGET_KEY in coeffs
-        assert FORCES_TARGET_KEY in coeffs
+        assert ENERGY_KEY in covs
+        assert FORCES_KEY in covs
+        assert ENERGY_KEY in coeffs
+        assert FORCES_KEY in coeffs
 
     def test_err_not_enough_data(self, device):
         trainer = self.trainer(device, torch.float32)
         efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt,
-                                        [FORCES_TARGET_KEY])
+                                        [FORCES_KEY])
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
         with pytest.raises(KeyError):
@@ -136,49 +136,49 @@ class TestLowMemTrainer:
         efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt, self.EF_TGT)
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         # Expected energy and forces covariance and coeffs
-        exp_f_cov = sum([efmap[FORCES_TARGET_KEY] @ efmap[FORCES_TARGET_KEY].T for efmap in efmap_vals])
-        exp_f_coef = sum([efmap[FORCES_TARGET_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
-        exp_e_cov = sum([efmap[ENERGY_TARGET_KEY] @ efmap[ENERGY_TARGET_KEY].T for efmap in efmap_vals])
-        exp_e_coef = sum([efmap[ENERGY_TARGET_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_f_cov = sum([efmap[FORCES_KEY] @ efmap[FORCES_KEY].T for efmap in efmap_vals])
+        exp_f_coef = sum([efmap[FORCES_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_e_cov = sum([efmap[ENERGY_KEY] @ efmap[ENERGY_KEY].T for efmap in efmap_vals])
+        exp_e_coef = sum([efmap[ENERGY_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
 
         model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
         covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
-        cov = covs[ENERGY_TARGET_KEY][0]
-        diag_energy = covs[ENERGY_TARGET_KEY][1]
-        diag_forces = covs[FORCES_TARGET_KEY][1]
+        cov = covs[ENERGY_KEY][0]
+        diag_energy = covs[ENERGY_KEY][1]
+        diag_forces = covs[FORCES_KEY][1]
         # Check outputs
         torch.testing.assert_close(torch.triu(cov, 1), torch.triu(exp_e_cov, 1))
         torch.testing.assert_close(diag_energy, torch.diagonal(exp_e_cov))
         torch.testing.assert_close(torch.tril(cov, -1), torch.tril(exp_f_cov, -1))
         torch.testing.assert_close(diag_forces, torch.diagonal(exp_f_cov))
-        torch.testing.assert_close(coeffs[ENERGY_TARGET_KEY], exp_e_coef)
-        torch.testing.assert_close(coeffs[FORCES_TARGET_KEY], exp_f_coef)
+        torch.testing.assert_close(coeffs[ENERGY_KEY], exp_e_coef)
+        torch.testing.assert_close(coeffs[FORCES_KEY], exp_f_coef)
         # Check behavior
         assert model.grad_feature_map.call_count == self.num_configs
 
     def test_covs_and_coeffs_stress(self, device):
-        ttype = [STRESS_TARGET_KEY, FORCES_TARGET_KEY]
+        ttype = [STRESS_KEY, FORCES_KEY]
         trainer = self.trainer(device, torch.float32, training_targets=ttype)
         efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt, ttype)
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         # Expected energy and forces covariance and coeffs
-        exp_f_cov = sum([efmap[FORCES_TARGET_KEY] @ efmap[FORCES_TARGET_KEY].T for efmap in efmap_vals])
-        exp_f_coef = sum([efmap[FORCES_TARGET_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
-        exp_s_cov = sum([efmap[STRESS_TARGET_KEY] @ efmap[STRESS_TARGET_KEY].T for efmap in efmap_vals])
-        exp_s_coef = sum([efmap[STRESS_TARGET_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_f_cov = sum([efmap[FORCES_KEY] @ efmap[FORCES_KEY].T for efmap in efmap_vals])
+        exp_f_coef = sum([efmap[FORCES_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_s_cov = sum([efmap[STRESS_KEY] @ efmap[STRESS_KEY].T for efmap in efmap_vals])
+        exp_s_coef = sum([efmap[STRESS_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
 
         model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
         covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
-        cov = covs[STRESS_TARGET_KEY][0]
-        diag_stress = covs[STRESS_TARGET_KEY][1]
-        diag_forces = covs[FORCES_TARGET_KEY][1]
+        cov = covs[STRESS_KEY][0]
+        diag_stress = covs[STRESS_KEY][1]
+        diag_forces = covs[FORCES_KEY][1]
         # Check outputs
         torch.testing.assert_close(torch.triu(cov, 1), torch.triu(exp_s_cov, 1))
         torch.testing.assert_close(diag_stress, torch.diagonal(exp_s_cov))
         torch.testing.assert_close(torch.tril(cov, -1), torch.tril(exp_f_cov, -1))
         torch.testing.assert_close(diag_forces, torch.diagonal(exp_f_cov))
-        torch.testing.assert_close(coeffs[STRESS_TARGET_KEY], exp_s_coef)
-        torch.testing.assert_close(coeffs[FORCES_TARGET_KEY], exp_f_coef)
+        torch.testing.assert_close(coeffs[STRESS_KEY], exp_s_coef)
+        torch.testing.assert_close(coeffs[FORCES_KEY], exp_f_coef)
         # Check behavior
         assert model.grad_feature_map.call_count == self.num_configs
 
@@ -191,10 +191,10 @@ class TestLowMemTrainer:
         efmap_vals = gen_efmap_vals(num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt, self.EF_TGT)
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         # Expected energy and forces covariance and coeffs
-        exp_f_cov = sum([efmap[FORCES_TARGET_KEY] @ efmap[FORCES_TARGET_KEY].T for efmap in efmap_vals])
-        exp_f_coef = sum([efmap[FORCES_TARGET_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
-        exp_e_cov = sum([efmap[ENERGY_TARGET_KEY] @ efmap[ENERGY_TARGET_KEY].T for efmap in efmap_vals])
-        exp_e_coef = sum([efmap[ENERGY_TARGET_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_f_cov = sum([efmap[FORCES_KEY] @ efmap[FORCES_KEY].T for efmap in efmap_vals])
+        exp_f_coef = sum([efmap[FORCES_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
+        exp_e_cov = sum([efmap[ENERGY_KEY] @ efmap[ENERGY_KEY].T for efmap in efmap_vals])
+        exp_e_coef = sum([efmap[ENERGY_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)])
         lerped_cov = exp_f_cov * force_weight + exp_e_cov * (1 - force_weight)
         exp_sol = torch.linalg.solve(
             lerped_cov + torch.eye(num_rf, dtype=trainer.buffer_dt, device=device) * l2_penalty,
@@ -209,8 +209,8 @@ class TestLowMemTrainer:
 
 @pytest.mark.parametrize("device", DEVICES)
 class TestTrainer:
-    EF_TGT = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
-    ESF_TGT = [ENERGY_TARGET_KEY, STRESS_TARGET_KEY, FORCES_TARGET_KEY]
+    EF_TGT = [ENERGY_KEY, FORCES_KEY]
+    ESF_TGT = [ENERGY_KEY, STRESS_KEY, FORCES_KEY]
     num_configs = 3
     num_atoms = 10
     num_rf = 4
@@ -242,7 +242,7 @@ class TestTrainer:
         logs = LogCollection([LogEntry("", 0, 0, 0, [], [])])
         logs_fast = trainer.evaluate(model, dataloader, logs, weights)
         model.predict.assert_not_called()
-        model._predict.assert_not_called()
+        model._predict_efs.assert_not_called()
         model.predict_from_fmaps.assert_called()
         model.predict_from_fmaps.reset_mock()
 
@@ -264,14 +264,14 @@ class TestTrainer:
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         # Expected energy and forces covariance and coeffs
         exp_covs = {
-            ENERGY_TARGET_KEY: sum([efmap[ENERGY_TARGET_KEY] @ efmap[ENERGY_TARGET_KEY].T for efmap in efmap_vals]),
-            FORCES_TARGET_KEY: sum([efmap[FORCES_TARGET_KEY] @ efmap[FORCES_TARGET_KEY].T for efmap in efmap_vals]),
-            STRESS_TARGET_KEY: sum([efmap[STRESS_TARGET_KEY] @ efmap[STRESS_TARGET_KEY].T for efmap in efmap_vals]),
+            ENERGY_KEY: sum([efmap[ENERGY_KEY] @ efmap[ENERGY_KEY].T for efmap in efmap_vals]),
+            FORCES_KEY: sum([efmap[FORCES_KEY] @ efmap[FORCES_KEY].T for efmap in efmap_vals]),
+            STRESS_KEY: sum([efmap[STRESS_KEY] @ efmap[STRESS_KEY].T for efmap in efmap_vals]),
         }
         exp_coeffs = {
-            STRESS_TARGET_KEY: sum([efmap[STRESS_TARGET_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
-            FORCES_TARGET_KEY: sum([efmap[FORCES_TARGET_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
-            ENERGY_TARGET_KEY: sum([efmap[ENERGY_TARGET_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            STRESS_KEY: sum([efmap[STRESS_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            FORCES_KEY: sum([efmap[FORCES_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            ENERGY_KEY: sum([efmap[ENERGY_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
         }
         model = init_mock_model(efmap_vals, device, trainer.buffer_dt)
         covs, coeffs = trainer._covs_and_coeffs(model, dataloader)
@@ -294,24 +294,24 @@ class TestTrainer:
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt)
         # Expected energy and forces covariance and coeffs
         exp_covs = {
-            ENERGY_TARGET_KEY: sum([efmap[ENERGY_TARGET_KEY] @ efmap[ENERGY_TARGET_KEY].T for efmap in efmap_vals]),
-            FORCES_TARGET_KEY: sum([efmap[FORCES_TARGET_KEY] @ efmap[FORCES_TARGET_KEY].T for efmap in efmap_vals]),
-            STRESS_TARGET_KEY: sum([efmap[STRESS_TARGET_KEY] @ efmap[STRESS_TARGET_KEY].T for efmap in efmap_vals]),
+            ENERGY_KEY: sum([efmap[ENERGY_KEY] @ efmap[ENERGY_KEY].T for efmap in efmap_vals]),
+            FORCES_KEY: sum([efmap[FORCES_KEY] @ efmap[FORCES_KEY].T for efmap in efmap_vals]),
+            STRESS_KEY: sum([efmap[STRESS_KEY] @ efmap[STRESS_KEY].T for efmap in efmap_vals]),
         }
         exp_coeffs = {
-            STRESS_TARGET_KEY: sum([efmap[STRESS_TARGET_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
-            FORCES_TARGET_KEY: sum([efmap[FORCES_TARGET_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
-            ENERGY_TARGET_KEY: sum([efmap[ENERGY_TARGET_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            STRESS_KEY: sum([efmap[STRESS_KEY] @ data[1].stress.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            FORCES_KEY: sum([efmap[FORCES_KEY] @ data[1].forces.to(device).view(-1) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
+            ENERGY_KEY: sum([efmap[ENERGY_KEY].view(-1) * data[1].energy.to(device) / self.num_atoms for efmap, data in zip(efmap_vals, dataloader)]),
         }
         lerped_cov = (
-            exp_covs[ENERGY_TARGET_KEY] * energy_weight + 
-            exp_covs[FORCES_TARGET_KEY] * forces_weight + 
-            exp_covs[STRESS_TARGET_KEY] * stress_weight
+            exp_covs[ENERGY_KEY] * energy_weight + 
+            exp_covs[FORCES_KEY] * forces_weight + 
+            exp_covs[STRESS_KEY] * stress_weight
         )
         lerped_coef = (
-            exp_coeffs[ENERGY_TARGET_KEY] * energy_weight + 
-            exp_coeffs[FORCES_TARGET_KEY] * forces_weight + 
-            exp_coeffs[STRESS_TARGET_KEY] * stress_weight
+            exp_coeffs[ENERGY_KEY] * energy_weight + 
+            exp_coeffs[FORCES_KEY] * forces_weight + 
+            exp_coeffs[STRESS_KEY] * stress_weight
         )
         exp_sol = torch.linalg.solve(
             lerped_cov + torch.eye(num_rf, dtype=trainer.buffer_dt, device=device) * l2_penalty,
@@ -324,7 +324,7 @@ class TestTrainer:
                                  stress_weight=stress_weight)
         torch.testing.assert_close(exp_sol, solution)
 
-    def test_missing_target_type(self, device):
+    def test_missing_property_type(self, device):
         trainer = self.trainer(device, torch.float32, training_targets=self.ESF_TGT)
         efmap_vals = gen_efmap_vals(self.num_rf, self.num_configs, self.num_atoms, device, trainer.buffer_dt, self.ESF_TGT)
         dataloader = gen_data(self.num_configs, self.num_atoms, trainer.buffer_dt, gen_stress=False)
@@ -365,9 +365,9 @@ class TestTrainer:
             torch.float32,
             training_targets=self.ESF_TGT,
             target_weight={
-                ENERGY_TARGET_KEY: [0.1],
-                FORCES_TARGET_KEY: [0.2],
-                STRESS_TARGET_KEY: [0.7],
+                ENERGY_KEY: [0.1],
+                FORCES_KEY: [0.2],
+                STRESS_KEY: [0.7],
             },
         )
         assert "stress_weight" in trainer.solver_hps
@@ -435,7 +435,7 @@ class TestSerializeBestModel:
                         with patch("builtins.open", mock_open()) as file_open:
                             trainer = RandomFeaturesTrainer(
                                 train_dataloader=None, # type: ignore
-                                training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+                                training_targets=[ENERGY_KEY, FORCES_KEY],
                                 l2_penalty=[1e-6],
                                 target_weight={},
                                 random_features_normalization=None,
@@ -501,7 +501,7 @@ class TestSerializeBestModel:
             mock_exists.return_value = False
             trainer = RandomFeaturesTrainer(
                 train_dataloader=None, # type: ignore
-                training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+                training_targets=[ENERGY_KEY, FORCES_KEY],
                 l2_penalty=[1e-6],
                 target_weight={},
                 random_features_normalization=None,
@@ -535,20 +535,20 @@ class TestSerializeBestModel:
 
 
 def test_process_tgt_weights():
-    w: dict[TargetType, float | list[float]] = {ENERGY_TARGET_KEY: 1.0}
-    t: list[TargetType] = [ENERGY_TARGET_KEY]
+    w: dict[PropertyType, float | list[float]] = {ENERGY_KEY: 1.0}
+    t: list[PropertyType] = [ENERGY_KEY]
     out = process_tgt_weights(w, t)
-    assert out == {ENERGY_TARGET_KEY: [1.0]}, "Doesn't create lists correctly"
+    assert out == {ENERGY_KEY: [1.0]}, "Doesn't create lists correctly"
 
-    w: dict[TargetType, float | list[float]] = {ENERGY_TARGET_KEY: [2.0]}
-    t: list[TargetType] = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
+    w: dict[PropertyType, float | list[float]] = {ENERGY_KEY: [2.0]}
+    t: list[PropertyType] = [ENERGY_KEY, FORCES_KEY]
     out = process_tgt_weights(w, t)
-    assert out == {ENERGY_TARGET_KEY: [2.0], FORCES_TARGET_KEY: [1.0]}, "Doesn't handle missing weights"
+    assert out == {ENERGY_KEY: [2.0], FORCES_KEY: [1.0]}, "Doesn't handle missing weights"
 
-    w: dict[TargetType, float | list[float]] = {ENERGY_TARGET_KEY: [3.0], STRESS_TARGET_KEY: [2.0]}
-    t: list[TargetType] = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
+    w: dict[PropertyType, float | list[float]] = {ENERGY_KEY: [3.0], STRESS_KEY: [2.0]}
+    t: list[PropertyType] = [ENERGY_KEY, FORCES_KEY]
     out = process_tgt_weights(w, t)
-    assert out == {ENERGY_TARGET_KEY: [3.0], FORCES_TARGET_KEY: [1.0]}, "Doesn't handle missing weights"
+    assert out == {ENERGY_KEY: [3.0], FORCES_KEY: [1.0]}, "Doesn't handle missing weights"
 
 
 def test_get_statistics():
@@ -558,7 +558,7 @@ def test_get_statistics():
         p2["compute_dataset_statistics"].return_value = Statistics()
         trainer = RandomFeaturesTrainer(
             train_dataloader=dloader, # type: ignore
-            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+            training_targets=[ENERGY_KEY, FORCES_KEY],
             l2_penalty=[1e-6],
             target_weight={},
             random_features_normalization=None,

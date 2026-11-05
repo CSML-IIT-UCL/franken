@@ -7,9 +7,9 @@ from ase.calculators.calculator import Calculator, all_changes
 from franken.config import BackboneConfig
 from franken.data import FrankenAtomsDataset, Configuration
 from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    STRESS_TARGET_KEY,
+    ENERGY_KEY,
+    FORCES_KEY,
+    STRESS_KEY,
 )
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
@@ -124,22 +124,18 @@ class FrankenCalculator(Calculator):
         assert isinstance(cpu_data, Configuration)
         data = cpu_data.to(device=self.device, dtype=self.dtype)
 
-        targets = [ENERGY_TARGET_KEY]
+        targets = [ENERGY_KEY]
         if "forces" in properties:
-            targets.append(FORCES_TARGET_KEY)
+            targets.append(FORCES_KEY)
         if "stress" in properties:
-            targets.append(STRESS_TARGET_KEY)
+            targets.append(STRESS_KEY)
         computed = self.franken(targets, data)
 
-        self.results["energy"] = computed[ENERGY_TARGET_KEY].item()
+        self.results["energy"] = computed[ENERGY_KEY].item()
         if "forces" in properties:
-            self.results["forces"] = (
-                computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
-            )
+            self.results["forces"] = computed[FORCES_KEY].squeeze(0).numpy(force=True)
         if "stress" in properties:
-            self.results["stress"] = (
-                computed[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
-            )
+            self.results["stress"] = computed[STRESS_KEY].squeeze(0).numpy(force=True)
 
 
 def calculator_throughput(
