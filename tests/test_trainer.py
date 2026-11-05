@@ -40,8 +40,14 @@ def make_dloader_from_dset(dataset):
     dloader.__len__ = MagicMock(return_value=len(dataset))
     dloader.__iter__ = iterator
     dloader.dataset = dataset
-    dloader.dataset.__len__ = MagicMock(return_value=len(dataset))
-    dloader.dataset.split = "train"
+    try:
+        dloader.dataset.__len__ = MagicMock(return_value=len(dataset))
+    except AttributeError:
+        pass
+    try:
+        dloader.dataset.split = "train"
+    except AttributeError:
+        pass
     return dloader
 
 

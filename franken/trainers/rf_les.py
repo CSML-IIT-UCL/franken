@@ -46,9 +46,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         target_weight: Mapping[TargetType, float],
         optimizer: Literal["adam", "lbfgs"],
         num_cycles: int,
-        epochs_per_cycle: int,
-        learning_rate: float,
         lr_decay: float,
+        adam_epochs_per_cycle: int,
+        adam_learning_rate: float,
+        adam_batch_size: int | None,
         lbfgs_max_iter: int,
         lbfgs_max_eval: int,
         lbfgs_learning_rate: float,
@@ -95,8 +96,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.rel_tgt_weight = self._get_relative_weights(target_weight)
         self.optimizer = optimizer
         self.num_cycles = num_cycles
-        self.epochs_per_cycle = epochs_per_cycle
-        self.learning_rate = learning_rate
+        self.adam_epochs_per_cycle = adam_epochs_per_cycle
+        self.adam_learning_rate = adam_learning_rate
+        self.adam_batch_size = adam_batch_size
         self.lr_decay = lr_decay
         self.lbfgs_max_iter = lbfgs_max_iter
         self.lbfgs_max_eval = lbfgs_max_eval
@@ -114,8 +116,9 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             "l2_penalty": self.l2_penalty,
             "optimizer": self.optimizer,
             "num_cycles": self.num_cycles,
-            "epochs_per_cycle": self.epochs_per_cycle,
-            "learning_rate": self.learning_rate,
+            "adam_epochs_per_cycle": self.adam_epochs_per_cycle,
+            "adam_learning_rate": self.adam_learning_rate,
+            "adam_batch_size": self.adam_batch_size,
             "lr_decay": self.lr_decay,
             "lbfgs_max_iter": self.lbfgs_max_iter,
             "lbfgs_learning_rate": self.lbfgs_learning_rate,
@@ -249,6 +252,64 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             raise ValueError("At least one training target must have positive weight")
         return {t: w / total_weight for t, w in weights.items()}
 
+    def _minibatch_gradient(self, model, normalization, indices):
+        """Identical to _full_gradient but only runs for specified indices. Does not work in multi-GPU setting."""
+        assert self.optimizer == "adam"
+        n_samples = len(self.train_dataloader.dataset)  # type: ignore
+        total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
+        # Each device will process its own subset of the dataset.
+        for idx in indices:
+            data, targets = self.train_dataloader.dataset[idx]
+            data = data.to(device=self.device)
+            targets = targets.to(device=self.device)
+            if data.natoms.numel() != 1:
+                raise ValueError("LES accumulation expects individual configurations")
+            if self.mode == "variable_projection" or (
+                self.fmaps and self.mode != "joint"
+            ):
+                # RFF is fixed in this derivative. Use the same linear maps as
+                # its solve, in solver precision. Differentiating the combined
+                # energy instead rounds the RFF force back to descriptor dtype,
+                # which can spoil a projected line search through cancellation.
+                fmaps = (
+                    {
+                        target: self.fmaps[target][idx]
+                        for target in self.training_targets
+                    }
+                    if self.fmaps
+                    else model.grad_feature_map(data, list(self.training_targets))
+                )
+                les_predictions = model.predict_les(data, list(self.training_targets))
+                predictions = {}
+                for target in self.training_targets:
+                    short_range = (
+                        model.rf.weights.detach().to(self.buffer_dt)
+                        @ fmaps[target].to(self.buffer_dt)
+                    ) * data.natoms
+                    predictions[target] = short_range.reshape_as(
+                        les_predictions[target]
+                    ) + les_predictions[target].to(self.buffer_dt)
+            else:
+                predictions = model.predict(
+                    targets=list(self.training_targets),
+                    data=data,
+                    add_energy_shift=False,
+                )
+            loss = total.new_zeros(())
+            for target, weight in self.rel_tgt_weight.items():
+                residual = (
+                    predictions[target].to(self.buffer_dt)
+                    - targets[target].to(self.buffer_dt)
+                ) / data.natoms.to(self.buffer_dt)
+                squared_error = residual.square().sum()
+                if normalization is not None:
+                    squared_error = squared_error / normalization[target].squeeze()
+                loss = loss + weight * squared_error
+            loss = loss / n_samples
+            loss.backward()
+            total += loss.detach()
+        return total
+
     def _full_gradient(self, model, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
         n_samples = len(self.train_dataloader.dataset)  # type: ignore
@@ -318,16 +379,25 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         if self.mode == "joint":
             params += list(model.rf.parameters())
         if self.optimizer == "adam":
-            lr = self.learning_rate * self.lr_decay**epoch
+            lr = self.adam_learning_rate * self.lr_decay**epoch
             if self._les_optimizer is None:
                 self._les_optimizer = torch.optim.Adam(params, lr=lr, eps=1e-8)
             optim = self._les_optimizer
             for group in optim.param_groups:
                 group["lr"] = lr
-            for _ in tqdm.trange(self.epochs_per_cycle, desc="LES epochs"):
-                optim.zero_grad(set_to_none=True)
-                self._full_gradient(model, normalization)
-                optim.step()
+            batch_size = self.adam_batch_size or n_samples
+            for _ in tqdm.trange(self.adam_epochs_per_cycle, desc="LES epochs"):
+                indices = (
+                    torch.randperm(n_samples).tolist()
+                    if batch_size < n_samples
+                    else list(range(n_samples))
+                )
+                for start in range(0, n_samples, batch_size):
+                    optim.zero_grad()
+                    self._minibatch_gradient(
+                        model, normalization, indices[start : start + batch_size]
+                    )
+                    optim.step()  # type: ignore
         else:
             # RFF refits change this objective: do not reuse curvature history.
             lr = self.lbfgs_learning_rate * self.lr_decay**epoch
@@ -424,6 +494,10 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             tuple[LogCollection, torch.Tensor]:
                 The fitting logs, together with the learned weights.
         """
+        if self.optimizer == "adam" and dist_utils.get_world_size() > 1:
+            raise NotImplementedError(
+                "Adam optimizer does not support multi-GPU implementation."
+            )
         self.patch_e3nn()
         self.training_history = []
         self._les_optimizer = None

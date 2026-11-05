@@ -26,25 +26,7 @@ from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 from tests.utils import mocked_gnn
 
 
-class ToyModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.les = torch.nn.Linear(1, 1, bias=False).double()
-        self.gnn = torch.nn.Linear(1, 1, bias=False).double()
-        self.rf = torch.nn.Module()
-        self.rf.weights = torch.nn.Parameter(torch.zeros(1, 1, dtype=torch.float64))
-        with torch.no_grad():
-            self.les.weight.zero_()
-            self.gnn.weight.fill_(1)
-        self.requested = []
-
-    def predict(self, targets, data, **kwargs):
-        self.requested.append(targets)
-        energy = self.les(self.gnn(data.atom_pos[:, :1])).sum() + self.rf.weights.sum()
-        result = {"energy": energy.reshape(1, 1)}
-        if "forces" in targets:
-            result["forces"] = self.les.weight.expand(1, 3)
-        return result
+HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
 
 
 def make_trainer(
@@ -75,11 +57,12 @@ def make_trainer(
         target_weight={ENERGY_TARGET_KEY: 1.0, FORCES_TARGET_KEY: 1.0},
         optimizer=cfg.optimizer,
         num_cycles=cfg.num_cycles, # type: ignore
-        epochs_per_cycle=cfg.epochs_per_cycle, # type: ignore
-        batch_size=cfg.batch_size,
-        learning_rate=cfg.learning_rate, # type: ignore
+        adam_epochs_per_cycle=cfg.adam_epochs_per_cycle, # type: ignore
+        adam_batch_size=cfg.adam_batch_size,
+        adam_learning_rate=cfg.adam_learning_rate, # type: ignore
         lr_decay=cfg.lr_decay, # type: ignore
         lbfgs_max_iter=cfg.lbfgs_max_iter, # type: ignore
+        lbfgs_max_eval=cfg.lbfgs_max_eval, # type: ignore
         lbfgs_learning_rate=cfg.lbfgs_learning_rate, # type: ignore
         lbfgs_history_size=cfg.lbfgs_history_size, # type: ignore
         lbfgs_tolerance_grad=cfg.lbfgs_tolerance_grad, # type: ignore
@@ -95,11 +78,211 @@ def make_trainer(
     return trainer
 
 
-# HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
+@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
+def test_varproj_maxiter(gnn_cfg):
+    """Test for checking save and load methods of FrankenPotential"""
+    rf_cfg = GaussianRFConfig(num_random_features=32, length_scale=1.0)
+    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+    dataset = FrankenAtomsDataset(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_cfg,
+    )
+    do_random_seed(1)
+    tr1 = make_trainer(LESConfig(
+        mode="variable_projection", num_cycles=1, lbfgs_max_iter=2, lbfgs_max_eval=50), 
+        dataset=dataset
+    )
+    m1 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc1, w1 = tr1.fit(m1)
+    do_random_seed(1)
+    print("\n")
+    tr2 = make_trainer(LESConfig(
+        mode="variable_projection", num_cycles=2, lbfgs_max_iter=1, lbfgs_max_eval=50), 
+        dataset=dataset
+    )
+    m2 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc2, w2 = tr2.fit(m2)
+    do_random_seed(1)
+    tr3 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=1), dataset=dataset)
+    m3 = LESFrankenPotential(
+        gnn_config=gnn_cfg,
+        rf_config=rf_cfg,
+        les_config=LESConfig(),
+        num_species=dataset.num_species, # type: ignore
+    )
+    lc3, w3 = tr3.fit(m3)
+    torch.testing.assert_close(w1, w2)
+    assert not torch.all(torch.isclose(w1, w3))
+
+
+class TestLESTrainingHistory():
+    def make_trainer(self, log_dir):
+        trainer = make_trainer(LESConfig())
+        trainer.log_dir = log_dir
+        trainer.training_history = []
+        trainer.train_dataloader = Mock(name="train_loader")
+        trainer.val_dataloader = Mock(name="validation_loader")
+        trainer.create_log_entry = Mock(
+            side_effect=lambda *args: LogEntry("model123", 0, 0, 0)
+        )
+        trainer.eval_summary = Mock(return_value="evaluation")
+
+        def evaluate(model, loader, log_collection, all_weights):
+            split = (
+                DataSplit.TRAIN
+                if loader is trainer.train_dataloader
+                else DataSplit.VALIDATION
+            )
+            for name, value in (("energy_RMSE", 1.5), ("forces_RMSE", 20.0)):
+                log_collection[0].add_metric(name, value, split)
+            return log_collection
+
+        trainer.evaluate = Mock(side_effect=evaluate)
+        return trainer
+
+    def test_saving(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            trainer = self.make_trainer(Path(tmp) / "run")
+            model = Mock()
+            path = Path(tmp) / "run" / "training_history.json"
+            trainer._print_eval(model, 0, step="rff")
+            first = json.loads(path.read_text())
+            assert first == trainer.training_history
+            assert len(trainer.training_history) == 1
+
+            trainer._print_eval(model, 0, step="les")
+            trainer._print_eval(model, 1, step="rff")
+            saved = json.loads(path.read_text())
+            assert saved == trainer.training_history
+            assert (
+                [(row["cycle"], row["step"]) for row in saved]
+                == [(1, "rff"), (1, "les"), (2, "rff")]
+            )
+            for row in saved:
+                for split in ("train", "validation"):
+                    assert row["metrics"][split]["energy_RMSE"] == 1.5
+                    assert row["metrics"][split]["forces_RMSE"] == 20.0
+            assert not path.with_suffix(".json.tmp").exists()
+
+    def test_no_logdir(self):
+        trainer = self.make_trainer(None)
+        trainer.val_dataloader = None
+        trainer._print_eval(Mock(), 0, step="joint")
+        assert trainer.evaluate.call_count == 1
+        assert trainer.training_history[0]["step"] == "joint"
+        assert set(trainer.training_history[0]["metrics"]) == {"train"}
+
+    @patch("franken.trainers.rf_les.dist_utils.get_rank", return_value=1)
+    def test_other_ranks(self, rank):
+        with tempfile.TemporaryDirectory() as tmp:
+            trainer = self.make_trainer(Path(tmp))
+            trainer._print_eval(Mock(), 0, step="les")
+            assert trainer.evaluate.call_count == 2
+            assert trainer.training_history == []
+            assert list(Path(tmp).iterdir()) == []
+
+
+def test_serialize_best_model(log_collection):
+    with (
+        mocked_gnn("cpu", torch.float32),
+        tempfile.TemporaryDirectory() as temp_dir,
+    ):
+        temp_dir = Path(temp_dir)
+        with open(temp_dir / "training_history.json", "w") as fh:
+            json.dump("test", fh)
+
+        trainer = RandomFeaturesEwaldsTrainer(
+            train_dataloader=None, # type: ignore
+            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+            l2_penalty=1e-6,
+            target_weight={},
+            random_features_normalization=None,
+            log_dir=temp_dir,
+            save_every_model=False,
+            device="cpu",
+            dtype=torch.float32,
+            optimizer="adam",
+            mode="alternating",
+            num_cycles=1,
+            adam_epochs_per_cycle=1,
+            adam_batch_size=1,
+            adam_learning_rate=1,
+            lr_decay=1,
+            lbfgs_history_size=1,
+            lbfgs_learning_rate=1,
+            lbfgs_max_iter=1,
+            lbfgs_max_eval=1,
+            lbfgs_tolerance_change=1,
+            lbfgs_tolerance_grad=1
+        )
+        model = LESFrankenPotential(
+            gnn_config=MaceBackboneConfig("test"),
+            rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0),
+            les_config=LESConfig(),
+        ).to("cpu")
+        all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
+        # 1. don't need to save
+        with patch.object(trainer, "has_new_best_model") as trainer_patch:
+            trainer_patch.return_value = (False, log_collection[1])
+            should_save = trainer.serialize_best_model(
+                model=model,
+                all_weights=all_weights,
+                split=DataSplit.VALIDATION,
+                best_model_selection=["energy_MAE", "forces_MAE"],
+            )
+            assert not should_save
+            assert (temp_dir / "training_history.json").exists()
+            assert not (temp_dir / "best_training_history.json").exists()
+        # 2. need to save
+        with patch.object(trainer, "has_new_best_model") as trainer_patch:
+            trainer_patch.return_value = (True, log_collection[1])
+            should_save = trainer.serialize_best_model(
+                model=model,
+                all_weights=all_weights,
+                split=DataSplit.VALIDATION,
+                best_model_selection=["energy_MAE", "forces_MAE"],
+            )
+            assert should_save
+            assert (temp_dir / "training_history.json").exists()
+            assert (temp_dir / "best_training_history.json").exists()
+            with open(temp_dir / "best_training_history.json", "r") as fh:
+                assert fh.readline() == '"test"'
+
+
+class ToyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.les = torch.nn.Linear(1, 1, bias=False).double()
+        self.gnn = torch.nn.Linear(1, 1, bias=False).double()
+        self.rf = torch.nn.Module()
+        self.rf.weights = torch.nn.Parameter(torch.zeros(1, 1, dtype=torch.float64))
+        with torch.no_grad():
+            self.les.weight.zero_()
+            self.gnn.weight.fill_(1)
+        self.requested = []
+
+    def predict(self, targets, data, **kwargs):
+        self.requested.append(targets)
+        energy = self.les(self.gnn(data.atom_pos[:, :1])).sum() + self.rf.weights.sum()
+        result = {"energy": energy.reshape(1, 1)}
+        if "forces" in targets:
+            result["forces"] = self.les.weight.expand(1, 3)
+        return result
 
 
 @pytest.mark.parametrize("save_fmaps", [False, True])
-def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
+def test_preserve_precision(save_fmaps):
     """The force must use A_F @ w, not a rounded backward pass through RFF."""
     dt = torch.float64  # TODO: Test that it doesn't work in f32
 
@@ -157,7 +340,6 @@ def test_projected_force_loss_preserves_linear_solver_precision(save_fmaps):
     loss = trainer._full_gradient(model, None)
     torch.testing.assert_close(loss, torch.tensor(3.0, dtype=dt))
     torch.testing.assert_close(model.les.weight.grad, torch.tensor([[6.0]]))
-    # TODO: The following should be a different test.
     assert model.rf.weights.grad is None
 
 
@@ -221,584 +403,3 @@ def test_les_force_and_parameter_derivatives(periodic):
         atol=1e-8,
         rtol=1e-5,
     )
-
-
-def test_accumulated_gradient_with_energy_and_force_losses():
-    trainer = make_trainer(LESConfig(mode="alternating"))
-    model = ToyModel()
-    loss = trainer._full_gradient(
-        model, {"energy": 0.25, "forces": 0.75}
-    )
-    x = torch.arange(1, 6, dtype=torch.float64)
-    torch.testing.assert_close(loss, 0.25 * (2 * x).square().mean() + 3 * 0.75)
-    torch.testing.assert_close(
-        model.les.weight.grad.squeeze(), -x.square().mean() - 4.5
-    )
-
-
-@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
-def test_varproj_maxiter(gnn_cfg):
-    """Test for checking save and load methods of FrankenPotential"""
-    rf_cfg = GaussianRFConfig(num_random_features=128, length_scale=1.0)
-    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
-    dataset = FrankenAtomsDataset(
-        data_path=data_path,
-        split="train",
-        gnn_config=gnn_cfg,
-    )
-    do_random_seed(1)
-    tr1 = make_trainer(LESConfig(
-        mode="variable_projection", num_cycles=1, lbfgs_max_iter=8, lbfgs_max_eval=50), 
-        dataset=dataset
-    )
-    m1 = LESFrankenPotential(
-        gnn_config=gnn_cfg,
-        rf_config=rf_cfg,
-        les_config=LESConfig(),
-        num_species=dataset.num_species, # type: ignore
-    )
-    lc1, w1 = tr1.fit(m1)
-    do_random_seed(1)
-    print("\n")
-    tr2 = make_trainer(LESConfig(
-        mode="variable_projection", num_cycles=2, lbfgs_max_iter=4, lbfgs_max_eval=50), 
-        dataset=dataset
-    )
-    m2 = LESFrankenPotential(
-        gnn_config=gnn_cfg,
-        rf_config=rf_cfg,
-        les_config=LESConfig(),
-        num_species=dataset.num_species, # type: ignore
-    )
-    lc2, w2 = tr2.fit(m2)
-    do_random_seed(1)
-    tr3 = make_trainer(LESConfig(mode="variable_projection", num_cycles=1, lbfgs_max_iter=1), dataset=dataset)
-    m3 = LESFrankenPotential(
-        gnn_config=gnn_cfg,
-        rf_config=rf_cfg,
-        les_config=LESConfig(),
-        num_species=dataset.num_species, # type: ignore
-    )
-    lc3, w3 = tr3.fit(m3)
-    torch.testing.assert_close(w1, w2)
-    assert not torch.isclose(w1, w3)
-
-
-class PolynomialModel(torch.nn.Module):
-    """Conservative linear energy with interchangeable short/long-range heads."""
-
-    def __init__(self):
-        super().__init__()
-        self.rf = torch.nn.Module()
-        self.rf.total_random_features = 3
-        self.rf.weights = torch.nn.Parameter(torch.zeros(1, 3, dtype=torch.float64))
-        self.les = torch.nn.Linear(3, 1, bias=False).double()
-
-    def grad_feature_map(self, data, targets):
-        x = data.atom_pos[:, 0]
-        energy = torch.stack((torch.ones_like(x), x.square() / 2, x**3 / 3))
-        forces = torch.zeros(3, x.numel(), 3, dtype=x.dtype)
-        forces[1, :, 0] = -x
-        forces[2, :, 0] = -x.square()
-        return {
-            "energy": energy.mean(1, keepdim=True),
-            "forces": forces.flatten(1) / data.natoms,
-        }
-
-    def _predict_weights(self, data, weights):
-        fmaps = self.grad_feature_map(data, ["energy", "forces"])
-        return {
-            "energy": data.natoms * (weights @ fmaps["energy"]),
-            "forces": (data.natoms * (weights @ fmaps["forces"])).reshape(1, -1, 3),
-        }
-
-    def predict(self, targets, data, **kwargs):
-        return self._predict_weights(data, self.rf.weights + self.les.weight)
-
-    def predict_les(self, data, targets, **kwargs):
-        return self._predict_weights(data, self.les.weight)
-
-
-@pytest.mark.parametrize("normalization", [None, "leading_eig"])
-def test_les_gradient_matches_rff_normal_equations(normalization):
-    # Different atom counts catch per-structure normalization errors; multiple
-    # force components catch a sum-versus-mean mismatch hidden by energy-only tests.
-    dataset = []
-    for n in (2, 4, 7):
-        positions = torch.zeros(n, 3, dtype=torch.float64)
-        positions[:, 0] = torch.linspace(0.2, 1.7, n)
-        data = Configuration(
-            positions, torch.ones(n, dtype=torch.long), torch.tensor([n])
-        )
-        target = Target(
-            torch.tensor([0.7 * n], dtype=torch.float64),
-            torch.randn(n, 3, dtype=torch.float64),
-        )
-        dataset.append((data, target))
-    loader = torch.utils.data.DataLoader(
-        dataset, batch_size=None, collate_fn=lambda x: x
-    )
-    trainer = RandomFeaturesEwaldsTrainer(
-        loader,
-        ["energy", "forces"],
-        0.03,
-        {"energy": 1.0, "forces": 0.2},
-        random_features_normalization=normalization,
-        device="cpu",
-        dtype=torch.float64,
-    )
-    model = PolynomialModel()
-    covs, _, norms = trainer.covariances(model, loader)
-    trainer._loss_normalization = norms
-    coeffs = trainer.residual_coeffs(model, loader, norms)
-    weights = {"energy": 1 / 1.2, "forces": 0.2 / 1.2}
-    with torch.no_grad():
-        model.rf.weights.normal_()
-    trainer._full_gradient(model, weights)
-    expected = sum(
-        weights[t] * (covs[t] @ model.rf.weights.detach().flatten() - coeffs[t])
-        for t in weights
-    ) * (2 / len(dataset))
-    torch.testing.assert_close(model.les.weight.grad.flatten(), expected)
-
-    # The actual closed-form residual solve must be a stationary point of the
-    # same data loss plus its ridge penalty. The toy heads use identical linear
-    # features, so the LES gradient also gives the data gradient w.r.t. RFF.
-    solution = trainer.solve(
-        covs, coeffs, l2_penalty=0.03, energy_weight=1.0, forces_weight=0.2
-    )
-    with torch.no_grad():
-        model.rf.weights.copy_(solution.reshape(1, -1))
-    model.zero_grad()
-    trainer._full_gradient(model, weights)
-    torch.testing.assert_close(
-        model.les.weight.grad.flatten() + 2 * 0.03 * solution / len(dataset),
-        torch.zeros_like(solution),
-        atol=1e-12,
-        rtol=0,
-    )
-
-
-@pytest.mark.parametrize("normalization", [None, "leading_eig"])
-@pytest.mark.parametrize("save_fmaps", [False, True])
-def test_variable_projection_gradient_and_accepted_state(normalization, save_fmaps):
-    dataset = []
-    for n in (2, 3, 5):
-        data = Configuration(
-            torch.randn(n, 3, dtype=torch.float64),
-            torch.ones(n, dtype=torch.long),
-            torch.tensor([n]),
-        )
-        dataset.append(
-            (
-                data,
-                Target(
-                    torch.randn(1, dtype=torch.float64),
-                    torch.randn(n, 3, dtype=torch.float64),
-                ),
-            )
-        )
-    loader = torch.utils.data.DataLoader(
-        dataset, batch_size=None, collate_fn=lambda x: x
-    )
-    trainer = RandomFeaturesEwaldsTrainer(
-        loader,
-        ["energy", "forces"],
-        0.1,
-        {"energy": 1.0, "forces": 0.2},
-        device="cpu",
-        dtype=torch.float64,
-        random_features_normalization=normalization,
-        save_fmaps=save_fmaps,
-        les_config=LESConfig(optimizer="lbfgs", mode="variable_projection"),
-    )
-    model = PolynomialModel()
-    trainer._print_eval = Mock()
-    hps = {"energy_weight": 1.0, "forces_weight": 0.2, "l2_penalty": 0.1}
-    weights = {"energy": 1 / 1.2, "forces": 0.2 / 1.2}
-    covs, _, norms = trainer.covariances(model, loader)
-    trainer._loss_normalization = norms
-    trainer._prepare_projection(covs, hps)
-
-    # Independent differentiable elimination of the linear block. Compare the
-    # envelope gradient AND the line-search value, including the changing ridge.
-    xs, ys = [], []
-    for data, target in dataset:
-        for key, fmap in model.grad_feature_map(data, list(weights)).items():
-            scale = weights[key] ** 0.5
-            if norms is not None:
-                scale = scale / norms[key].sqrt()
-            xs.append(scale * fmap.T)
-            ys.append(scale * target[key].flatten() / data.natoms)
-    x, y = torch.cat(xs), torch.cat(ys)
-    theta = model.les.weight.flatten()
-    w = torch.linalg.solve(
-        x.T @ x + 0.1 * torch.eye(3, dtype=x.dtype), x.T @ (y - x @ theta)
-    )
-    expected_loss = (
-        (x @ (w + theta) - y).square().sum() + 0.1 * w.square().sum()
-    ) / len(dataset)
-    expected_gradient = torch.autograd.grad(expected_loss, model.les.weight)[0]
-    accepted_theta = model.les.weight.detach().clone()
-
-    def step(closure):
-        torch.testing.assert_close(closure(), expected_loss.detach())
-        torch.testing.assert_close(model.les.weight.grad, expected_gradient)
-        # Simulate a final rejected trial followed by the optimizer restoring
-        # its accepted LES parameters. RFF must also be restored to that point.
-        with torch.no_grad():
-            model.les.weight.add_(0.5)
-        closure()
-        with torch.no_grad():
-            model.les.weight.copy_(accepted_theta)
-
-    with patch("torch.optim.LBFGS") as optimizer:
-        optimizer.return_value.step.side_effect = step
-        optimizer.return_value.zero_grad.side_effect = model.zero_grad
-        trainer._fit_les(model, 0, hps)
-    torch.testing.assert_close(model.rf.weights.flatten(), w.detach())
-
-    trainer.on_fit_start = Mock()
-    trainer.create_log_entry = Mock(side_effect=lambda *a: LogEntry("toy", 0, 0, 0))
-    trainer.les_config.num_cycles = 2
-    trainer.les_config.restore_best = False
-    objectives = []
-
-    def record(*args, **kwargs):
-        combined = (model.rf.weights + model.les.weight).flatten()
-        objectives.append(
-            (
-                (x @ combined - y).square().sum()
-                + 0.1 * model.rf.weights.square().sum()
-            ).item()
-        )
-
-    trainer._print_eval = record
-    with patch.object(
-        trainer, "_prepare_projection", wraps=trainer._prepare_projection
-    ) as prepare:
-        trainer.fit(model)
-    assert prepare.call_count == 1
-    assert len(objectives) == 4
-    assert all(b <= a + 1e-10 for a, b in zip(objectives, objectives[1:]))
-    assert objectives[-1] < objectives[0]
-    assert trainer._projection_factor is None
-
-
-@pytest.mark.parametrize("batch_size,steps", [(None, 2), (2, 6)])
-def test_adam_epochs_and_persistent_state(batch_size, steps):
-    trainer = make_trainer(
-        LESConfig(
-            optimizer="adam",
-            mode="alternating",
-            epochs_per_cycle=2,
-            batch_size=batch_size,
-            learning_rate=0.05,
-            lr_decay=0.5,
-        )
-    )
-    model = ToyModel()
-    with patch.object(
-        trainer, "_backward_batch", wraps=trainer._full_gradient
-    ) as batch:
-        trainer._fit_les(model, 0, HPS)
-        seen = [call.args[1] for call in batch.call_args_list]
-    per_epoch = steps // 2
-    for start in (0, per_epoch):
-        assert sorted(
-            i for group in seen[start : start + per_epoch] for i in group
-        ) == list(range(5))
-    if batch_size == 2:
-        assert [len(group) for group in seen] == [2, 2, 1, 2, 2, 1]
-    optim = trainer._les_optimizer
-    assert optim.state[model.les.weight]["step"].item() == steps
-    trainer._fit_les(model, 1, HPS)
-    assert trainer._les_optimizer is optim
-    assert optim.state[model.les.weight]["step"].item() == 2 * steps
-    assert optim.param_groups[0]["lr"] == 0.025
-    assert all(targets == ["energy"] for targets in model.requested)
-    assert model.gnn.weight.item() == 1.0
-    assert model.rf.weights.item() == 0.0
-    assert model.gnn.weight.requires_grad  # Original flags restored.
-
-
-def test_lbfgs_reduces_loss_uses_fixed_dataset_and_resets_history():
-    trainer = make_trainer(
-        LESConfig(optimizer="lbfgs", mode="alternating", lbfgs_max_iter=10)
-    )
-    model = ToyModel()
-    real_optimizer = torch.optim.LBFGS
-    with patch("torch.optim.LBFGS", wraps=real_optimizer) as construct:
-        with patch.object(
-            trainer, "_backward_batch", wraps=trainer._full_gradient
-        ) as batch:
-            trainer._fit_les(model, 0, HPS)
-            trainer._fit_les(model, 1, HPS)
-        assert construct.call_count == 2
-    assert all(call.args[1] == list(range(5)) for call in batch.call_args_list)
-    assert model.les.weight.item() == pytest.approx(2.0, abs=1e-5)
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"optimizer": "bad"},
-        {"mode": "bad"},
-        {"mode": "variable_projection", "optimizer": "adam"},
-        {"batch_size": 0},
-        {"batch_size": -1},
-        {"optimizer": "lbfgs", "batch_size": 2},
-        {"num_cycles": 0},
-        {"epochs_per_cycle": 0},
-        {"learning_rate": float("nan")},
-        {"learning_rate": -1},
-        {"lbfgs_history_size": 0},
-    ],
-)
-def test_invalid_settings(kwargs):
-    with pytest.raises(ValueError):
-        LESConfig(**kwargs)
-
-
-@pytest.mark.parametrize("restore_best", [True, False])
-def test_fit_restores_both_components_from_best_rff_stage(tmp_path, restore_best):
-    trainer = make_trainer(
-        LESConfig(mode="alternating", num_cycles=2, restore_best=restore_best)
-    )
-    trainer.log_dir = tmp_path
-    model = ToyModel()
-    trainer.on_fit_start = Mock()
-    trainer.covariances = Mock(return_value=({}, {}, None))
-    trainer._fit_rff = Mock(
-        side_effect=[
-            torch.tensor([[1.0]], dtype=torch.float64),
-            torch.tensor([[3.0]], dtype=torch.float64),
-        ]
-    )
-    trainer.create_log_entry = Mock(side_effect=lambda *a: LogEntry("toy", 0, 0, 0))
-    trainer.val_dataloader = object()
-    scores = iter([3.0, 4.0, 1.0, 5.0])
-
-    def record(hps, model, weights, epoch, step):
-        log = LogEntry("toy", 0, 0, 0)
-        log.add_metric("energy_MAE", next(scores), DataSplit.VAL)
-        trainer._remember_best(model, weights, log, epoch + 1, step)
-
-    def update_les(model, epoch, rf_hps):
-        with torch.no_grad():
-            model.les.weight.fill_(10.0 * (epoch + 1))
-        record(rf_hps, model, None, epoch, "les")
-
-    trainer._print_eval = record
-    trainer._fit_les = update_les
-    _, weights = trainer.fit(model)
-    # Even cycle zero must fit y - LES(initial), rather than the full target.
-    assert all(
-        "direct_coeffs" not in call.kwargs for call in trainer._fit_rff.call_args_list
-    )
-    assert model.rf.weights.item() == 3.0
-    assert weights.item() == 3.0
-    assert model.les.weight.item() == (10.0 if restore_best else 20.0)
-    assert trainer.best_stage["cycle"] == 2
-    assert trainer.best_stage["step"] == "rff"
-    assert (tmp_path / "best_stage.json").exists()
-
-
-def test_best_selection_without_validation_and_nonfinite_metrics():
-    trainer = make_trainer(LESConfig(mode="alternating"))
-    model = ToyModel()
-    for value in (2.0, float("nan"), 3.0):
-        log = LogEntry("toy", 0, 0, 0)
-        log.add_metric("energy_MAE", value, DataSplit.TRAIN)
-        trainer._remember_best(model, None, log, 1, "les")
-    assert trainer.best_stage["score"] == 2.0
-    assert trainer.best_stage["split"] == "train"
-
-
-def test_cli_training_options():
-    args = [
-        "--train-path",
-        "/tmp/train.xyz",
-        "--backbone",
-        "mace",
-        "--mace.path-or-id",
-        "mace_mp/small",
-        "--rf",
-        "gaussian",
-        "--gaussian.num-rf",
-        "8",
-        "--les",
-    ]
-    config = parse_cli(
-        args
-        + [
-            "--les-optimizer",
-            "adam",
-            "--les-mode",
-            "alternating",
-            "--les-batch-size",
-            "3",
-            "--les-num-cycles",
-            "4",
-            "--les-epochs-per-cycle",
-            "2",
-            "--les-no-restore-best",
-        ]
-    )
-    assert config.les.batch_size == 3
-    assert config.les.num_cycles == 4
-    assert config.les.epochs_per_cycle == 2
-    assert config.les.restore_best is False
-    defaults = parse_cli(args).les
-    assert defaults.batch_size is None
-    assert defaults.restore_best is True
-    projected = parse_cli(
-        args
-        + [
-            "--les-optimizer",
-            "lbfgs",
-            "--les-mode",
-            "variable_projection",
-            "--les-activation",
-            "silu",
-        ]
-    )
-    assert projected.les.mode == "variable_projection"
-    assert projected.les.activation == "silu"
-
-
-class TestLESTrainingHistory():
-    def make_trainer(self, log_dir):
-        trainer = object.__new__(RandomFeaturesEwaldsTrainer)
-        trainer.log_dir = log_dir
-        trainer.training_history = []
-        trainer.les_config = LESConfig(restore_best=False)
-        trainer.train_dataloader = Mock(name="train_loader")
-        trainer.val_dataloader = Mock(name="validation_loader")
-        trainer.create_log_entry = Mock(
-            side_effect=lambda *args: LogEntry("model123", 0, 0, 0)
-        )
-        trainer.eval_summary = Mock(return_value="evaluation")
-
-        def evaluate(model, loader, log_collection, all_weights):
-            split = (
-                DataSplit.TRAIN
-                if loader is trainer.train_dataloader
-                else DataSplit.VALIDATION
-            )
-            for name, value in (("energy_RMSE", 1.5), ("forces_RMSE", 20.0)):
-                log_collection[0].add_metric(name, value, split)
-            return log_collection
-
-        trainer.evaluate = Mock(side_effect=evaluate)
-        return trainer
-
-    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=0)
-    def test_records_both_stages_and_splits_with_current_weights(self, rank):
-        with tempfile.TemporaryDirectory() as tmp:
-            trainer = self.make_trainer(Path(tmp) / "run")
-            model = Mock()
-            weights = torch.tensor([[2.0]])
-            path = Path(tmp) / "run" / "training_history.json"
-            trainer._print_eval({}, model, weights, 0, step="rff")
-            first = json.loads(path.read_text())
-            assert len(first) == 1 
-            for call in trainer.evaluate.call_args_list:
-                self.assertIs(call.kwargs["all_weights"], weights)
-            trainer._print_eval({}, model, None, 0, step="les")
-            trainer._print_eval({}, model, weights, 1, step="rff")
-            saved = json.loads(path.read_text())
-            assert saved == trainer.training_history
-            assert (
-                [(row["cycle"], row["step"]) for row in saved]
-                == [(1, "rff"), (1, "les"), (2, "rff")]
-            )
-            for row in saved:
-                for split in ("train", "validation"):
-                    assert row["metrics"][split]["energy_RMSE"] == 1.5
-                    assert row["metrics"][split]["forces_RMSE"] == 20.0
-            assert not path.with_suffix(".json.tmp").exists()
-
-    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=0)
-    def test_without_validation_or_log_directory(self, rank):
-        trainer = self.make_trainer(None)
-        trainer.val_dataloader = None
-        trainer._print_eval({}, Mock(), None, 0, step="joint")
-        assert trainer.evaluate.call_count == 1
-        assert trainer.training_history[0]["step"] == "joint"
-        assert set(trainer.training_history[0]["metrics"]) == {"train"}
-
-    @patch("franken.trainers.rf_ewalds.dist_utils.get_rank", return_value=1)
-    def test_other_ranks_evaluate_without_writing(self, rank):
-        with tempfile.TemporaryDirectory() as tmp:
-            trainer = self.make_trainer(Path(tmp))
-            trainer._print_eval({}, Mock(), None, 0, step="les")
-            assert trainer.evaluate.call_count == 2
-            assert trainer.training_history == []
-            assert list(Path(tmp).iterdir()) == []
-
-
-def test_serialize_best_model(log_collection):
-    with (
-        mocked_gnn("cpu", torch.float32),
-        tempfile.TemporaryDirectory() as temp_dir,
-    ):
-        temp_dir = Path(temp_dir)
-        with open(temp_dir / "training_history.json", "w") as fh:
-            json.dump("test", fh)
-
-        trainer = RandomFeaturesEwaldsTrainer(
-            train_dataloader=None, # type: ignore
-            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
-            l2_penalty=[1e-6],
-            target_weight={},
-            random_features_normalization=None,
-            log_dir=temp_dir,
-            save_every_model=False,
-            device="cpu",
-            dtype=torch.float32,
-            optimizer="adam",
-            mode="alternating",
-            num_cycles=1,
-            epochs_per_cycle=1,
-            batch_size=1,
-            learning_rate=1,
-            lr_decay=1,
-            lbfgs_history_size=1,
-            lbfgs_learning_rate=1,
-            lbfgs_max_iter=1,
-            lbfgs_tolerance_change=1,
-            lbfgs_tolerance_grad=1
-        )
-        model = LESFrankenPotential(
-            gnn_config=MaceBackboneConfig("test"),
-            rf_config=GaussianRFConfig(num_random_features=1024, length_scale=1.0),
-            les_config=LESConfig(),
-        ).to("cpu")
-        all_weights = torch.randn(2, 1024, dtype=trainer.buffer_dt)
-        # 1. don't need to save
-        with patch.object(trainer, "has_new_best_model") as trainer_patch:
-            trainer_patch.return_value = (False, log_collection[1])
-            should_save = trainer.serialize_best_model(
-                model=model,
-                all_weights=all_weights,
-                split=DataSplit.VALIDATION,
-                best_model_selection=["energy_MAE", "forces_MAE"],
-            )
-            assert not should_save
-            assert (temp_dir / "training_history.json").exists()
-            assert not (temp_dir / "best_training_history.json").exists()
-        # 2. need to save
-        with patch.object(trainer, "has_new_best_model") as trainer_patch:
-            trainer_patch.return_value = (True, log_collection[1])
-            should_save = trainer.serialize_best_model(
-                model=model,
-                all_weights=all_weights,
-                split=DataSplit.VALIDATION,
-                best_model_selection=["energy_MAE", "forces_MAE"],
-            )
-            assert should_save
-            assert (temp_dir / "training_history.json").exists()
-            assert (temp_dir / "best_training_history.json").exists()
-            with open(temp_dir / "best_training_history.json", "r") as fh:
-                assert fh.readline() == '"test"'
