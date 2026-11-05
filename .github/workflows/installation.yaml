@@ -119,7 +119,7 @@ jobs:
             extras: cueq-cu12
             cupy: cupy-cuda12x[ctk]
             cuda: '12'
-            torch: torch==2.14.1+cu128
+            torch: torch==2.11.0+cu128
           - index: cu130
             extras: cueq-cu13
             cupy: cupy-cuda13x[ctk]
