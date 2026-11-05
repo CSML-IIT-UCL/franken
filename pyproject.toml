@@ -87,6 +87,7 @@ docs = [
     "sphinx-argparse",
     "myst-parser",
     "nbsphinx",
+    "sphinx-autobuild>=2025.8.25",
 ]
 
 [build-system]

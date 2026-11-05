@@ -1,13 +1,23 @@
 (installation)=
 # Installation
+Franken requires Python 3.11 or newer, [MACE](https://github.com/acesuit/mace) support is included in the default
+installation.
+```{raw} html
+<button type="button" class="agent-onboarding__copy" data-agent-guide="../agent-setup.md" aria-live="polite">
+  <span class="agent-onboarding__icons" aria-hidden="true">
+    <img src="../_static/agent-icons/claude.svg" alt="" width="20" height="20">
+    <img src="../_static/agent-icons/codex.svg" alt="" width="20" height="20" class="agent-onboarding__adaptive-icon">
+    <img src="../_static/agent-icons/opencode.svg" alt="" width="20" height="20" class="agent-onboarding__adaptive-icon">
+  </span>
+  <span data-copy-label>Copy setup prompt</span>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>
+</button>
+```
 
-Franken requires Python 3.11 or newer. MACE is included in the default
-installation; there is no separate `mace` extra. Training uses the standard
-e3nn backend on CPUs or NVIDIA GPUs through PyTorch.
 
 ## Default installation
 
-With pip, create an environment and install Franken:
+With `pip`, create an environment and install Franken:
 
 ```bash
 python -m venv .venv
@@ -25,48 +35,30 @@ uv add franken
 ```
 
 In an existing environment or uv project, only the last command is needed.
-You do not need to install PyTorch separately unless you want a particular
-CPU or CUDA build; see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
+The installer will choose a PyTorch build automatically; if you prefer choosing your own, see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
 
-These instructions describe the current version of Franken. The installation
-workflow tests the wheel built from the checkout. To install an unreleased
-checkout, use `python -m pip install .` from its directory, or
-`uv add /path/to/franken` from your uv project, in place of the package name.
+## Extras
 
-## Install extras
+Franken supports a wide range of integrations, which can be installed as extras:
 
-Extras can be selected during the first installation or added later. They keep
-MACE installed. Use quotes around requirements containing brackets.
-
-| Extra | Adds | pip | uv |
-|---|---|---|---|
-| `metatomic` | PET/UPET through Metatomic/Metatrain | `python -m pip install "franken[metatomic]"` | `uv add "franken[metatomic]"` |
-| `torch-sim` | TorchSim interface dependencies | `python -m pip install "franken[torch-sim]"` | `uv add "franken[torch-sim]"` |
-| `docs` | Documentation build tools | `python -m pip install "franken[docs]"` | `uv add "franken[docs]"` |
-| `develop` | Formatting and test tools | `python -m pip install "franken[develop]"` | `uv add "franken[develop]"` |
-| `cueq-cu12` | cuEquivariance CUDA 12 inference kernels | `python -m pip install "franken[cueq-cu12]"` | `uv add "franken[cueq-cu12]"` |
-| `cueq-cu13` | cuEquivariance CUDA 13 inference kernels | `python -m pip install "franken[cueq-cu13]"` | `uv add "franken[cueq-cu13]"` |
-| `cuda` | CuPy **source build**, requiring a local CUDA toolkit | `python -m pip install "franken[cuda]"` | `uv add "franken[cuda]"` |
+| Name | Integration |
+|---|---|
+| `metatomic` | [PET/UPET](https://lab-cosmo.github.io/upet/) backbones and inference with [Metatomic](https://docs.metatensor.org/) |
+| `torch-sim` | Inference through [TorchSim](https://torchsim.github.io/torch-sim/) |
+| `cueq-cu<12/13>` | [cuEquivariance](https://docs.nvidia.com/cuda/cuequivariance/) CUDA 12/13 inference kernels |
+| `cuda` | Memory-efficient solvers, through [CuPy](https://cupy.dev/) **source build** (requires a local CUDA toolkit) |
 
 For the cuEquivariance extras, first select the matching CUDA PyTorch build
 using the recipes below. For CuPy, the {ref}`binary-wheel recipe <cupy-for-the-low-memory-solver>`
 is usually easier than the legacy `cuda` extra.
 
-Combine the extras you want in one requirement, for example:
+You can combine the extras you want in one requirement, for example:
 
 ```bash
-python -m pip install "franken[metatomic,torch-sim,docs,develop]"
+python -m pip install "franken[metatomic,torch-sim]"
 # In a uv project:
-uv add "franken[metatomic,torch-sim,docs,develop]"
+uv add "franken[metatomic,torch-sim]"
 ```
-
-PET/UPET backbones are supported once the `metatomic` extra is installed;
-there is no separate `pet` installation extra.
-
-Metatomic wheels support a range of PyTorch versions. Installing `metatomic`
-can therefore select an older PyTorch than the default installation.
-Let the installer resolve the combined requirement. MACE 0.3.17 also requires
-e3nn 0.4.4; do not override that upstream requirement.
 
 If you previously ran `uv add torch`, uv may have saved a lower bound matching
 the newest PyTorch release. If that version is newer than Metatomic supports,
@@ -82,19 +74,8 @@ incompatible PyTorch or e3nn version, use a separate environment. See the
 [Metatomic installation guide](https://docs.metatensor.org/metatomic/latest/installation.html)
 for its supported PyTorch versions.
 
-For a local documentation build, the `docs` extra provides the Python tools.
-The notebooks also require the system program Pandoc (for example,
-`sudo apt install pandoc` on Ubuntu, or `conda install -c conda-forge pandoc`).
-From a checkout, run `sphinx-build -b html -D nbsphinx_execute=never docs _build/html`.
-
 (choosing-a-pytorch-build)=
 ## Choosing a PyTorch build
-
-The following recipes target Linux x86-64, as tested by the installation
-workflow. Check the [PyTorch installation guide](https://pytorch.org/get-started/locally/)
-for other platforms and driver requirements. A CUDA wheel can be installed on
-a CPU-only machine, but GPU execution requires supported hardware and a
-compatible NVIDIA driver.
 
 ### pip
 
@@ -120,13 +101,7 @@ python -m pip install --extra-index-url https://download.pytorch.org/whl/cu130 \
     "torch==2.14.1+cu130" "franken[cueq-cu13]" "cupy-cuda13x[ctk]"
 ```
 
-These pip recipes select a tested PyTorch build explicitly: `--extra-index-url`
-alone does not force pip to use that index, and dependency backtracking can
-otherwise select a different CUDA family. When changing PyTorch versions, choose
-a matching build from the PyTorch installation guide and check it after installation.
-CuPy is optional; omit its requirement if you do not use the low-memory solver.
-When adding extras later, use the same PyTorch index again and check the selected
-build as shown below.
+These pip recipes select a PyTorch build explicitly.
 
 ### uv
 
@@ -267,18 +242,3 @@ python -m pip install "franken[metatomic,torch-sim]"
 
 Follow the same pip recipes for selecting a PyTorch build. Conda environment
 creation is not part of the GitHub installation workflow.
-
-## What installation CI verifies
-
-The [installation workflow](https://github.com/CSML-IIT-UCL/franken/blob/main/.github/workflows/installation.yaml)
-installs the candidate wheel in fresh environments using pip and uv. It checks
-the plain default installation, fresh combined extras, extras added to an existing
-installation, and explicit CPU/CUDA 12/CUDA 13 build recipes. The checks synchronize
-packages, validate installed dependencies, import the selected packages and train
-a tiny MACE model for the default and combined-extras paths.
-
-GitHub-hosted runners have no NVIDIA GPU. CUDA cases check wheel installation,
-imports and the selected PyTorch build; they do not execute GPU kernels. The
-legacy source-built CuPy extra receives a dependency-resolution check only.
-A passing workflow therefore verifies these installation recipes, not every
-hardware/driver combination or a full training run with every backbone.
