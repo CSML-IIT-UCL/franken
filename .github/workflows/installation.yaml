@@ -43,7 +43,8 @@ jobs:
           uv init --bare --python '${{ matrix.python }}' uv-smoke
           cd uv-smoke
           uv venv --python '${{ matrix.python }}'
-          uv add torch --index pytorch-cpu=https://download.pytorch.org/whl/cpu
+          # Keep Franken's lower bound so adding extras can select a compatible torch.
+          uv add 'torch>=2.5' --index pytorch-cpu=https://download.pytorch.org/whl/cpu
           # Restrict this index to torch, so other packages come from PyPI.
           python -c "from pathlib import Path; p = Path('pyproject.toml'); p.write_text(p.read_text() + '\nexplicit = true\n')"
           uv add "$RUNNER_TEMP"/wheels/franken-*.whl
@@ -74,9 +75,11 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           wheel=(wheels/franken-*.whl)
+          # The legacy cuda extra builds CuPy from source and needs a CUDA toolkit.
+          # Its dependency constraints are covered by the all-extras uv check above.
           for cuda in cueq-cu12 cueq-cu13; do
             pip-smoke/bin/python -m pip install --dry-run \
-              "${wheel[0]}[pet,metatomic,torch-sim,develop,docs,cuda,$cuda]"
+              "${wheel[0]}[pet,metatomic,torch-sim,develop,docs,$cuda]"
           done
       - name: Add extras to a uv project without installing GPU wheels
         if: matrix.manager == 'uv'
