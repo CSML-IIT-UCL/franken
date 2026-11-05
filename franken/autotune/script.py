@@ -22,10 +22,10 @@ from franken.config import (
     asdict_with_classvar,
 )
 from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    STRESS_TARGET_KEY,
-    TargetType,
+    ENERGY_KEY,
+    FORCES_KEY,
+    STRESS_KEY,
+    PropertyType,
 )
 from franken.datasets.registry import DATASET_REGISTRY
 from franken.trainers import (
@@ -202,12 +202,12 @@ def create_rf_hpsearch_grid(
 
 def create_solver_hpsearch_grid(
     cfg: SolverConfig,
-) -> tuple[list[float], dict[TargetType, list[float]]]:
+) -> tuple[list[float], dict[PropertyType, list[float]]]:
     solver_hps = hps_from_config(cfg)
-    weight_dict: dict[TargetType, list[float]] = {
-        ENERGY_TARGET_KEY: solver_hps["energy_weight"],
-        FORCES_TARGET_KEY: solver_hps["force_weight"],
-        STRESS_TARGET_KEY: solver_hps["stress_weight"],
+    weight_dict: dict[PropertyType, list[float]] = {
+        ENERGY_KEY: solver_hps["energy_weight"],
+        FORCES_KEY: solver_hps["force_weight"],
+        STRESS_KEY: solver_hps["stress_weight"],
     }
     return solver_hps["l2_penalty"], weight_dict
 

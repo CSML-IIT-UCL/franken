@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Callable, List, Literal, Mapping, Optional, Union, cast
+from typing import Callable, Literal, Mapping, Union, cast
 
 import torch
 
@@ -10,9 +10,9 @@ from franken.config import BackboneConfig, RFConfig
 from franken.backbones.utils import load_checkpoint
 from franken.data import Configuration
 
-# torch-script doesn't work unless we access target-keys through the module.
+# torch-script doesn't work unless we access property-keys through the module.
 import franken.data.base
-from franken.data.base import TargetType
+from franken.data.base import PropertyType
 from franken.rf.atomic_energies import AtomicEnergiesShift
 from franken.rf.heads import initialize_rf
 from franken.rf.scaler import FeatureScaler
@@ -62,7 +62,7 @@ class FrankenPotential(torch.nn.Module):
         jac_chunk_size: Union[int, Literal["auto"]] = "auto",
         scale_by_Z: bool = True,
         num_species: int = 1,
-        atomic_energies: Optional[Mapping[int, torch.Tensor | float]] = None,
+        atomic_energies: Mapping[int, torch.Tensor | float] | None = None,
     ):
         super(FrankenPotential, self).__init__()
         # stored here as simpler to access than through self.gnn
@@ -100,6 +100,23 @@ class FrankenPotential(torch.nn.Module):
             "input_scaler": self.input_scaler.init_args(),
         }
         return hps
+
+    @property
+    def implemented_properties(self) -> list[str]:
+        return [
+            franken.data.base.ENERGY_KEY,
+            franken.data.base.FORCES_KEY,
+            franken.data.base.STRESS_KEY,
+        ]
+
+    def _check_properties(self, requested: list[str]) -> None:
+        impl = self.implemented_properties
+        for req in requested:
+            if req not in impl:
+                raise ValueError(
+                    f"Requested property '{req}' is not implemented in this model. "
+                    f"Implemented properties are {impl}"
+                )
 
     def save(self, path: os.PathLike | str, multi_weights: torch.Tensor | None = None):
         if multi_weights is not None:
@@ -178,135 +195,102 @@ class FrankenPotential(torch.nn.Module):
 
     @torch.jit.unused
     @torch.no_grad
-    def _compute_forces_stresses(
+    def _derivatives_fwdad(
         self,
         data: Configuration,
         fmaps_func: bool,
         weights: torch.Tensor | None,
-        cache_key: str,
+        stress: bool,
     ) -> dict[str, torch.Tensor]:
-        num_systems = data.natoms.numel()
-        displacement = torch.zeros(
-            (num_systems, 3, 3),
-            dtype=data.atom_pos.dtype,
-            device=data.atom_pos.device,
+        out = {}
+        cache_key = (
+            "force" + ("stress" if stress else "") + ("fmap" if fmaps_func else "")
         )
+        displacement = None
+        argnums = 0
+        if stress:
+            num_systems = data.natoms.numel()
+            displacement = torch.zeros(
+                (num_systems, 3, 3),
+                dtype=data.atom_pos.dtype,
+                device=data.atom_pos.device,
+            )
+            argnums = (0, 1)
         if fmaps_func:
             args = [data.atom_pos, displacement, data]
         else:
             args = [data.atom_pos, displacement, data, weights]
         if (jacfn := self.jac_cache.get(cache_key)) is None:
             func = self._feature_map_aux if fmaps_func else self._energy_aux
-            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=(0, 1))
+            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=argnums)
             jacfn = jacfwd(
-                func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
+                func, argnums=argnums, has_aux=True, chunk_size=jac_chunk_size
             )
             self.jac_cache[cache_key] = jacfn
-        (force_fm, virial_fm), energy_fm = jacfn(*args)
-        stress_fm = virial_to_stress(-virial_fm, data)
-        return {
-            franken.data.base.FORCES_TARGET_KEY: -force_fm,
-            franken.data.base.STRESS_TARGET_KEY: stress_fm,
-            franken.data.base.ENERGY_TARGET_KEY: energy_fm,
-        }
+        derivatives_fm, energy_fm = jacfn(*args)
+        out[franken.data.base.ENERGY_KEY] = energy_fm
+        if stress:
+            out[franken.data.base.FORCES_KEY] = -derivatives_fm[0]
+            out[franken.data.base.STRESS_KEY] = virial_to_stress(
+                -derivatives_fm[1], data
+            )
+        else:
+            out[franken.data.base.FORCES_KEY] = -derivatives_fm
+        return out
 
-    @torch.jit.unused
-    @torch.no_grad
-    def _compute_forces(
+    def _derivatives_autograd(
         self,
         data: Configuration,
         fmaps_func: bool,
         weights: torch.Tensor | None,
-        cache_key: str,
-    ) -> dict[str, torch.Tensor]:
-        if fmaps_func:
-            args = [data.atom_pos, None, data]
-        else:
-            args = [data.atom_pos, None, data, weights]
-        if (jacfn := self.jac_cache.get(cache_key)) is None:
-            func = self._feature_map_aux if fmaps_func else self._energy_aux
-            jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
-            jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
-            self.jac_cache[cache_key] = jacfn
-        force_fm, energy_fm = jacfn(*args)
-        return {
-            franken.data.base.FORCES_TARGET_KEY: -force_fm,
-            franken.data.base.ENERGY_TARGET_KEY: energy_fm,
-        }
-
-    def _compute_forces_stresses_ag(
-        self, data: Configuration, fmaps_func: bool, weights: torch.Tensor | None = None
-    ) -> dict[str, torch.Tensor]:
+        stress: bool,
+    ):
         n_systems = data.natoms.numel()
-        displacement = torch.zeros(
-            (n_systems, 3, 3),
-            dtype=data.atom_pos.dtype,
-            device=data.atom_pos.device,
-        ).requires_grad_(True)
+        n_atoms = data.atom_pos.shape[0]
+        out = {}
+        displacement: torch.Tensor | None = None
         data.atom_pos.requires_grad_(True)
+        grad_inputs = [data.atom_pos]
+        if stress:
+            displacement = torch.zeros(
+                (n_systems, 3, 3),
+                dtype=data.atom_pos.dtype,
+                device=data.atom_pos.device,
+            ).requires_grad_(True)
+            grad_inputs.append(displacement)
+
         if fmaps_func:
             _, energy = self._feature_map_aux(data.atom_pos, displacement, data)
         else:
-            _, energy = self._energy_aux(
-                data.atom_pos, displacement, data, weights=weights
-            )
+            _, energy = self._energy_aux(data.atom_pos, displacement, data, weights)
+        out[franken.data.base.ENERGY_KEY] = energy.detach()
+
         n_sols = energy.shape[0]
-        n_atoms = data.atom_pos.shape[0]
         force_lst, virial_lst = [], []
         for i in range(n_sols):  # each model (M) independently
             cur_energy: torch.Tensor = energy[i]
             # NOTE: complex type annotation required by jit.script
-            grad_out: List[Optional[torch.Tensor]] = [torch.ones_like(cur_energy)]
+            grad_out: list[torch.Tensor | None] = [torch.ones_like(cur_energy)]
             grads = torch.autograd.grad(
                 outputs=[cur_energy],
-                inputs=[data.atom_pos, displacement],
+                inputs=grad_inputs,
                 grad_outputs=grad_out,  # type: ignore
                 retain_graph=i < n_sols - 1,
             )
             g0 = grads[0]
             assert g0 is not None
             force_lst.append(g0)
-            g1 = grads[1]
-            assert g1 is not None
-            virial_lst.append(g1)
+            if stress:
+                g1 = grads[1]
+                assert g1 is not None
+                virial_lst.append(g1)
         force = -torch.stack(force_lst, 0).view(n_sols, n_atoms, 3)
-        virial = -torch.stack(virial_lst, 0).view(n_sols, n_systems, 3, 3)
-        stress = virial_to_stress(virial, data)
-        return {
-            franken.data.base.FORCES_TARGET_KEY: force.detach(),
-            franken.data.base.STRESS_TARGET_KEY: stress.detach(),
-            franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
-        }
-
-    def _compute_forces_ag(
-        self, data: Configuration, fmaps_func: bool, weights: torch.Tensor | None = None
-    ) -> dict[str, torch.Tensor]:
-        data.atom_pos.requires_grad_(True)
-        if fmaps_func:
-            _, energy = self._feature_map_aux(data.atom_pos, None, data)
-        else:
-            _, energy = self._energy_aux(data.atom_pos, None, data, weights=weights)
-        n_sols = energy.shape[0]
-        n_atoms = data.atom_pos.shape[0]
-        force_lst = []
-        for i in range(n_sols):  # each model (M) independently
-            cur_energy: torch.Tensor = energy[i]
-            # NOTE: complex type annotation required by jit.script
-            grad_out: List[Optional[torch.Tensor]] = [torch.ones_like(cur_energy)]
-            grads = torch.autograd.grad(
-                outputs=[cur_energy],
-                inputs=[data.atom_pos],
-                grad_outputs=grad_out,  # type: ignore
-                retain_graph=i < n_sols - 1,
-            )
-            grad = grads[0]
-            assert grad is not None
-            force_lst.append(grad)
-        force = -torch.stack(force_lst, 0).view(n_sols, n_atoms, 3)
-        return {
-            franken.data.base.FORCES_TARGET_KEY: force.detach(),
-            franken.data.base.ENERGY_TARGET_KEY: energy.detach(),
-        }
+        out[franken.data.base.FORCES_KEY] = force.detach()
+        if len(virial_lst) > 0:
+            virial = -torch.stack(virial_lst, 0).view(n_sols, n_systems, 3, 3)
+            stresses = virial_to_stress(virial, data)
+            out[franken.data.base.STRESS_KEY] = stresses.detach()
+        return out
 
     def _feature_map_aux(
         self,
@@ -355,54 +339,52 @@ class FrankenPotential(torch.nn.Module):
     def grad_feature_map(
         self,
         data: Configuration,
-        targets: list[TargetType],
-    ) -> dict[TargetType, torch.Tensor]:
+        properties: list[PropertyType],
+    ) -> dict[PropertyType, torch.Tensor]:
         """Compute the feature map for this configuration (the *energy* feature-map)
         as well as derived quantities such as the *forces* feature-map or the
         *stress* map.
 
         Args:
             data (Configuration): atomic system
-            targets (list[TargetType]): list feature-maps to compute. These correspond
+            properties (list[PropertyType]): list of feature-maps to compute corresponding
                 to the training targets.
 
         Returns:
-            dictionary mapping targets to the respective feature maps.
+            dictionary mapping properties to the respective feature maps.
             All feature maps have a first dimension of size `num_random_features`
             followed by the dimensions of the respective feature map.
         """
-        compute_force = franken.data.base.FORCES_TARGET_KEY in targets
-        compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
-        out: dict[TargetType, torch.Tensor]
-        if compute_stress or (compute_force and compute_stress):
+        compute_force = franken.data.base.FORCES_KEY in properties
+        compute_stress = franken.data.base.STRESS_KEY in properties
+        out: dict[PropertyType, torch.Tensor]
+        if not (compute_force or compute_stress):
+            _, energy_fm = self._feature_map_aux(data.atom_pos, None, data)
+            out = {franken.data.base.ENERGY_KEY: energy_fm}
+        else:
             out = cast(
-                dict[TargetType, torch.Tensor],
-                self._compute_forces_stresses(
-                    data, True, weights=None, cache_key="force_stress_fmap"
+                dict[PropertyType, torch.Tensor],
+                self._derivatives_fwdad(
+                    data,
+                    fmaps_func=True,
+                    weights=None,
+                    stress=compute_stress,
                 ),
             )
-        elif compute_force:
-            out = cast(
-                dict[TargetType, torch.Tensor],
-                self._compute_forces(data, True, weights=None, cache_key="force_fmap"),
-            )
-        else:
-            _, energy_fm = self._feature_map_aux(data.atom_pos, None, data)
-            out = {franken.data.base.ENERGY_TARGET_KEY: energy_fm}
         # Fix shapes
-        if franken.data.base.ENERGY_TARGET_KEY in out:
+        if franken.data.base.ENERGY_KEY in out:
             # Sys, F -> F, Sys
-            out[franken.data.base.ENERGY_TARGET_KEY] = out[
-                franken.data.base.ENERGY_TARGET_KEY
+            out[franken.data.base.ENERGY_KEY] = out[
+                franken.data.base.ENERGY_KEY
             ].transpose(0, 1)
-        if franken.data.base.FORCES_TARGET_KEY in out:
+        if franken.data.base.FORCES_KEY in out:
             # F, S, 3, 3 -> F, S*3*3
-            out_f = out[franken.data.base.FORCES_TARGET_KEY]
-            out[franken.data.base.FORCES_TARGET_KEY] = out_f.reshape(out_f.shape[0], -1)
-        if franken.data.base.STRESS_TARGET_KEY in out:
+            out_f = out[franken.data.base.FORCES_KEY]
+            out[franken.data.base.FORCES_KEY] = out_f.reshape(out_f.shape[0], -1)
+        if franken.data.base.STRESS_KEY in out:
             # F, S, 3, 3 -> F, S*6
-            out_s = out[franken.data.base.STRESS_TARGET_KEY]
-            out[franken.data.base.STRESS_TARGET_KEY] = out_s.reshape(out_s.shape[0], -1)
+            out_s = out[franken.data.base.STRESS_KEY]
+            out[franken.data.base.STRESS_KEY] = out_s.reshape(out_s.shape[0], -1)
         return out
 
     def _energy_aux(
@@ -422,39 +404,29 @@ class FrankenPotential(torch.nn.Module):
         energies = natoms[None, :] * energies
         return energies.sum(1), energies
 
-    def _predict(
+    def _predict_efs(
         self,
         weights: torch.Tensor | None,
         data: Configuration,
-        targets: list[str],
+        properties: list[str],
         mode: str,
     ) -> dict[str, torch.Tensor]:
-        compute_force = franken.data.base.FORCES_TARGET_KEY in targets
-        compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
-        if compute_stress or (compute_force and compute_stress):
-            if mode == "torch.func":
-                return self._compute_forces_stresses(
-                    data,
-                    fmaps_func=False,
-                    weights=weights,
-                    cache_key="force_stress_energy",
-                )
-            elif mode == "torch.autograd":
-                return self._compute_forces_stresses_ag(data, False, weights)
-            else:
-                raise ValueError(f"Differentiation mode {mode} is invalid.")
-        elif compute_force:
-            if mode == "torch.func":
-                return self._compute_forces(
-                    data, fmaps_func=False, weights=weights, cache_key="force_energy"
-                )
-            elif mode == "torch.autograd":
-                return self._compute_forces_ag(data, False, weights)
-            else:
-                raise ValueError(f"Differentiation mode {mode} is invalid.")
-        else:
+        compute_force = franken.data.base.FORCES_KEY in properties
+        compute_stress = franken.data.base.STRESS_KEY in properties
+        if not (compute_force or compute_stress):
             _, energy = self._energy_aux(data.atom_pos, None, data, weights)  # [M, N]
-            return {franken.data.base.ENERGY_TARGET_KEY: energy}
+            return {franken.data.base.ENERGY_KEY: energy}
+        if mode == "torch.func":
+            return self._derivatives_fwdad(
+                data,
+                fmaps_func=False,
+                weights=weights,
+                stress=compute_stress,
+            )
+        elif mode == "torch.autograd":
+            return self._derivatives_autograd(data, False, weights, compute_stress)
+        else:
+            raise ValueError(f"Differentiation mode {mode} is invalid.")
 
     def _get_jacobian_chunk_size(
         self, func, func_inputs, argnums: int | tuple[int, int] = 0
@@ -480,7 +452,7 @@ class FrankenPotential(torch.nn.Module):
 
     def predict(
         self,
-        targets: list[str],
+        properties: list[str],
         data: Configuration,
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",
@@ -502,18 +474,19 @@ class FrankenPotential(torch.nn.Module):
             is a vector of shape `[model_size]`)
 
         Args:
-            targets: the target quantities to compute. For example, :code:`"energy"`, :code:`"forces"`
-                or :code:`"stress"`. To see all available quantities, check :attr:`"franken.data.base.TargetType"`.
+            properties: the properties to compute. For example, :code:`"energy"`, :code:`"forces"`
+                or :code:`"stress"`. To check which properties are available for the current model
+                call :code:`model.implemented_properties`.
             weights: weights of the random feature model. Defaults to None, in which case
                 the weights set in :attr:`FrankenPotential.rf` will be used instead.
             differential_mode: how to compute the model's differential quantites. Defaults to :code:`"torch.autograd"`.
             add_energy_shift: whether to add the energy shift to the energy.
 
         Returns:
-            A dictionary mapping requested targets to the computed values.
-            Each requested target has a first dimension which depends on the number of models present
+            A dictionary mapping requested properties to the computed values.
+            Each requested property has a first dimension which depends on the number of models present
             in the current weights. The second dimension depends on the number of separate systems present
-            in the data. Further dimensions depend on the specific target. For example,
+            in the data. Further dimensions depend on the specific property. For example,
             forces have size `[num_models, num_systems * num_atoms_per_system, 3]`; stress tensors instead
             have size `[num_models, num_systems, 3, 3]` and energy tensors have size `[num_models, num_systems]`.
 
@@ -521,13 +494,14 @@ class FrankenPotential(torch.nn.Module):
             The `"torch.func"` strategy for differentiation is not supported for torch-jitted models.
             Use `"torch.autograd"` if the model has been processed by :code:`torch.jit.script`.
         """
+        self._check_properties(properties)
         natoms = torch.atleast_1d(data.natoms)
-        out = self._predict(weights, data, targets, differential_mode)
+        out = self._predict_efs(weights, data, properties, differential_mode)
 
-        if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in targets:
-            out[franken.data.base.ENERGY_TARGET_KEY] = out[
-                franken.data.base.ENERGY_TARGET_KEY
-            ].to(dtype=torch.float64) + self.energy_shift(
+        if add_energy_shift and franken.data.base.ENERGY_KEY in properties:
+            out[franken.data.base.ENERGY_KEY] = out[franken.data.base.ENERGY_KEY].to(
+                dtype=torch.float64
+            ) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),
@@ -546,15 +520,16 @@ class FrankenPotential(torch.nn.Module):
 
         Args:
             data : Configuration object describing one or more atomic structures
-            fmaps : Dictionary of feature maps corresponding to different targets.
+            fmaps : Dictionary of feature maps corresponding to different properties.
             weights: Optional tensor of size [num_models, num_random_features]. This contains
                 the weights of a trained RF model. If no weights are provided, the weights
                 contained in the RF model attached to this class will be used. Energies and forces
                 can be computed for multiple models simulatenously by passing in multiple weight
                 vectors (arranged in 2D).
         Returns:
-            Dictionary of prediction-types mapped to the corresponding predictions. All targets
-            for which there were feature-maps provided are computed.
+            Dictionary of prediction-types mapped to the corresponding predictions. All properties
+            for which there were feature-maps provided (typically energies, forces and optionally
+            stress tensors) are computed.
         """
         if weights is None:
             weights = self.rf.weights
@@ -566,12 +541,10 @@ class FrankenPotential(torch.nn.Module):
         out = {}
         for tt, fmap in fmaps.items():
             out_tt = torch.matmul(weights, fmap)  # [M, S*X]
-            if (
-                tt == franken.data.base.ENERGY_TARGET_KEY
-            ):  # fmap: [F, S], out_tt: [M, S]
+            if tt == franken.data.base.ENERGY_KEY:  # fmap: [F, S], out_tt: [M, S]
                 out_tt = natoms[None, :] * out_tt  # [M, S]
             elif (
-                tt == franken.data.base.FORCES_TARGET_KEY
+                tt == franken.data.base.FORCES_KEY
             ):  # fmap: [F, S*A*3], out_tt: [M, S*A*3]
                 out_tt = out_tt.reshape(out_tt.shape[0], -1, 3)  # [M, S*A, 3]
                 if data.batch_ids is None:
@@ -580,7 +553,7 @@ class FrankenPotential(torch.nn.Module):
                     natoms_mul = torch.gather(natoms, 0, data.batch_ids)  # [S*A]
                     out_tt = out_tt * natoms_mul[None, :, None]
             elif (
-                tt == franken.data.base.STRESS_TARGET_KEY
+                tt == franken.data.base.STRESS_KEY
             ):  # fmap: [F, S*3*3], out_tt: [M, S*3*3]
                 out_tt = out_tt.reshape(out_tt.shape[0], -1, 3, 3)  # [M, S, 3, 3]
                 out_tt = natoms[None, :, None, None] * out_tt
@@ -588,10 +561,10 @@ class FrankenPotential(torch.nn.Module):
                 raise NotImplementedError(tt)
             out[tt] = out_tt
 
-        if add_energy_shift and franken.data.base.ENERGY_TARGET_KEY in fmaps.keys():
-            out[franken.data.base.ENERGY_TARGET_KEY] = out[
-                franken.data.base.ENERGY_TARGET_KEY
-            ].to(dtype=torch.float64) + self.energy_shift(
+        if add_energy_shift and franken.data.base.ENERGY_KEY in fmaps.keys():
+            out[franken.data.base.ENERGY_KEY] = out[franken.data.base.ENERGY_KEY].to(
+                dtype=torch.float64
+            ) + self.energy_shift(
                 data.atomic_numbers,
                 batch_ids=data.batch_ids,
                 num_systems=int(natoms.numel()),
@@ -600,7 +573,7 @@ class FrankenPotential(torch.nn.Module):
 
     def forward(
         self,
-        targets: list[str],
+        properties: list[str],
         data: Configuration,
         weights: torch.Tensor | None = None,
         add_energy_shift: bool = True,
@@ -612,7 +585,7 @@ class FrankenPotential(torch.nn.Module):
         to be jit-compiled.
         """
         out = self.predict(
-            targets=targets,
+            properties=properties,
             data=data,
             weights=weights,
             differential_mode=(

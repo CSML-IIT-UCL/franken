@@ -11,7 +11,7 @@ import torch
 from franken.config import GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.calculators.ase_calc import FrankenCalculator
 from franken.data import FrankenAtomsDataset
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
+from franken.data.base import ENERGY_KEY, FORCES_KEY, STRESS_KEY, Configuration, PropertyType
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
@@ -24,7 +24,7 @@ RF_PARAMETRIZE = [
     GaussianRFConfig(num_random_features=128, length_scale=1.0),
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
-ALL_TARGETS: list[TargetType] = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+ALL_TARGETS: list[PropertyType] = [ENERGY_KEY, FORCES_KEY, STRESS_KEY]
 
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
@@ -270,8 +270,8 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
         out_func = model_func(ALL_TARGETS, data)
         out_autograd = model(ALL_TARGETS, data)
         energy_shape = (10, 1) if multiweights else (1,)
-        assert out_func[ENERGY_TARGET_KEY].shape == energy_shape
-        assert out_autograd[ENERGY_TARGET_KEY].shape == energy_shape
+        assert out_func[ENERGY_KEY].shape == energy_shape
+        assert out_autograd[ENERGY_KEY].shape == energy_shape
         for target in ALL_TARGETS:
             torch.testing.assert_close(
                 out_func[target], out_autograd[target], rtol=1e-3, atol=1e-3
@@ -334,11 +334,11 @@ def test_fmap_shapes(num_systems):
     ])
     out_fmap = model.grad_feature_map(data, ALL_TARGETS)
     for k, v in out_fmap.items():
-        if k == ENERGY_TARGET_KEY:
+        if k == ENERGY_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems)
-        if k == FORCES_TARGET_KEY:
+        if k == FORCES_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems * num_atoms * 3)
-        if k == STRESS_TARGET_KEY:
+        if k == STRESS_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems * 3 * 3)
 
 
@@ -356,21 +356,21 @@ def test_gradient_shapes(num_linear_models, num_systems):
     data = Configuration.concatenate([
         random_cfg(num_atoms, dtype, "cpu") for _ in range(num_systems)
     ])
-    out_ag = model._predict(weights, data, ALL_TARGETS, mode="torch.autograd")
+    out_ag = model._predict_efs(weights, data, ALL_TARGETS, mode="torch.autograd")
     for k, v in out_ag.items():
-        if k == ENERGY_TARGET_KEY:
+        if k == ENERGY_KEY:
             assert v.shape == (num_linear_models, num_systems)
-        if k == FORCES_TARGET_KEY:
+        if k == FORCES_KEY:
             assert v.shape == (num_linear_models, num_systems * num_atoms, 3)
-        if k == STRESS_TARGET_KEY:
+        if k == STRESS_KEY:
             assert v.shape == (num_linear_models, num_systems, 3, 3)
-    out_func = model._predict(weights, data, ALL_TARGETS, mode="torch.func")
+    out_func = model._predict_efs(weights, data, ALL_TARGETS, mode="torch.func")
     for k, v in out_func.items():
-        if k == ENERGY_TARGET_KEY:
+        if k == ENERGY_KEY:
             assert v.shape == (num_linear_models, num_systems)
-        if k == FORCES_TARGET_KEY:
+        if k == FORCES_KEY:
             assert v.shape == (num_linear_models, num_systems * num_atoms, 3)
-        if k == STRESS_TARGET_KEY:
+        if k == STRESS_KEY:
             assert v.shape == (num_linear_models, num_systems, 3, 3)
 
 
@@ -378,12 +378,12 @@ def test_gradient_shapes(num_linear_models, num_systems):
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("multiweights", [True, False])
 @pytest.mark.parametrize("targets", [
-    [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY], 
-    [ENERGY_TARGET_KEY, FORCES_TARGET_KEY], 
-    [ENERGY_TARGET_KEY]
+    [ENERGY_KEY, FORCES_KEY, STRESS_KEY], 
+    [ENERGY_KEY, FORCES_KEY], 
+    [ENERGY_KEY]
 ])
 class TestModelGradients:
-    def test_gradients_mocked(self, rf_cfg, device, multiweights, targets: list[TargetType]):
+    def test_gradients_mocked(self, rf_cfg, device, multiweights, targets: list[PropertyType]):
         num_atoms = 10
         dtype = torch.float32
         with mocked_gnn(device=device, dtype=dtype, feature_dim=32):
@@ -397,8 +397,8 @@ class TestModelGradients:
             (num_lin_models, model.rf.total_random_features), device=device
         )
         data = random_cfg(num_atoms, dtype, device)
-        out_ag = model._predict(weights, data, targets, mode="torch.autograd")
-        out_func = model._predict(weights, data, targets, mode="torch.func")
+        out_ag = model._predict_efs(weights, data, targets, mode="torch.autograd")
+        out_func = model._predict_efs(weights, data, targets, mode="torch.func")
         for tt in targets:
             torch.testing.assert_close(out_func[tt], out_ag[tt], rtol=1e-3, atol=1e-3, 
                                        msg=f"Func-Autograd equality failed on target {tt}. AG={out_ag[tt]} FUNC={out_func[tt]}")
@@ -418,10 +418,10 @@ class TestModelGradients:
         )
         cfgs = [random_cfg(num_atoms, dtype, device) for _ in range(2)]
         cfg_batched = Configuration.concatenate(cfgs)
-        out_ag_indiv = [model._predict(weights, cfg, targets, mode="torch.autograd") for cfg in cfgs]
+        out_ag_indiv = [model._predict_efs(weights, cfg, targets, mode="torch.autograd") for cfg in cfgs]
         out_ag = {tt: torch.cat([out[tt] for out in out_ag_indiv], dim=1) for tt in targets}
-        out_ag_batched = model._predict(weights, cfg_batched, targets, mode="torch.autograd")
-        out_func_batched = model._predict(weights, cfg_batched, targets, mode="torch.func")
+        out_ag_batched = model._predict_efs(weights, cfg_batched, targets, mode="torch.autograd")
+        out_func_batched = model._predict_efs(weights, cfg_batched, targets, mode="torch.func")
         for tt in targets:
             torch.testing.assert_close(out_ag_batched[tt], out_ag[tt], rtol=1e-3, atol=1e-3, 
                                        msg=f"Batched (autograd) equality failed on target {tt}")
@@ -444,8 +444,8 @@ class TestModelGradients:
         )
         data, _ = dataset[0]  # type: ignore
         data = data.to(device)
-        out_ag = model._predict(weights, data, targets, mode="torch.autograd")
-        out_func = model._predict(weights, data, targets, mode="torch.func")
+        out_ag = model._predict_efs(weights, data, targets, mode="torch.autograd")
+        out_func = model._predict_efs(weights, data, targets, mode="torch.func")
         for tt in targets:
             torch.testing.assert_close(out_func[tt], out_ag[tt], rtol=1e-3, atol=1e-3, 
                                        msg=f"Func-Autograd equality failed on target {tt}")
@@ -453,8 +453,8 @@ class TestModelGradients:
     
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("targets", [
-    [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY], 
-    [ENERGY_TARGET_KEY, FORCES_TARGET_KEY], 
+    [ENERGY_KEY, FORCES_KEY, STRESS_KEY], 
+    [ENERGY_KEY, FORCES_KEY], 
 ])
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 def test_jitted_model(device, targets, gnn_cfg):
@@ -474,10 +474,10 @@ def test_jitted_model(device, targets, gnn_cfg):
     )
     data, _ = dataset[0]  # type: ignore
     data = data.to(device)
-    out_ag_jit = jit_model._predict(weights, data, targets, mode="torch.autograd")
+    out_ag_jit = jit_model._predict_efs(weights, data, targets, mode="torch.autograd")
     with pytest.raises(torch.jit.Error):
-        jit_model._predict(weights, data, targets, mode="torch.func")
-    out_func = model._predict(weights, data, targets, mode="torch.func")
+        jit_model._predict_efs(weights, data, targets, mode="torch.func")
+    out_func = model._predict_efs(weights, data, targets, mode="torch.func")
     for tt in targets:
         torch.testing.assert_close(out_func[tt], out_ag_jit[tt], rtol=1e-3, atol=1e-3, 
                                     msg=f"Func-Autograd equality failed on target {tt}")
@@ -509,19 +509,19 @@ class TestEnergyShift:
 
         out_ag = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.autograd", add_energy_shift=False)
         out_ag_shift = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.autograd", add_energy_shift=True)
-        torch.testing.assert_close(out_ag[FORCES_TARGET_KEY], out_ag_shift[FORCES_TARGET_KEY])
-        torch.testing.assert_close(out_ag[STRESS_TARGET_KEY], out_ag_shift[STRESS_TARGET_KEY])
+        torch.testing.assert_close(out_ag[FORCES_KEY], out_ag_shift[FORCES_KEY])
+        torch.testing.assert_close(out_ag[STRESS_KEY], out_ag_shift[STRESS_KEY])
         torch.testing.assert_close(
-            out_ag[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
-            out_ag_shift[ENERGY_TARGET_KEY]
+            out_ag[ENERGY_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
+            out_ag_shift[ENERGY_KEY]
         )
         out_fn = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=False)
         out_fn_shift = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=True)
-        torch.testing.assert_close(out_fn[FORCES_TARGET_KEY], out_fn_shift[FORCES_TARGET_KEY])
-        torch.testing.assert_close(out_fn[STRESS_TARGET_KEY], out_fn_shift[STRESS_TARGET_KEY])
+        torch.testing.assert_close(out_fn[FORCES_KEY], out_fn_shift[FORCES_KEY])
+        torch.testing.assert_close(out_fn[STRESS_KEY], out_fn_shift[STRESS_KEY])
         torch.testing.assert_close(
-            out_fn[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
-            out_fn_shift[ENERGY_TARGET_KEY]
+            out_fn[ENERGY_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
+            out_fn_shift[ENERGY_KEY]
         )
 
     def test_w_feature_maps(self, rf_cfg, device, multiweights):
@@ -542,11 +542,11 @@ class TestEnergyShift:
         # ffmap = ffmap.view(ffmap.shape[0], -1)
         out_from_fmaps = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=False)
         out_from_fmaps_shift = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=True)
-        torch.testing.assert_close(out_from_fmaps[FORCES_TARGET_KEY], out_from_fmaps_shift[FORCES_TARGET_KEY])
-        torch.testing.assert_close(out_from_fmaps[STRESS_TARGET_KEY], out_from_fmaps_shift[STRESS_TARGET_KEY])
+        torch.testing.assert_close(out_from_fmaps[FORCES_KEY], out_from_fmaps_shift[FORCES_KEY])
+        torch.testing.assert_close(out_from_fmaps[STRESS_KEY], out_from_fmaps_shift[STRESS_KEY])
         torch.testing.assert_close(
-            out_from_fmaps[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
-            out_from_fmaps_shift[ENERGY_TARGET_KEY]
+            out_from_fmaps[ENERGY_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 5,
+            out_from_fmaps_shift[ENERGY_KEY]
         )
 
     def test_unknown_species(self, rf_cfg, device, multiweights):
@@ -568,19 +568,19 @@ class TestEnergyShift:
 
         out_ag = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.autograd", add_energy_shift=False)
         out_ag_shift = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.autograd", add_energy_shift=True)
-        torch.testing.assert_close(out_ag[FORCES_TARGET_KEY], out_ag_shift[FORCES_TARGET_KEY])
-        torch.testing.assert_close(out_ag[STRESS_TARGET_KEY], out_ag_shift[STRESS_TARGET_KEY])
+        torch.testing.assert_close(out_ag[FORCES_KEY], out_ag_shift[FORCES_KEY])
+        torch.testing.assert_close(out_ag[STRESS_KEY], out_ag_shift[STRESS_KEY])
         torch.testing.assert_close(
-            out_ag[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
-            out_ag_shift[ENERGY_TARGET_KEY]
+            out_ag[ENERGY_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
+            out_ag_shift[ENERGY_KEY]
         )
         out_fn = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=False)
         out_fn_shift = model.predict(ALL_TARGETS, data, weights, differential_mode="torch.func", add_energy_shift=True)
-        torch.testing.assert_close(out_fn[FORCES_TARGET_KEY], out_fn_shift[FORCES_TARGET_KEY])
-        torch.testing.assert_close(out_fn[STRESS_TARGET_KEY], out_fn_shift[STRESS_TARGET_KEY])
+        torch.testing.assert_close(out_fn[FORCES_KEY], out_fn_shift[FORCES_KEY])
+        torch.testing.assert_close(out_fn[STRESS_KEY], out_fn_shift[STRESS_KEY])
         torch.testing.assert_close(
-            out_fn[ENERGY_TARGET_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
-            out_fn_shift[ENERGY_TARGET_KEY]
+            out_fn[ENERGY_KEY].double() + self.atomic_energies[1] * 5 + self.atomic_energies[8] * 3,
+            out_fn_shift[ENERGY_KEY]
         )
 
     def test_batched(self, rf_cfg, device, multiweights):
