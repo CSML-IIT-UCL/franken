@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import math
 from pathlib import Path
@@ -20,8 +21,11 @@ from franken.trainers.log_utils import (
     HyperParameterGroup,
     LogCollection,
     LogEntry,
+    dtypeJSONEncoder,
 )
 from franken.utils.linalg.cov import normalize_leading_eig
+from franken.utils.linalg.solve import psd_solve
+from franken.utils.linalg.tri import pack_upper, unpack_symm
 from franken.utils.misc import ensure_list, no_jit, params_grid, throughput
 from franken.metrics import metric_registry
 
@@ -100,12 +104,12 @@ class RandomFeaturesTrainer(BaseTrainer):
             train_dataloader,
             log_dir=log_dir,
             save_every_model=save_every_model,
-            save_cholesky_factor=save_cholesky_factor,
             device=device,
             dtype=dtype,
         )
         self.random_features_normalization = random_features_normalization
         self.save_fmaps = save_fmaps
+        self.save_cholesky_factor = save_cholesky_factor
         self.metrics = metrics
         if len(training_targets) == 0:
             raise ValueError(
@@ -119,6 +123,40 @@ class RandomFeaturesTrainer(BaseTrainer):
         self.solver_hps = dict(l2_penalty=self.l2_penalty) | {
             f"{k}_weight": v for k, v in self.target_weight.items()
         }
+        self._covs_cache = None
+        self._coeffs_cache = None
+
+    def _cache_covs(self, covs, coeffs):
+        """Cache packed covariances and coefficients on CPU until serialization."""
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: pack_upper(cov.detach().to("cpu"))
+                for target, cov in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
+        )
+
+    def _restore_covs(
+        self, n_features: int
+    ) -> tuple[dict[TargetType, Tensor], dict[TargetType, Tensor]]:
+        """Restore the latest fit's system on the trainer device for the winning solve."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        return (
+            {
+                target: unpack_symm(packed, n_features).to(self.device)
+                for target, packed in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
+
+    def _clear_covs_cache(self):
+        """Release cached systems after serialization or when abandoning a fit."""
+        self._covs_cache = None
+        self._coeffs_cache = None
 
     def on_fit_start(self, model: FrankenPotential):
         if self._covs_cache is not None or self._coeffs_cache is not None:
@@ -186,6 +224,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             t_solve_start = perf_counter()
             try:
                 weights = self.solve(covs=covs, coeffs=coeffs, **hp_val)
+                assert isinstance(weights, Tensor)
             except torch.linalg.LinAlgError as e:  # type: ignore
                 weights = torch.zeros_like(all_weights[hp_idx])
                 num_failed += 1
@@ -227,7 +266,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             and self.log_dir is not None
             and dist_utils.get_rank() == 0
         ):
-            self._offload_covs_and_coeffs(covs, coeffs)
+            self._cache_covs(covs, coeffs)
         return log_collection, all_weights
 
     def get_metrics(self) -> list[BaseMetric]:
@@ -360,6 +399,47 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Saved feature maps require {tot_bytes / 2**30:.2f}GB of device memory."
                 )
 
+    def serialize_logs(self, *args, **kwargs):
+        """Serialize the latest fitted model and release its cached system, even on failure."""
+        try:
+            super().serialize_logs(*args, **kwargs)
+        finally:
+            self._clear_covs_cache()
+
+    def serialize_best_model(
+        self,
+        model: FrankenPotential,
+        all_weights: torch.Tensor,
+        best_model_selection: list[str],
+        split: DataSplit = DataSplit.TRAIN,
+    ):
+        """Save the best checkpoint using the latest fit's system, then release the cache."""
+        try:
+            assert self.log_dir is not None, "Log directory is not set"
+            should_save, best_log_entry = self.has_new_best_model(
+                best_model_selection, split
+            )
+            best_model_file = self.log_dir / "best.json"
+            if should_save:
+                logger.debug(f"Identified new best model: {best_log_entry}")
+                if self.save_cholesky_factor:
+                    model._cholesky_factor, model._l2_penalty = (
+                        self._cholesky_factor_from_logentry(model, best_log_entry)
+                    )
+                weights = all_weights[best_log_entry.checkpoint_rf_weight_id]
+                model.rf.weights = weights.reshape_as(model.rf.weights)
+                model.save(self.log_dir / "best_ckpt.pt")
+                with open(best_model_file, "w") as f:
+                    json.dump(
+                        best_log_entry.to_dict(), f, indent=4, cls=dtypeJSONEncoder
+                    )
+                logger.debug(
+                    f"Saved best model (within-experiment ID={best_log_entry.checkpoint_rf_weight_id}) "
+                    f"to {self.log_dir / 'best_ckpt.pt'}"
+                )
+        finally:
+            self._clear_covs_cache()
+
     @no_jit()
     @torch.no_grad()
     def _covs_and_coeffs(
@@ -428,6 +508,20 @@ class RandomFeaturesTrainer(BaseTrainer):
             )
         return covs, coeffs
 
+    def _cholesky_factor_from_logentry(
+        self, model: FrankenPotential, log_entry: LogEntry
+    ) -> tuple[torch.Tensor | None, float | None]:
+        """Repeat the best solve, returning its packed factor and regularization penalty."""
+        if self._covs_cache is None and self._coeffs_cache is None:
+            return None, None  # Manual serialization without a preceding fit.
+        solver_hps = log_entry.to_dict()["hyperparameters"]["solver"]
+        solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
+        covs, coeffs = self._restore_covs(model.rf.total_random_features)
+        _, factor = self.solve(
+            covs=covs, coeffs=coeffs, return_cholesky_factor=True, **solver_hps
+        )
+        return factor, solver_hps["l2_penalty"]
+
     @torch.no_grad()
     def solve(
         self,
@@ -451,9 +545,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return self.psd_solve(
-            solve_cov, solve_coeff, l2_penalty, return_cholesky_factor
-        )
+        return psd_solve(solve_cov, solve_coeff, l2_penalty, return_cholesky_factor)
 
 
 def process_tgt_weights(
