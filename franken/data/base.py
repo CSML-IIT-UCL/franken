@@ -216,11 +216,23 @@ class Configuration:
 #       dict[Enum, Any] do not work with torch jit. We
 #       use aliases of strings such that when scripting
 #       str can be used.
-PropertyType = Literal["energy", "forces", "stress"]
+PropertyType = Literal[
+    "energy",
+    "forces",
+    "stress",
+    "per_atom_energy",
+    "energy_gp_uncertainty",
+    "per_atom_energy_gp_uncertainty",
+    "forces_gp_uncertainty",
+]
 """PropertyType describes the range of possible properties for :class:`franken.rf.model.FrankenPotential`"""
 ENERGY_KEY: PropertyType = "energy"
+PER_ATOM_ENERGY_KEY: PropertyType = "per_atom_energy"
 FORCES_KEY: PropertyType = "forces"
 STRESS_KEY: PropertyType = "stress"
+ENERGY_GP_UNC_KEY: PropertyType = "energy_gp_uncertainty"
+PER_ATOM_ENERGY_GP_UNC_KEY: PropertyType = "per_atom_energy_gp_uncertainty"
+FORCES_GP_UNC_KEY: PropertyType = "forces_gp_uncertainty"
 
 
 def is_property(s: str):
