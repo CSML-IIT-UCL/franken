@@ -4,11 +4,11 @@ import typing
 import torch
 
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType
+from franken.data.base import Configuration, Target, PropertyType
 
 
 class BaseMetric(abc.ABC):
-    target_type: typing.ClassVar[TargetType]
+    property_type: typing.ClassVar[PropertyType]
     name: typing.ClassVar[str]
 
     def __init__(
