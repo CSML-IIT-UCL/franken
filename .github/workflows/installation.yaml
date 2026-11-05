@@ -1,90 +1,194 @@
-name: MACE installation
+name: User installation
 
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+env:
+  OMP_NUM_THREADS: '2'
+  MKL_NUM_THREADS: '2'
+  PIP_NO_CACHE_DIR: '1'
+
 jobs:
   install:
-    name: Install and train (${{ matrix.manager }}, Python ${{ matrix.python }})
+    name: ${{ matrix.manager }} / ${{ matrix.scenario }} / Python ${{ matrix.python }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
+      max-parallel: 2
       matrix:
+        manager: [pip, uv]
+        scenario: [default, combined-extras]
         include:
-          - python: '3.11'
-            manager: pip
-          - python: '3.13'
-            manager: uv
-    env:
-      OMP_NUM_THREADS: '2'
-      MKL_NUM_THREADS: '2'
+          - manager: pip
+            python: '3.11'
+          - manager: uv
+            python: '3.13'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Build the package
+      - name: Build the candidate wheel
         run: |
           python -m pip install uv
           uv build --wheel --out-dir "$RUNNER_TEMP/wheels"
-      - name: Install the default wheel with pip
-        if: matrix.manager == 'pip'
+      # The wheel replaces the PyPI name "franken" in the documented commands.
+      # No preinstalled torch, dependency overrides, or skipped synchronization.
+      - name: Install in a fresh environment
         working-directory: ${{ runner.temp }}
         run: |
-          python -m venv pip-smoke
-          pip-smoke/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip-smoke/bin/python -m pip install wheels/franken-*.whl
-          pip-smoke/bin/python -m pip check
-      - name: Add the default wheel to a uv project
-        if: matrix.manager == 'uv'
-        working-directory: ${{ runner.temp }}
-        run: |
-          uv init --bare --python '${{ matrix.python }}' uv-smoke
-          cd uv-smoke
-          uv venv --python '${{ matrix.python }}'
-          # Keep Franken's lower bound so adding extras can select a compatible torch.
-          uv add 'torch>=2.5' --index pytorch-cpu=https://download.pytorch.org/whl/cpu
-          # Restrict this index to torch, so other packages come from PyPI.
-          python -c "from pathlib import Path; p = Path('pyproject.toml'); p.write_text(p.read_text() + '\nexplicit = true\n')"
-          uv add "$RUNNER_TEMP"/wheels/franken-*.whl
-          uv pip check --python .venv/bin/python
-      - name: Train using only the default installation
+          wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
+          package=${wheel[0]}
+          if [ '${{ matrix.scenario }}' = combined-extras ]; then
+            package+='[pet,metatomic,torch-sim,docs,develop]'
+          fi
+          if [ '${{ matrix.manager }}' = pip ]; then
+            python -m venv install-env
+            install-env/bin/python -m pip install --upgrade pip
+            install-env/bin/python -m pip install "$package"
+          else
+            uv init --bare --python '${{ matrix.python }}' uv-smoke
+            cd uv-smoke
+            uv venv --python '${{ matrix.python }}'
+            uv add "$package"
+          fi
+      - name: Check dependencies, imports and MACE training
         env:
           FRANKEN_CACHE_DIR: ${{ runner.temp }}/franken-models
         working-directory: ${{ runner.temp }}
         run: |
           if [ '${{ matrix.manager }}' = pip ]; then
-            TRAINER="$RUNNER_TEMP/pip-smoke/bin/franken.autotune"
+            install_python="$RUNNER_TEMP/install-env/bin/python"
           else
-            TRAINER="$RUNNER_TEMP/uv-smoke/.venv/bin/franken.autotune"
+            install_python="$RUNNER_TEMP/uv-smoke/.venv/bin/python"
           fi
-          "$TRAINER" --dataset-name test \
+          uv pip check --python "$install_python"
+          "$install_python" -c 'import mace'
+          if [ '${{ matrix.scenario }}' = combined-extras ]; then
+            "$install_python" -c 'import metatomic.torch, metatrain, torch_sim, sphinx, pytest'
+          fi
+          "$(dirname "$install_python")/franken.autotune" --dataset-name test \
             --backbone mace --mace.path-or-id mace_mp/small \
             --rf gaussian --gaussian.num-rf 16 --gaussian.length-scale 1 \
             --force-weight 0.5 --l2-penalty 0.0001 \
             --jac-chunk-size 2 --run-dir "$RUNNER_TEMP/training"
           test -n "$(find "$RUNNER_TEMP/training" -name best_ckpt.pt -print -quit)"
-      - name: Resolve all extras with uv
+      - name: Add extras to the existing default installation
+        if: matrix.scenario == 'default'
+        working-directory: ${{ runner.temp }}
         run: |
+          wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
+          for extra in pet metatomic torch-sim docs develop; do
+            if [ '${{ matrix.manager }}' = pip ]; then
+              install-env/bin/python -m pip install "${wheel[0]}[$extra]"
+              install_python="$RUNNER_TEMP/install-env/bin/python"
+            else
+              cd "$RUNNER_TEMP/uv-smoke"
+              uv add --extra "$extra" "${wheel[0]}"
+              install_python="$PWD/.venv/bin/python"
+            fi
+            uv pip check --python "$install_python"
+          done
+          "$install_python" -c 'import mace, metatomic.torch, metatrain, torch_sim, sphinx, pytest'
+      - name: Resolve legacy source extra and all optional dependency constraints
+        if: matrix.scenario == 'combined-extras'
+        run: |
+          # Includes cuda (source CuPy) and both cueq variants; resolution only.
+          # Actual source compilation requires a CUDA toolkit and is not tested here.
           uv pip compile pyproject.toml --all-extras \
             --python-version '${{ matrix.python }}' \
             --output-file "$RUNNER_TEMP/all-extras.txt"
-      - name: Resolve extras with pip
-        if: matrix.manager == 'pip'
+
+  pytorch-build:
+    name: ${{ matrix.manager }} / PyTorch ${{ matrix.build.index }} installation
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        manager: [pip, uv]
+        build:
+          - index: cpu
+            extras: pet,metatomic,torch-sim
+            cupy: ''
+            cuda: ''
+          - index: cu128
+            extras: cueq-cu12
+            cupy: cupy-cuda12x[ctk]
+            cuda: '12'
+          - index: cu130
+            extras: cueq-cu13
+            cupy: cupy-cuda13x[ctk]
+            cuda: '13'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build the candidate wheel
+        run: |
+          python -m pip install uv
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheels"
+      - name: Install with the selected PyTorch index
+        working-directory: ${{ runner.temp }}
+        env:
+          TORCH_INDEX: https://download.pytorch.org/whl/${{ matrix.build.index }}
+          CUPY_PACKAGE: ${{ matrix.build.cupy }}
+        run: |
+          wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
+          package="${wheel[0]}[${{ matrix.build.extras }}]"
+          packages=("$package")
+          if [ -n "$CUPY_PACKAGE" ]; then
+            packages+=("$CUPY_PACKAGE")
+          fi
+          if [ '${{ matrix.manager }}' = pip ]; then
+            python -m venv install-env
+            install-env/bin/python -m pip install --upgrade pip
+            install-env/bin/python -m pip install --extra-index-url "$TORCH_INDEX" "${packages[@]}"
+          else
+            uv init --bare --python 3.13 uv-smoke
+            cd uv-smoke
+            uv venv --python 3.13
+            # This is the same explicit index configuration shown in the docs.
+            cat >> pyproject.toml <<TOML
+
+          [[tool.uv.index]]
+          name = "pytorch"
+          url = "$TORCH_INDEX"
+          explicit = true
+
+          [tool.uv.sources]
+          torch = { index = "pytorch" }
+          TOML
+            uv add 'torch>=2.5' "${packages[@]}"
+          fi
+      - name: Check installed packages and the selected build
+        env:
+          EXPECTED_CUDA: ${{ matrix.build.cuda }}
         working-directory: ${{ runner.temp }}
         run: |
-          wheel=(wheels/franken-*.whl)
-          # The legacy cuda extra builds CuPy from source and needs a CUDA toolkit.
-          # Its dependency constraints are covered by the all-extras uv check above.
-          for cuda in cueq-cu12 cueq-cu13; do
-            pip-smoke/bin/python -m pip install --dry-run \
-              "${wheel[0]}[pet,metatomic,torch-sim,develop,docs,$cuda]"
-          done
-      - name: Add extras to a uv project without installing GPU wheels
-        if: matrix.manager == 'uv'
-        working-directory: ${{ runner.temp }}/uv-smoke
-        run: |
-          uv add --no-sync --extra pet --extra metatomic --extra torch-sim \
-            --extra develop --extra docs --extra cuda --extra cueq-cu12 \
-            "$RUNNER_TEMP"/wheels/franken-*.whl
+          if [ '${{ matrix.manager }}' = pip ]; then
+            install_python="$RUNNER_TEMP/install-env/bin/python"
+          else
+            install_python="$RUNNER_TEMP/uv-smoke/.venv/bin/python"
+          fi
+          uv pip check --python "$install_python"
+          "$install_python" - <<'PY'
+          import os
+          import torch
+          import mace
+          from importlib.metadata import version
+          expected = os.environ['EXPECTED_CUDA']
+          if expected:
+              assert torch.version.cuda and torch.version.cuda.split('.')[0] == expected, torch.version.cuda
+              import cuequivariance_torch
+              import cupy
+              print(version('cuequivariance-ops-torch-cu' + expected), cupy.__version__)
+          else:
+              assert torch.version.cuda is None, torch.version.cuda
+              import metatomic.torch, metatrain, torch_sim
+          print(torch.__version__, torch.version.cuda)
+          PY
+          # These runners have no GPU. Kernel execution is deliberately not claimed.
