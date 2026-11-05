@@ -1,12 +1,9 @@
 """Small optimizer tests, independent of downloaded backbone checkpoints."""
 
 import json
-import logging
 from pathlib import Path
-import pathlib
 import tempfile
-from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, mock_open, patch, DEFAULT
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -15,13 +12,11 @@ from franken.data.dataset import FrankenAtomsDataset
 from franken.datasets.registry import DATASET_REGISTRY
 from tests.test_trainer import make_dloader_from_dset
 
-from .conftest import DEFAULT_GNN_CONFIGS, do_random_seed, random_seed
-from franken.autotune.cli import parse_cli
+from .conftest import DEFAULT_GNN_CONFIGS, do_random_seed
 from franken.config import GaussianRFConfig, LESConfig, MaceBackboneConfig
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, Configuration, Target
 from franken.rf.les_model import LESFrankenPotential
-from franken.rf.model import FrankenPotential
-from franken.trainers.log_utils import DataSplit, LogCollection, LogEntry
+from franken.trainers.log_utils import DataSplit, LogEntry
 from franken.trainers.rf_les import RandomFeaturesEwaldsTrainer
 from tests.utils import mocked_gnn
 
