@@ -114,14 +114,17 @@ jobs:
             extras: pet,metatomic,torch-sim
             cupy: ''
             cuda: ''
+            torch: ''
           - index: cu128
             extras: cueq-cu12
             cupy: cupy-cuda12x[ctk]
             cuda: '12'
+            torch: torch==2.14.1+cu128
           - index: cu130
             extras: cueq-cu13
             cupy: cupy-cuda13x[ctk]
             cuda: '13'
+            torch: torch==2.14.1+cu130
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
@@ -136,6 +139,7 @@ jobs:
         env:
           TORCH_INDEX: https://download.pytorch.org/whl/${{ matrix.build.index }}
           CUPY_PACKAGE: ${{ matrix.build.cupy }}
+          TORCH_PACKAGE: ${{ matrix.build.torch }}
         run: |
           wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
           package="${wheel[0]}[${{ matrix.build.extras }}]"
@@ -146,6 +150,10 @@ jobs:
           if [ '${{ matrix.manager }}' = pip ]; then
             python -m venv install-env
             install-env/bin/python -m pip install --upgrade pip
+            # Select the actual CUDA build; an extra index alone does not force it.
+            if [ -n "$TORCH_PACKAGE" ]; then
+              packages+=("$TORCH_PACKAGE")
+            fi
             install-env/bin/python -m pip install --extra-index-url "$TORCH_INDEX" "${packages[@]}"
           else
             uv init --bare --python 3.13 uv-smoke
