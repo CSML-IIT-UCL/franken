@@ -1,0 +1,28 @@
+# Categories for GitHub's "Generate release notes" action.
+# Review breaking changes manually and add migration guidance before publishing.
+changelog:
+  categories:
+    - title: New features
+      labels:
+        - new feature
+    - title: Improvements
+      labels:
+        - enhancement
+    - title: Bug fixes
+      labels:
+        - fix
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Maintenance
+      labels:
+        - cleanup
+    - title: Other changes
+      labels:
+        - "*"
+      exclude:
+        labels:
+          - breaking change
+    - title: Breaking changes
+      labels:
+        - breaking change
