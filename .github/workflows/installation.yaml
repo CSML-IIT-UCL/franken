@@ -42,7 +42,7 @@ jobs:
           wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
           package=${wheel[0]}
           if [ '${{ matrix.scenario }}' = combined-extras ]; then
-            package+='[pet,metatomic,torch-sim,docs,develop]'
+            package+='[metatomic,torch-sim,docs,develop]'
           fi
           if [ '${{ matrix.manager }}' = pip ]; then
             python -m venv install-env
@@ -80,7 +80,7 @@ jobs:
         working-directory: ${{ runner.temp }}
         run: |
           wheel=("$RUNNER_TEMP"/wheels/franken-*.whl)
-          for extra in pet metatomic torch-sim docs develop; do
+          for extra in metatomic torch-sim docs develop; do
             if [ '${{ matrix.manager }}' = pip ]; then
               install-env/bin/python -m pip install "${wheel[0]}[$extra]"
               install_python="$RUNNER_TEMP/install-env/bin/python"
@@ -111,7 +111,7 @@ jobs:
         manager: [pip, uv]
         build:
           - index: cpu
-            extras: pet,metatomic,torch-sim
+            extras: metatomic,torch-sim
             cupy: ''
             cuda: ''
             torch: ''

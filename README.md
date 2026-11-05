@@ -46,7 +46,7 @@ Optional dependencies include:
 - `cueq-cu12` or `cueq-cu13` for cuEquivariance CUDA kernels matching your
   PyTorch CUDA version. Enable inference with
   `FrankenCalculator(..., use_cueq=True)`; training always uses e3nn.
-- `pet` for UPET through Metatomic/Metatrain.
+- `metatomic` for PET/UPET backbones through Metatomic/Metatrain.
 - `docs` and `develop` for documentation and development tools.
 
 For example, with a CUDA 13 PyTorch build:

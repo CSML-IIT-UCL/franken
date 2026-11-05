@@ -40,8 +40,7 @@ MACE installed. Use quotes around requirements containing brackets.
 
 | Extra | Adds | pip | uv |
 |---|---|---|---|
-| `pet` | UPET through Metatomic/Metatrain | `python -m pip install "franken[pet]"` | `uv add "franken[pet]"` |
-| `metatomic` | Same dependencies as `pet` | `python -m pip install "franken[metatomic]"` | `uv add "franken[metatomic]"` |
+| `metatomic` | PET/UPET through Metatomic/Metatrain | `python -m pip install "franken[metatomic]"` | `uv add "franken[metatomic]"` |
 | `torch-sim` | TorchSim interface dependencies | `python -m pip install "franken[torch-sim]"` | `uv add "franken[torch-sim]"` |
 | `docs` | Documentation build tools | `python -m pip install "franken[docs]"` | `uv add "franken[docs]"` |
 | `develop` | Formatting and test tools | `python -m pip install "franken[develop]"` | `uv add "franken[develop]"` |
@@ -56,13 +55,16 @@ is usually easier than the legacy `cuda` extra.
 Combine the extras you want in one requirement, for example:
 
 ```bash
-python -m pip install "franken[pet,torch-sim,docs,develop]"
+python -m pip install "franken[metatomic,torch-sim,docs,develop]"
 # In a uv project:
-uv add "franken[pet,torch-sim,docs,develop]"
+uv add "franken[metatomic,torch-sim,docs,develop]"
 ```
 
-Metatomic wheels support a range of PyTorch versions. Installing `pet` or
-`metatomic` can therefore select an older PyTorch than the default installation.
+PET/UPET backbones are supported once the `metatomic` extra is installed;
+there is no separate `pet` installation extra.
+
+Metatomic wheels support a range of PyTorch versions. Installing `metatomic`
+can therefore select an older PyTorch than the default installation.
 Let the installer resolve the combined requirement. MACE 0.3.17 also requires
 e3nn 0.4.4; do not override that upstream requirement.
 
@@ -72,7 +74,7 @@ replace the direct requirement with Franken's supported lower bound while adding
 the extra:
 
 ```bash
-uv add "torch>=2.5" "franken[pet]"
+uv add "torch>=2.5" "franken[metatomic]"
 ```
 
 This lets uv choose a compatible version. If another dependency requires an
@@ -101,7 +103,7 @@ including any extras you need:
 
 ```bash
 python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-    "franken[pet,metatomic,torch-sim]"
+    "franken[metatomic,torch-sim]"
 ```
 
 For CUDA 12.8 with cuEquivariance and binary CuPy:
@@ -144,7 +146,7 @@ torch = { index = "pytorch" }
 Then install the CPU-only build and your extras together:
 
 ```bash
-uv add "torch>=2.5" "franken[pet,metatomic,torch-sim]"
+uv add "torch>=2.5" "franken[metatomic,torch-sim]"
 ```
 
 For CUDA 12.8, change the index URL to
@@ -260,7 +262,7 @@ Conda can provide Python while pip installs Franken and its extras:
 ```bash
 conda create -n franken python=3.13 pip
 conda activate franken
-python -m pip install "franken[pet,torch-sim]"
+python -m pip install "franken[metatomic,torch-sim]"
 ```
 
 Follow the same pip recipes for selecting a PyTorch build. Conda environment

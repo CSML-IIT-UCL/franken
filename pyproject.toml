@@ -18,10 +18,8 @@ dependencies = [
     "ase",
     "numpy",
     "tqdm",
-    "psutil",
     "scipy",
     "e3nn",
-    "omegaconf",
     "requests",
     "docstring_parser",
 ]
@@ -68,10 +66,6 @@ cueq-cu13 = [
     "mace-torch[cueq,cueq-cuda-13] >= 0.3.17, < 0.4",
     "cuequivariance >= 0.10, < 0.11",
     "cuequivariance-torch >= 0.10, < 0.11",
-]
-pet = [
-    "metatomic-torch", 
-    "metatrain >= 2026.4",
 ]
 "torch-sim" = ["torch-sim-atomistic"]
 metatomic = [
