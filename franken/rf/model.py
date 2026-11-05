@@ -610,6 +610,8 @@ class FrankenPotential(torch.nn.Module):
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",
         add_energy_shift: bool = True,
+        compute_gp_uncertainty: bool = False,
+        energy_uncertainty_per_atom: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Infer energy, forces and other quantities for an atomic system with a learned RF model.
 
@@ -636,7 +638,7 @@ class FrankenPotential(torch.nn.Module):
             add_energy_shift: whether to add the energy shift to the energy.
             compute_gp_uncertainty: Include posterior/prior standard-deviation
                 ratios in [0, 1] for energy and/or forces, using a saved
-                prior-normalized training Cholesky factor.
+                training Cholesky factor and its L2 penalty.
                 Computes feature maps once for both predictions and uncertainty.
                 This path uses forward-mode feature Jacobians regardless of
                 ``differential_mode`` and is unavailable in TorchScript.

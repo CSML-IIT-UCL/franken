@@ -40,10 +40,10 @@ def test_covs_and_coeffs_cache_roundtrip_with_three_targets(device):
         matrices[target] = value @ value.T
     coeffs = {target: torch.randn(4, device=device) for target in matrices}
 
-    trainer._offload_covs_and_coeffs(matrices, coeffs)
+    trainer._cache_covs(matrices, coeffs)
     with pytest.raises(RuntimeError, match="previous fit"):
         trainer.on_fit_start(None)
-    restored_covs, restored_coeffs = trainer._restore_covs_and_coeffs(n_features=4)
+    restored_covs, restored_coeffs = trainer._restore_covs(n_features=4)
 
     assert set(trainer._covs_cache) == set(matrices)
     assert set(restored_covs) == set(matrices)
@@ -53,7 +53,7 @@ def test_covs_and_coeffs_cache_roundtrip_with_three_targets(device):
         assert trainer._coeffs_cache[target].device.type == "cpu"
         torch.testing.assert_close(restored_covs[target], matrices[target])
         torch.testing.assert_close(restored_coeffs[target], coeffs[target])
-    trainer._purge_covs_and_coeffs_cache()
+    trainer._clear_covs_cache()
     assert trainer._covs_cache is None
     assert trainer._coeffs_cache is None
 
@@ -127,9 +127,7 @@ def test_winning_factor(tmp_path, device, dtype, trainer_cls, save_cholesky_fact
                 assert model._cholesky_factor.shape == (10,)
                 factor = model.get_cholesky_factor()
                 torch.testing.assert_close(factor, factor.triu())
-                torch.testing.assert_close(
-                    factor.T @ factor, expected / hp["l2_penalty"]
-                )
+                torch.testing.assert_close(factor.T @ factor, expected)
             else:
                 assert model.get_cholesky_factor() is None
             torch.testing.assert_close(model.rf.weights, weights[1].reshape(1, -1))
@@ -227,7 +225,7 @@ def test_failed_factor_does_not_publish_best(tmp_path):
         )
         log.add_metric("energy_MAE", 1.0, DataSplit.TRAIN)
         LogCollection([log]).save_json(tmp_path / "log.json")
-        trainer._offload_covs_and_coeffs(
+        trainer._cache_covs(
             {"energy": torch.eye(4)},
             {"energy": torch.ones(4)},
         )
@@ -252,7 +250,7 @@ def test_early_serialization_failure_purges_cache(tmp_path, failure_stage):
         log_dir=tmp_path,
         device="cpu",
     )
-    trainer._offload_covs_and_coeffs(
+    trainer._cache_covs(
         {"energy": torch.eye(4)}, {"energy": torch.ones(4)}
     )
     model = Mock()
@@ -265,30 +263,3 @@ def test_early_serialization_failure_purges_cache(tmp_path, failure_stage):
             trainer.serialize_logs(model, logs, torch.ones(1, 4), ["energy_MAE"])
     assert trainer._covs_cache is None
     assert trainer._coeffs_cache is None
-
-
-@pytest.mark.parametrize("penalty", [0.0, -1.0, float("inf"), float("nan")])
-def test_prior_normalized_factor_requires_positive_ridge(penalty):
-    trainer = RandomFeaturesTrainer(
-        train_dataloader=None,
-        training_targets=["energy"],
-        l2_penalty=penalty,
-        target_weight={},
-        device="cpu",
-    )
-    trainer._offload_covs_and_coeffs(
-        {"energy": torch.eye(4)}, {"energy": torch.ones(4)}
-    )
-    winner = LogEntry(
-        "trial",
-        0,
-        0.0,
-        0.0,
-        hyperparameters=[
-            HyperParameterGroup.from_dict("solver", {"l2_penalty": penalty})
-        ],
-    )
-    with patch.object(trainer, "solve") as solve:
-        with pytest.raises(ValueError, match="finite positive l2_penalty"):
-            trainer._best_cho_factor(Mock(), winner)
-        solve.assert_not_called()
