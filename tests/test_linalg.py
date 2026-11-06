@@ -7,7 +7,7 @@ import pytest
 import torch
 
 import franken
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.data.base import ENERGY_KEY, FORCES_KEY
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils
 import franken.utils.linalg
@@ -361,8 +361,8 @@ class TestPSDSolvers:
             lowmem.reset_mock()
             lm_trainer = self.lowmem_trainer()
             lm_trainer.solve(
-                covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
-                coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                covs={ENERGY_KEY: (A, torch.diag(A), True), FORCES_KEY: (A, torch.diag(A), False)}, 
+                coeffs={ENERGY_KEY: B, FORCES_KEY: B}, 
                 l2_penalty=1e-5, 
                 energy_weight=1,
                 forces_weight=0,
@@ -391,8 +391,8 @@ class TestPSDSolvers:
             lm_trainer = self.lowmem_trainer()
             with pytest.warns(UserWarning, match="`cupy` is not available"):
                 lm_trainer.solve(
-                    covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
-                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    covs={ENERGY_KEY: (A, torch.diag(A), True), FORCES_KEY: (A, torch.diag(A), False)}, 
+                    coeffs={ENERGY_KEY: B, FORCES_KEY: B}, 
                     l2_penalty=1e-5, 
                     energy_weight=1,
                     forces_weight=0,
@@ -431,8 +431,8 @@ class TestPSDSolvers:
             with warnings.catch_warnings():
                 warnings.simplefilter("error")  # assert no warning are raised
                 lm_trainer.solve(
-                    covs={ENERGY_TARGET_KEY: (A, torch.diag(A), True), FORCES_TARGET_KEY: (A, torch.diag(A), False)}, 
-                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    covs={ENERGY_KEY: (A, torch.diag(A), True), FORCES_KEY: (A, torch.diag(A), False)}, 
+                    coeffs={ENERGY_KEY: B, FORCES_KEY: B}, 
                     l2_penalty=1e-5, 
                     energy_weight=1,
                     forces_weight=0,
@@ -455,8 +455,8 @@ class TestPSDSolvers:
             with warnings.catch_warnings():
                 warnings.simplefilter("error")  # assert no warning are raised
                 trainer.solve(
-                    covs={ENERGY_TARGET_KEY: A, FORCES_TARGET_KEY: A}, 
-                    coeffs={ENERGY_TARGET_KEY: B, FORCES_TARGET_KEY: B}, 
+                    covs={ENERGY_KEY: A, FORCES_KEY: A}, 
+                    coeffs={ENERGY_KEY: B, FORCES_KEY: B}, 
                     l2_penalty=1e-5, 
                     energy_weight=1,
                     forces_weight=0,

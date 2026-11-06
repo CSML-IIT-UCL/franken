@@ -302,16 +302,10 @@ class FrankenPotential(torch.nn.Module):
                 data.atom_pos, displacement, data, weights, per_atom
             )
 
-        if per_atom:
-            out[franken.data.base.ENERGY_KEY] = energy[0].detach()
-            out[franken.data.base.PER_ATOM_ENERGY_KEY] = energy[1].detach()
-        else:
-            out[franken.data.base.ENERGY_KEY] = energy[0].detach()
-
-        n_sols = out[franken.data.base.ENERGY_KEY].shape[0]
+        n_sols = energy[0].shape[0]
         force_lst, virial_lst = [], []
         for i in range(n_sols):  # each model (M) independently
-            cur_energy: torch.Tensor = out[franken.data.base.ENERGY_KEY][i]
+            cur_energy: torch.Tensor = energy[0][i]
             # NOTE: complex type annotation required by jit.script
             grad_out: list[torch.Tensor | None] = [torch.ones_like(cur_energy)]
             grads = torch.autograd.grad(
@@ -327,6 +321,11 @@ class FrankenPotential(torch.nn.Module):
                 g1 = grads[1]
                 assert g1 is not None
                 virial_lst.append(g1)
+        if per_atom:
+            out[franken.data.base.ENERGY_KEY] = energy[0].detach()
+            out[franken.data.base.PER_ATOM_ENERGY_KEY] = energy[1].detach()
+        else:
+            out[franken.data.base.ENERGY_KEY] = energy[0].detach()
         force = -torch.stack(force_lst, 0).view(n_sols, n_atoms, 3)
         out[franken.data.base.FORCES_KEY] = force.detach()
         if len(virial_lst) > 0:
@@ -610,8 +609,6 @@ class FrankenPotential(torch.nn.Module):
         weights: torch.Tensor | None = None,
         differential_mode: str = "torch.autograd",
         add_energy_shift: bool = True,
-        compute_gp_uncertainty: bool = False,
-        energy_uncertainty_per_atom: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Infer energy, forces and other quantities for an atomic system with a learned RF model.
 
@@ -671,9 +668,8 @@ class FrankenPotential(torch.nn.Module):
         # GP uncertainty. If any requested, we need the feature-maps so we compute
         # everything using feature maps. Otherwise we can go down the other code-path
         # which doesn't save the feature maps.
-        gp_unc_props: dict[str, int] = (
-            {}
-        )  # torchscript doesn't support set, workaround with dict.
+        # torchscript doesn't support set, workaround with dict.
+        gp_unc_props: dict[str, int] = dict()
         if franken.data.base.ENERGY_GP_UNC_KEY in properties:
             gp_unc_props[franken.data.base.ENERGY_KEY] = 1
         if franken.data.base.PER_ATOM_ENERGY_GP_UNC_KEY in properties:
@@ -788,7 +784,6 @@ class FrankenPotential(torch.nn.Module):
                 num_systems=int(natoms.numel()),
                 per_atom=True,
             )
-        return out  # ([
         return out
 
     def forward(
