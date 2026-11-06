@@ -727,6 +727,7 @@ class FrankenPotential(torch.nn.Module):
 
         out = {}
         for tt, fmap in fmaps.items():
+            fmap = fmap.to(dtype=weights.dtype)  # cast to match weights dtype
             out_tt = torch.matmul(weights, fmap)  # [M, S*X]
             if tt == franken.data.base.ENERGY_KEY:  # fmap: [F, S], out_tt: [M, S]
                 out_tt = natoms[None, :] * out_tt  # [M, S]
