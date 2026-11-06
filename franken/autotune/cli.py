@@ -4,7 +4,7 @@ import dataclasses
 import types
 import typing
 import docstring_parser
-from typing import Any, Sequence, cast, get_args
+from typing import Any, Sequence, cast
 
 from franken.config import (
     AutotuneConfig,
@@ -18,11 +18,10 @@ from franken.config import (
 )
 from franken.metrics import metric_registry
 from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    TargetType,
-    all_target_keys,
-    is_target_key,
+    ENERGY_KEY,
+    FORCES_KEY,
+    PropertyType,
+    all_targets,
 )
 
 
@@ -129,12 +128,13 @@ def parse_optional_literal(s: str) -> str | None:
     return s
 
 
-def parse_target(value: str) -> TargetType:
-    if not is_target_key(value.lower()):
+def parse_target(value: str) -> PropertyType:
+    allowed_targets = all_targets()
+    if value.lower() not in allowed_targets:
         raise argparse.ArgumentTypeError(
-            f"Invalid target type: {value}. Allowed types: {get_args(TargetType)}"
+            f"Invalid target type: {value}. Allowed types: {allowed_targets}"
         )
-    return cast(TargetType, value)
+    return cast(PropertyType, value)
 
 
 class Argument:
@@ -502,6 +502,13 @@ def build_parser(return_groups: bool = False):
         help=get_field_docstring(AutotuneConfig, "save_every_model"),
     )
     parser.add_argument(
+        "--no-save-cholesky-factor",
+        dest="save_cholesky_factor",
+        action="store_false",
+        default=True,
+        help="Do not save the best model's Cholesky factor in its checkpoint.",
+    )
+    parser.add_argument(
         "--save-fmaps",
         action="store_true",
         help=get_field_docstring(AutotuneConfig, "save_fmaps"),
@@ -553,8 +560,8 @@ def build_parser(return_groups: bool = False):
         "--train-targets",
         type=parse_target,
         nargs="+",
-        choices=all_target_keys(),
-        default=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+        choices=all_targets(),
+        default=[ENERGY_KEY, FORCES_KEY],
         help=get_field_docstring(AutotuneConfig, "train_targets"),
     )
     parser.add_argument(
@@ -604,6 +611,7 @@ def parse_cli(argv):
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
+        save_cholesky_factor=args.save_cholesky_factor,
         save_fmaps=args.save_fmaps,
         metrics=args.metrics,
         best_model_selection=args.best_model_selection,
