@@ -4,7 +4,6 @@ import os
 os.environ["OMP_NUM_THREADS"] = "8"
 from unittest.mock import DEFAULT, patch
 
-import numpy as np
 import pytest
 import torch
 
@@ -482,6 +481,41 @@ def test_jitted_model(device, targets, gnn_cfg):
     for tt in targets:
         torch.testing.assert_close(out_func[tt], out_ag_jit[tt], rtol=1e-3, atol=1e-3, 
                                     msg=f"Func-Autograd equality failed on target {tt}")
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("scale_by_Z", [False, True])
+def test_atomic_fmap(device, scale_by_Z):
+    with mocked_gnn(device, torch.float32, feature_dim=4):
+        model = FrankenPotential(
+            DEFAULT_GNN_CONFIGS[0],
+            GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=scale_by_Z,
+            num_species=2 if scale_by_Z else 1,
+        ).to(device)
+    numbers = torch.tensor([1, 8, 1, 8], device=device)
+    config = Configuration(
+        torch.randn(4, 3, device=device, requires_grad=True),
+        atomic_numbers=numbers,
+        natoms=torch.tensor(4, device=device),
+    )
+    statistics = Statistics()
+    statistics.update(model.gnn.descriptors(config).detach(), numbers)
+    model.input_scaler.set_from_statistics(statistics)
+    descriptors = model.input_scaler(
+        model.gnn.descriptors(config), atomic_numbers=numbers
+    )
+    expected = model.rf.atomic_feature_map(descriptors).T
+    actual = model.grad_feature_map(config, [PER_ATOM_ENERGY_KEY])[PER_ATOM_ENERGY_KEY]
+    torch.testing.assert_close(actual, expected)
+    assert actual.shape == (8, 4)
+    assert actual.device == config.atom_pos.device
+    assert actual.requires_grad
+    expected_grad = torch.autograd.grad(expected.sum(), config.atom_pos)[0]
+    actual_grad = torch.autograd.grad(actual.sum(), config.atom_pos)[0]
+    torch.testing.assert_close(actual_grad, expected_grad)
+    assert torch.isfinite(actual_grad).all()
+    assert actual_grad.abs().sum() > 0
 
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
