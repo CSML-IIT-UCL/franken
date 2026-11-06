@@ -24,7 +24,7 @@ RF_PARAMETRIZE = [
     GaussianRFConfig(num_random_features=128, length_scale=1.0),
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
-ALL_TARGETS: list[PropertyType] = [ENERGY_KEY, FORCES_KEY, STRESS_KEY]
+ALL_TARGETS: list[PropertyType] = [ENERGY_KEY, FORCES_KEY, STRESS_KEY, PER_ATOM_ENERGY_KEY]
 
 
 @pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
@@ -336,6 +336,8 @@ def test_fmap_shapes(num_systems):
     for k, v in out_fmap.items():
         if k == ENERGY_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems)
+        if k == PER_ATOM_ENERGY_KEY:
+            assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems * num_atoms)
         if k == FORCES_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems * num_atoms * 3)
         if k == STRESS_KEY:
@@ -360,6 +362,8 @@ def test_gradient_shapes(num_linear_models, num_systems):
     for k, v in out_ag.items():
         if k == ENERGY_KEY:
             assert v.shape == (num_linear_models, num_systems)
+        if k == PER_ATOM_ENERGY_KEY:
+            assert v.shape == (num_linear_models, num_systems * num_atoms)
         if k == FORCES_KEY:
             assert v.shape == (num_linear_models, num_systems * num_atoms, 3)
         if k == STRESS_KEY:
@@ -368,6 +372,8 @@ def test_gradient_shapes(num_linear_models, num_systems):
     for k, v in out_func.items():
         if k == ENERGY_KEY:
             assert v.shape == (num_linear_models, num_systems)
+        if k == PER_ATOM_ENERGY_KEY:
+            assert v.shape == (num_linear_models, num_systems * num_atoms)
         if k == FORCES_KEY:
             assert v.shape == (num_linear_models, num_systems * num_atoms, 3)
         if k == STRESS_KEY:
@@ -455,6 +461,7 @@ class TestModelGradients:
 @pytest.mark.parametrize("targets", [
     [ENERGY_KEY, FORCES_KEY, STRESS_KEY], 
     [ENERGY_KEY, FORCES_KEY], 
+    [ENERGY_KEY, FORCES_KEY, PER_ATOM_ENERGY_KEY], 
 ])
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 def test_jitted_model(device, targets, gnn_cfg):
@@ -481,6 +488,36 @@ def test_jitted_model(device, targets, gnn_cfg):
     for tt in targets:
         torch.testing.assert_close(out_func[tt], out_ag_jit[tt], rtol=1e-3, atol=1e-3, 
                                     msg=f"Func-Autograd equality failed on target {tt}")
+
+
+@pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("targets", [
+    [ENERGY_GP_UNC_KEY], 
+    [FORCES_GP_UNC_KEY], 
+    [PER_ATOM_ENERGY_GP_UNC_KEY], 
+])
+@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
+def test_nonjittable_model(device, targets, gnn_cfg):
+    rf_cfg = RF_PARAMETRIZE[0]
+    model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
+    model._cholesky_factor = pack_upper(torch.eye(rf_cfg.num_random_features))
+    model._l2_penalty = 1.0
+    jit_model = torch.jit.script(model)
+
+    num_lin_models = 1
+    weights = torch.randn(
+        (num_lin_models, model.rf.total_random_features), device=device
+    )
+    data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
+    dataset = FrankenAtomsDataset(
+        data_path=data_path,
+        split="train",
+        gnn_config=gnn_cfg,
+    )
+    data, _ = dataset[0]  # type: ignore
+    data = data.to(device)
+    with pytest.raises(torch.jit.Error, match="GP uncertainties can not be computed in a torch-scripted module."):
+        jit_model.predict(targets, data, weights, "torch.autograd")
 
 
 @pytest.mark.parametrize("device", DEVICES)
