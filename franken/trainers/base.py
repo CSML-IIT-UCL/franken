@@ -16,7 +16,6 @@ from franken.trainers.log_utils import (
     LogEntry,
     dtypeJSONEncoder,
 )
-from franken.utils.linalg.tri import pack_upper
 from franken.utils.misc import are_dicts_equal
 
 logger = logging.getLogger("franken")
@@ -52,45 +51,6 @@ class BaseTrainer(abc.ABC):
             )
         self.buffer_dt = dtype
         self.device = torch.device(device)
-
-    def psd_solve(
-        self,
-        cov: torch.Tensor,
-        rhs: torch.Tensor,
-        penalty: float,
-        return_cho_factor: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        r"""Solve ridge regression via Cholesky factorization, overwriting :attr:`cov` and :attr:`rhs`.
-
-        Multiple right-hand sides are supported.
-        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
-        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
-        and :math:`\text{rhs} = X^{\top} y`.
-        Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
-
-        To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
-        may also be overwritten (depending on its memory layout).
-
-        Args:
-            cov (Tensor): covariance of the linear system
-            rhs (Tensor): right hand side (one or more) of the linear system
-            penalty (float): Tikhonov l2 penalty
-            return_cho_factor (bool): Also return the packed upper Cholesky factor.
-
-        Returns:
-            The ridge regression coefficients, or (coefficients, packed factor)
-            when return_cho_factor is True.
-        """
-        # Add diagonal without copies
-        cov.diagonal().add_(penalty)
-        # Solve with cholesky on GPU
-        L = torch.linalg.cholesky(cov, upper=True)
-        rhs_shape = rhs.shape
-        solution = torch.cholesky_solve(rhs.view(cov.shape[0], -1), L, upper=True)
-        solution = solution.view(rhs_shape)
-        if return_cho_factor:
-            return solution, pack_upper(L).detach()
-        return solution
 
     @torch.no_grad()
     def get_statistics(self, model: FrankenPotential) -> Tuple[Statistics, dict]:
@@ -170,6 +130,7 @@ class BaseTrainer(abc.ABC):
         best_model_selection: list[str],
         best_model_split: DataSplit = DataSplit.TRAIN,
     ):
+        """Serialize the latest fitted model."""
         assert self.log_dir is not None, "Log directory is not set"
         model_hash_set = set(log.checkpoint_hash for log in log_collection)
         assert len(model_hash_set) == 1
@@ -183,7 +144,7 @@ class BaseTrainer(abc.ABC):
             model_save_path = ckpt_dir / f"{model_hash}.pt"
             model.save(model_save_path, multi_weights=all_weights)
             logger.debug(
-                f"Saved multiple models (hash={model_hash}) " f"to {model_save_path}"
+                f"Saved multiple models (hash={model_hash}) to {model_save_path}"
             )
         # Log the best model
         self.serialize_best_model(
@@ -193,6 +154,23 @@ class BaseTrainer(abc.ABC):
             best_model_selection=best_model_selection,
         )
 
+    def has_new_best_model(
+        self, best_model_selection: list[str], split: DataSplit
+    ) -> tuple[bool, LogEntry]:
+        assert self.log_dir is not None, "Log directory is not set"
+        log_collection = LogCollection.from_json(self.log_dir / "log.json")
+        new_best_model = log_collection.get_best_model(
+            split=split, metrics_to_minimize=best_model_selection
+        )
+        best_model_file = self.log_dir / "best.json"
+        new_best = True
+        if best_model_file.exists():
+            with open(best_model_file, "r") as f:
+                old_best_model = LogEntry.from_dict(json.load(f))
+            if new_best_model == old_best_model:
+                new_best = False
+        return new_best, new_best_model
+
     def serialize_best_model(
         self,
         model: FrankenPotential,
@@ -200,28 +178,20 @@ class BaseTrainer(abc.ABC):
         best_model_selection: list[str],
         split: DataSplit = DataSplit.TRAIN,
     ) -> None:
+        """Save the best checkpoint using the latest fit's system."""
         assert self.log_dir is not None, "Log directory is not set"
-        log_collection = LogCollection.from_json(self.log_dir / "log.json")
-        best_model = log_collection.get_best_model(
-            split=split, metrics_to_minimize=best_model_selection
+        should_save, best_log_entry = self.has_new_best_model(
+            best_model_selection, split
         )
-
         best_model_file = self.log_dir / "best.json"
-        should_save = True
-        if best_model_file.exists():
-            with open(best_model_file, "r") as f:
-                current_best = LogEntry.from_dict(json.load(f))
-            if best_model == current_best:
-                should_save = False
-
         if should_save:
-            logger.debug(f"Identified new best model: {best_model}")
-            with open(best_model_file, "w") as f:
-                json.dump(best_model.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
-            weights = all_weights[best_model.checkpoint_rf_weight_id]
+            logger.debug(f"Identified new best model: {best_log_entry}")
+            weights = all_weights[best_log_entry.checkpoint_rf_weight_id]
             model.rf.weights = weights.reshape_as(model.rf.weights)
             model.save(self.log_dir / "best_ckpt.pt")
+            with open(best_model_file, "w") as f:
+                json.dump(best_log_entry.to_dict(), f, indent=4, cls=dtypeJSONEncoder)
             logger.debug(
-                f"Saved best model (within-experiment ID={best_model.checkpoint_rf_weight_id}) "
+                f"Saved best model (within-experiment ID={best_log_entry.checkpoint_rf_weight_id}) "
                 f"to {self.log_dir / 'best_ckpt.pt'}"
             )

@@ -1,9 +1,10 @@
 import hashlib
+import json
 import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, Mapping
+from typing import Literal, Mapping, cast
 
 import numpy as np
 import torch
@@ -12,7 +13,7 @@ from torch import Tensor
 
 from franken.metrics.base import BaseMetric
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType, is_scalar_target
+from franken.data.base import Configuration, Target, PropertyType, is_scalar_property
 from franken.rf.model import FrankenPotential
 from franken.trainers import BaseTrainer
 from franken.trainers.log_utils import (
@@ -20,8 +21,11 @@ from franken.trainers.log_utils import (
     HyperParameterGroup,
     LogCollection,
     LogEntry,
+    dtypeJSONEncoder,
 )
 from franken.utils.linalg.cov import normalize_leading_eig
+from franken.utils.linalg.solve import psd_solve
+from franken.utils.linalg.tri import pack_upper, unpack_symm
 from franken.utils.misc import ensure_list, no_jit, params_grid, throughput
 from franken.metrics import metric_registry
 
@@ -34,16 +38,16 @@ class RandomFeaturesTrainer(BaseTrainer):
     Args:
         train_dataloader (torch.utils.data.DataLoader):
             Dataloader which iterates over the training set.
-        training_targets (list[TargetType]):
+        training_targets (list[PropertyType]):
             The target properties to use for training. For example :code:`["energy", "forces"]`.
         l2_penalty (float or list[float]):
             Regularization parameter for the kernel ridge problem. If multiple parameters
             are specified, a separate model will be solved for each. This allows to
             perform a grid-search for the best parameter.
-        target_weight (dict[TargetType, float | list[float]]):
-            Specify the relative weights of different target-types. Default value for
-            targets without a specified weight is 1.0. Weights are all normalized to sum to
-            one. As with ``l2_penalty``, specify a list of parameters to train a separate
+        target_weight (dict[PropertyType, float | list[float]]):
+            Specify the relative weights of different targets. Default value for targets
+            without a specified weight is 1.0. Weights are all normalized to sum to one.
+            As with ``l2_penalty``, specify a list of parameters to train a separate
             model for each. For example :code:`{"forces": [0.1, 0.5, 0.9]}`.
         random_features_normalization (Literal["leading_eig"] | None):
             How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
@@ -67,19 +71,26 @@ class RandomFeaturesTrainer(BaseTrainer):
             Whether or not to save feature-maps for the training set. Saving them
             requires extra memory (linear in the training-set size), but speeds up
             the ``evaluate()`` path on training data. Defaults to True.
+        save_cholesky_factor (bool):
+            Whether to include the best model's packed Cholesky factor in its checkpoint.
+            Covariances and coefficients are cached on CPU between fitting and best-model
+            serialization. Defaults to True.
 
     Note:
         The ``target_weight`` and ``l2_penalty`` can be used to specify a grid-search over
         solver parameters. Take into account that the size of this grid can become large if
         several target weights are specified.
+
+        When saving Cholesky factors, serialize the latest fitted model before the next fit.
+        Call ``_purge_covs_and_coeffs_cache()`` to abandon a pending fit instead.
     """
 
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
-        training_targets: list[TargetType],
+        training_targets: list[PropertyType],
         l2_penalty: float | list[float],
-        target_weight: Mapping[TargetType, float | list[float]],
+        target_weight: Mapping[PropertyType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -87,6 +98,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
+        save_cholesky_factor: bool = True,
     ):
         super().__init__(
             train_dataloader,
@@ -97,6 +109,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
         self.random_features_normalization = random_features_normalization
         self.save_fmaps = save_fmaps
+        self.save_cholesky_factor = save_cholesky_factor
         self.metrics = metrics
         if len(training_targets) == 0:
             raise ValueError(
@@ -110,8 +123,49 @@ class RandomFeaturesTrainer(BaseTrainer):
         self.solver_hps = dict(l2_penalty=self.l2_penalty) | {
             f"{k}_weight": v for k, v in self.target_weight.items()
         }
+        self._covs_cache = None
+        self._coeffs_cache = None
+
+    def _cache_covs(self, covs, coeffs):
+        """Cache packed covariances and coefficients on CPU until serialization."""
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: pack_upper(cov.detach().to("cpu"))
+                for target, cov in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
+        )
+
+    def _restore_covs(
+        self, n_features: int
+    ) -> tuple[dict[PropertyType, Tensor], dict[PropertyType, Tensor]]:
+        """Restore the latest fit's system on the trainer device for the winning solve."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        return (
+            {
+                target: unpack_symm(packed, n_features).to(self.device)
+                for target, packed in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
+
+    def _clear_covs_cache(self):
+        """Release cached systems after serialization or when abandoning a fit."""
+        self._covs_cache = None
+        self._coeffs_cache = None
 
     def on_fit_start(self, model: FrankenPotential):
+        if self._covs_cache is not None or self._coeffs_cache is not None:
+            raise RuntimeError(
+                "The previous fit still has cached covariances and coefficients. "
+                "Serialize it or call _purge_covs_and_coeffs_cache() before fitting again."
+            )
+        model._cholesky_factor = None
+        model._l2_penalty = None
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
@@ -170,6 +224,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             t_solve_start = perf_counter()
             try:
                 weights = self.solve(covs=covs, coeffs=coeffs, **hp_val)
+                assert isinstance(weights, Tensor)
             except torch.linalg.LinAlgError as e:  # type: ignore
                 weights = torch.zeros_like(all_weights[hp_idx])
                 num_failed += 1
@@ -206,6 +261,12 @@ class RandomFeaturesTrainer(BaseTrainer):
                 f"Solver failed in {num_failed.item()}/{solver_grid_size} cases."
             )
 
+        if (
+            self.save_cholesky_factor
+            and self.log_dir is not None
+            and dist_utils.get_rank() == 0
+        ):
+            self._cache_covs(covs, coeffs)
         return log_collection, all_weights
 
     def get_metrics(self) -> list[BaseMetric]:
@@ -215,7 +276,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             metric_names = [
                 metric
                 for tt in self.training_targets
-                for metric in metric_registry.available_metrics_for_target(tt)
+                for metric in metric_registry.available_metrics_for_property(tt)
             ]
         else:
             metric_names = self.metrics
@@ -230,7 +291,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         available = {
             metric
             for tt in self.training_targets
-            for metric in metric_registry.available_metrics_for_target(tt)
+            for metric in metric_registry.available_metrics_for_property(tt)
         }
         unsupported = [metric for metric in self.metrics if metric not in available]
         if unsupported:
@@ -285,12 +346,13 @@ class RandomFeaturesTrainer(BaseTrainer):
                 else:
                     forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
                 predictions = model.predict(
-                    targets=self.training_targets,
+                    properties=cast(list[str], self.training_targets),
                     data=data,
                     weights=all_weights,
                     differential_mode=forces_mode,
                     add_energy_shift=(False if split == DataSplit.TRAIN else True),
                 )
+            predictions = cast(dict[PropertyType, Tensor], predictions)
             for tt, val in predictions.items():
                 if torch.any(torch.isnan(val)):
                     logger.warning(
@@ -338,6 +400,47 @@ class RandomFeaturesTrainer(BaseTrainer):
                     f"Saved feature maps require {tot_bytes / 2**30:.2f}GB of device memory."
                 )
 
+    def serialize_logs(self, *args, **kwargs):
+        """Serialize the latest fitted model and release its cached system, even on failure."""
+        try:
+            super().serialize_logs(*args, **kwargs)
+        finally:
+            self._clear_covs_cache()
+
+    def serialize_best_model(
+        self,
+        model: FrankenPotential,
+        all_weights: torch.Tensor,
+        best_model_selection: list[str],
+        split: DataSplit = DataSplit.TRAIN,
+    ):
+        """Save the best checkpoint using the latest fit's system, then release the cache."""
+        try:
+            assert self.log_dir is not None, "Log directory is not set"
+            should_save, best_log_entry = self.has_new_best_model(
+                best_model_selection, split
+            )
+            best_model_file = self.log_dir / "best.json"
+            if should_save:
+                logger.debug(f"Identified new best model: {best_log_entry}")
+                if self.save_cholesky_factor:
+                    model._cholesky_factor, model._l2_penalty = (
+                        self._cholesky_factor_from_logentry(model, best_log_entry)
+                    )
+                weights = all_weights[best_log_entry.checkpoint_rf_weight_id]
+                model.rf.weights = weights.reshape_as(model.rf.weights)
+                model.save(self.log_dir / "best_ckpt.pt")
+                with open(best_model_file, "w") as f:
+                    json.dump(
+                        best_log_entry.to_dict(), f, indent=4, cls=dtypeJSONEncoder
+                    )
+                logger.debug(
+                    f"Saved best model (within-experiment ID={best_log_entry.checkpoint_rf_weight_id}) "
+                    f"to {self.log_dir / 'best_ckpt.pt'}"
+                )
+        finally:
+            self._clear_covs_cache()
+
     @no_jit()
     @torch.no_grad()
     def _covs_and_coeffs(
@@ -356,7 +459,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-        self.fmaps: dict[TargetType, list[Tensor]] = {
+        self.fmaps: dict[PropertyType, list[Tensor]] = {
             t: [] for t in self.training_targets
         }
 
@@ -384,7 +487,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
-                if is_scalar_target(tgt_name):
+                if is_scalar_property(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
                     coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
                 else:
@@ -406,13 +509,27 @@ class RandomFeaturesTrainer(BaseTrainer):
             )
         return covs, coeffs
 
+    def _cholesky_factor_from_logentry(
+        self, model: FrankenPotential, log_entry: LogEntry
+    ) -> tuple[torch.Tensor | None, float | None]:
+        """Repeat the best solve, returning its packed factor and regularization penalty."""
+        if self._covs_cache is None and self._coeffs_cache is None:
+            return None, None  # Manual serialization without a preceding fit.
+        solver_hps = log_entry.to_dict()["hyperparameters"]["solver"]
+        solver_hps = {k: v for k, v in solver_hps.items() if k != "dtype"}
+        covs, coeffs = self._restore_covs(model.rf.total_random_features)
+        _, factor = self.solve(
+            covs=covs, coeffs=coeffs, return_cholesky_factor=True, **solver_hps
+        )
+        return factor, solver_hps["l2_penalty"]
+
     @torch.no_grad()
     def solve(
         self,
-        covs: dict[TargetType, Tensor],
-        coeffs: dict[TargetType, Tensor],
+        covs: dict[PropertyType, Tensor],
+        coeffs: dict[PropertyType, Tensor],
         l2_penalty: float = 1e-6,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
         **weights,
     ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
@@ -429,12 +546,12 @@ class RandomFeaturesTrainer(BaseTrainer):
                 solve_cov.add_(covs[tt], alpha=normalized_weight)
                 solve_coeff.add_(coeffs[tt], alpha=normalized_weight)
         assert solve_cov is not None and solve_coeff is not None
-        return self.psd_solve(solve_cov, solve_coeff, l2_penalty, return_cho_factor)
+        return psd_solve(solve_cov, solve_coeff, l2_penalty, return_cholesky_factor)
 
 
 def process_tgt_weights(
-    tgt_weights: Mapping[TargetType, float | list[float]], tgts: list[TargetType]
-) -> dict[TargetType, list[float]]:
+    tgt_weights: Mapping[PropertyType, float | list[float]], tgts: list[PropertyType]
+) -> dict[PropertyType, list[float]]:
     """
     Make sure all weights in tgts are present (default value for
     non-provided weights is 1.0).
