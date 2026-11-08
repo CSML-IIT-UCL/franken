@@ -1,3 +1,4 @@
+from collections import defaultdict
 import hashlib
 import json
 import logging
@@ -31,6 +32,7 @@ from franken.trainers.log_utils import (
     HyperParameterGroup,
     LogCollection,
     LogEntry,
+    TimingLog,
 )
 from franken.utils.misc import no_jit, throughput
 
@@ -108,7 +110,15 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         self.lbfgs_tolerance_change = lbfgs_tolerance_change
         self.training_history: list[dict] = []
         self._les_optimizer = None
+        self._aggr_times: dict[str, float] = defaultdict(float)
         self.fmaps: dict[TargetType, list[Tensor]] = {}
+
+    def on_fit_start(self, model):
+        super().on_fit_start(model)
+        self.fmaps = {}
+        self.training_history = []
+        self._les_optimizer = None
+        self._aggr_times = defaultdict(float)
 
     def create_log_entry(self, model):
         solver_hps = {
@@ -139,8 +149,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         local_log = LogEntry(
             checkpoint_hash=model_hash,
             checkpoint_rf_weight_id=0,
-            timings_cov_coeffs=0,  # TODO: Fix timings in logs (need to allow arbitrary timings)
-            timings_solve=0,
+            timings=[TimingLog(k, v) for k, v in self._aggr_times.items()],
             hyperparameters=hyperparameters,
         )
         return local_log
@@ -254,6 +263,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     def _minibatch_gradient(self, model, normalization, indices):
         """Identical to _full_gradient but only runs for specified indices. Does not work in multi-GPU setting."""
+        t_solve = perf_counter()
         assert self.optimizer == "adam"
         n_samples = len(self.train_dataloader.dataset)  # type: ignore
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
@@ -308,10 +318,12 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             loss = loss / n_samples
             loss.backward()
             total += loss.detach()
+        self._aggr_times["les_solve"] += perf_counter() - t_solve
         return total
 
     def _full_gradient(self, model, normalization):
         """Accumulate a mean gradient, freeing each structure's graph immediately."""
+        t_solve = perf_counter()
         n_samples = len(self.train_dataloader.dataset)  # type: ignore
         total = torch.zeros((), device=self.device, dtype=self.buffer_dt)
         # Each device will process its own subset of the dataset.
@@ -365,6 +377,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         # Sum gradients over all devices
         grads = [p.grad for p in model.parameters() if p.grad is not None]
         dist_utils.all_sum_coalesced(grads)
+        self._aggr_times["les_solve"] += perf_counter() - t_solve
         return total
 
     def _fit_les(
@@ -448,13 +461,16 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
 
     @torch.no_grad()
     def _prepare_projection(self, covs: dict[TargetType, Tensor]) -> Tensor:
+        t_solve = perf_counter()
         l2_penalty = self.l2_penalty
         target_weights = self.rel_tgt_weight
         matrix: torch.Tensor = cast(
             Tensor, sum(target_weights[t] * covs[t] for t in self.training_targets)
         )
         matrix.diagonal().add_(l2_penalty)
-        return torch.linalg.cholesky(matrix, upper=True)
+        out = torch.linalg.cholesky(matrix, upper=True)
+        self._aggr_times["rff_solve"] += perf_counter() - t_solve
+        return out
 
     @torch.no_grad()
     def _fit_projected_rff(
@@ -467,15 +483,18 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
         if direct_coeffs is not None:
             coeffs = direct_coeffs
         else:
+            t_coeffs = perf_counter()
             coeffs = self.residual_coeffs(
                 model, self.train_dataloader, normalization=normalization
             )
+            self._aggr_times["covs_coeffs"] += perf_counter() - t_coeffs
         target_weights = self.rel_tgt_weight
-        coeffs = self.residual_coeffs(model, self.train_dataloader, normalization)
         weighted_coeffs: Tensor = cast(
             Tensor, sum(target_weights[t] * coeffs[t] for t in self.training_targets)
         )
+        t_solve = perf_counter()
         solution = torch.cholesky_solve(weighted_coeffs[:, None], proj_mat, upper=True)
+        self._aggr_times["rff_solve"] += perf_counter() - t_solve
         # weights from [n_rf, 1] to [1, n_rf]
         solution = solution.unsqueeze(0).squeeze(-1)
         model.rf.weights = torch.nn.Parameter(solution)
@@ -499,8 +518,6 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
                 "Adam optimizer does not support multi-GPU implementation."
             )
         self.patch_e3nn()
-        self.training_history = []
-        self._les_optimizer = None
         self.on_fit_start(model)
 
         covs, coeffs, normalization, proj_mat = None, None, None, None
@@ -509,7 +526,7 @@ class RandomFeaturesEwaldsTrainer(RandomFeaturesTrainer):
             covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
             covs, coeffs, normalization = self._calc_cov_normalization(covs, coeffs)
             proj_mat = self._prepare_projection(covs)
-            t_cov = perf_counter() - t_cov
+            self._aggr_times["covs_coeffs"] += perf_counter() - t_cov
 
         if self.mode == "variable_projection":
             assert covs is not None
