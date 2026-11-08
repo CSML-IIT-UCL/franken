@@ -64,12 +64,12 @@ def test_load_preserves_regression_precision(tmp_path, dtype, multiweight):
     checkpoint = tmp_path / "model.pt"
     if multiweight:
         # The selected solution can have a different dtype from the base weights.
-        model.rf.weights = model.rf.weights.to(
+        model.rf.weights = torch.nn.Parameter(model.rf.weights.to(
             dtype=torch.float32 if dtype == torch.float64 else torch.float64
-        )
+        ))
         model.save(checkpoint, multi_weights=torch.cat([weights * 2, weights]))
     else:
-        model.rf.weights = weights.clone()
+        model.rf.weights = torch.nn.Parameter(weights.clone())
         model.save(checkpoint)
 
     loaded = FrankenPotential.load(

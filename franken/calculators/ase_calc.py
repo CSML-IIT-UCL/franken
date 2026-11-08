@@ -144,7 +144,7 @@ class FrankenCalculator(Calculator):
             targets.append(LES_CHARGES_TARGET_KEY)
         results = self.franken(targets, data)
 
-        self.results["energy"] = results[ENERGY_TARGET_KEY].squeeze(0).numpy(force=True)
+        self.results["energy"] = results[ENERGY_TARGET_KEY].item()
         if FORCES_TARGET_KEY in results and "forces" in properties:
             self.results["forces"] = (
                 results[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)

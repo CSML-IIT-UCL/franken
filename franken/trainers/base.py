@@ -108,11 +108,13 @@ class BaseTrainer(abc.ABC):
         if self.statistics_ is None or not are_dicts_equal(
             self.statistics_[1], asdict_with_classvar(model.gnn_config)
         ):
+            print("Computing stats")
             stat = compute_dataset_statistics(
                 dataset=self.train_dataloader.dataset,  # type: ignore
                 gnn=model.gnn,
                 device=self.device,
             )
+            print(f"{stat.input_dim=}")
             stat_dict = asdict_with_classvar(model.gnn_config)
             self.statistics_ = (stat, stat_dict)
 

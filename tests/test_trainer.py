@@ -8,6 +8,7 @@ import torch
 
 from franken.config import GaussianRFConfig, MaceBackboneConfig
 from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, Target, TargetType
+from franken.data.dataset import FrankenAtomsDataset
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.trainers import RandomFeaturesTrainer
@@ -39,15 +40,16 @@ def make_dloader_from_dset(dataset):
     dloader = MagicMock()
     dloader.__len__ = MagicMock(return_value=len(dataset))
     dloader.__iter__ = iterator
-    dloader.dataset = dataset
+    dloader.dataset = MagicMock(wraps=dataset)
+    dloader.dataset.__iter__ = iterator
+    species = torch.cat([cfg.atomic_numbers for cfg, tgt in dataset]).unique()
+    dloader.dataset.atomic_energies = {i: torch.ones(1) for i in species}
+    dloader.dataset.__class__ = FrankenAtomsDataset
     try:
         dloader.dataset.__len__ = MagicMock(return_value=len(dataset))
     except AttributeError:
         pass
-    try:
-        dloader.dataset.split = "train"
-    except AttributeError:
-        pass
+    dloader.dataset.split = "train"
     return dloader
 
 

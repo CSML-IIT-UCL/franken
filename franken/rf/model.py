@@ -181,13 +181,10 @@ class FrankenPotential(torch.nn.Module):
                     f"The checkpoint contains {ckpt['multi_weights'].shape[0]}, select which one to load by specifying rf_weight_id"
                 )
             assert rf_weight_id < ckpt["multi_weights"].shape[0]
-            # model.rf.weights.copy_(
-            #     ckpt["multi_weights"][rf_weight_id].reshape_as(model.rf.weights)
-            # )
             model.rf.weights = torch.nn.Parameter(
                 ckpt["multi_weights"][rf_weight_id]
                 .reshape_as(model.rf.weights)
-                .to(model.rf.weights)
+                .to(device=model.rf.weights.device)
             )
 
         if map_location is not None:
@@ -323,7 +320,6 @@ class FrankenPotential(torch.nn.Module):
     def rfs_from_descriptor(self, gnn_descriptors: torch.Tensor, data: Configuration):
         random_features = self.rf.feature_map(
             gnn_descriptors,
-            atomic_numbers=data.atomic_numbers,
             batch_ids=data.batch_ids,
         )
         return random_features

@@ -1,5 +1,6 @@
 """Checkpoint dispatch tests without downloaded backbone models."""
 
+from typing import Any
 from unittest.mock import patch
 
 import ase
@@ -15,6 +16,10 @@ from franken.rf.model import FrankenPotential
 
 
 class ToyBackbone(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.test_param = torch.nn.Parameter(torch.ones(10))
+
     def feature_dim(self):
         return 4
 
