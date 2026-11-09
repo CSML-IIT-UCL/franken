@@ -134,7 +134,7 @@ def test_torchsim_adapter_precision(tmp_path, dtype, from_checkpoint):
         GaussianRFConfig(num_random_features=16, length_scale=1.0),
     ).to(dtype=torch.float32)
     weights = torch.full_like(model.rf.weights, 1.000000000123, dtype=torch.float64)
-    model.rf.weights = weights.clone()
+    model.rf.weights = torch.nn.Parameter(weights.clone())
     source = model
     if from_checkpoint:
         source = tmp_path / "model.pt"

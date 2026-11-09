@@ -1,31 +1,20 @@
-from copy import deepcopy
 from pathlib import Path
 import os
-
-from tests.test_franken_calculator import GNN_CONFIGS
-
+from unittest.mock import patch
 os.environ["OMP_NUM_THREADS"] = "8"
-from unittest.mock import DEFAULT, patch
 
 import numpy as np
 import pytest
-import torch
 
 from franken.trainers.log_utils import LogCollection
-from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig
-from franken.calculators.ase_calc import FrankenCalculator
+from franken.config import AutotuneConfig, DatasetConfig, GaussianRFConfig, HPSearchConfig, LESConfig, MultiscaleGaussianRFConfig, SolverConfig
 from franken.autotune.cli import parse_cli
-from franken.autotune.script import get_dataset_paths, init_loaders, run_autotune
-from franken.data import FrankenAtomsDataset
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
-from franken.rf.model import FrankenPotential
-from franken.rf.scaler import Statistics
-from franken.trainers.rf_trainer import RandomFeaturesTrainer
-from franken.utils.misc import garbage_collection_cuda
+from franken.autotune.script import create_outer_hpsearch_grid, get_dataset_paths, init_loaders, run_autotune
+from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, TargetType
 from franken.datasets.registry import DATASET_REGISTRY
 
 from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
-from .utils import are_dicts_close, cleanup_dir, create_temp_dir, mocked_gnn
+from .utils import cleanup_dir, create_temp_dir
 
 RF_PARAMETRIZE = [
     GaussianRFConfig(num_random_features=128, length_scale=1.0),
@@ -49,29 +38,26 @@ def test_integration(gnn_cfg, device, atomic_energies):
         num_random_features=128,
         length_scale=HPSearchConfig(values=[0.5, 1.0]),
     )
+    cfg = AutotuneConfig(
+        dataset=DatasetConfig(),
+        solver=SolverConfig(l2_penalty=[1e-4], force_weight=np.linspace(0.1, 0.9, 2).tolist()),
+        backbone=gnn_cfg,
+        rfs=rf_cfg,
+        les=None,
+        train_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+        atomic_energies=atomic_energies,
+        save_every_model=False,
+        rf_normalization=None
+    )
     temp_dir = None
     try:
         # Step 1: Create a temporary directory for saving the model
         temp_dir = Path(create_temp_dir())
-        trainer = RandomFeaturesTrainer(
-            train_dataloader=loaders["train"],
-            random_features_normalization=None,
-            log_dir=temp_dir,
-            save_every_model=False,
-            l2_penalty=[1e-4],
-            target_weight={FORCES_TARGET_KEY: np.linspace(0.1, 0.9, 2).tolist()},
-            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
-            device=device,
-        )
         run_autotune(
-            gnn_cfg=gnn_cfg,
-            rf_cfg=rf_cfg,
+            auto_cfg=cfg,
             loaders=loaders,
-            scale_by_species=False,
-            jac_chunk_size="auto",
-            trainer=trainer,
-            atomic_energies=atomic_energies,
-
+            device=device,
+            log_dir=temp_dir,
         )
         print(f"{list(temp_dir.glob('*'))}")
         assert (temp_dir / "best.json").is_file()
@@ -84,39 +70,93 @@ def test_integration(gnn_cfg, device, atomic_energies):
             cleanup_dir(str(temp_dir))
 
 
-def test_parse_cli_supports_stress_weight_and_metrics():
-    cfg = parse_cli([
-        "--train-path",
-        "/tmp/train.xyz",
-        "--val-path",
-        "/tmp/val.xyz",
-        "--backbone",
-        "mace",
-        "--mace.path-or-id",
-        "mace_mp/small",
-        "--rf",
-        "gaussian",
-        "--gaussian.num-rf",
-        "128",
-        "--gaussian.length-scale",
-        "[1.,2.]",
-        "--train-targets",
-        "energy",
-        "forces",
-        "stress",
-        "--stress-weight",
-        "(0.1,0.9,2,linear)",
-        "--metrics",
-        "energy_MAE",
-        "forces_MAE",
-        "stress_MAE",
-        "--run-dir",
-        ".",
-    ])
+class TestCLI:
+    def test_parse_cli(self):
+        cfg = parse_cli([
+            "--train-path",
+            "/tmp/train.xyz",
+            "--val-path",
+            "/tmp/val.xyz",
+            "--backbone",
+            "mace",
+            "--mace.path-or-id",
+            "mace_mp/small",
+            "--rf",
+            "gaussian",
+            "--gaussian.num-rf",
+            "128",
+            "--gaussian.length-scale",
+            "[1.,2.]",
+            "--train-targets",
+            "energy",
+            "forces",
+            "stress",
+            "--stress-weight",
+            "(0.1,0.9,2,linear)",
+            "--metrics",
+            "energy_MAE",
+            "forces_MAE",
+            "stress_MAE",
+            "--run-dir",
+            ".",
+        ])
 
-    assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
-    assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
-    assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
+        assert cfg.les is None
+        assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+        assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
+        assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
+
+    def test_les(self):
+        config = parse_cli(
+            [
+                "--train-path",
+                "/tmp/train.xyz",
+                "--backbone",
+                "mace",
+                "--mace.path-or-id",
+                "mace_mp/small",
+                "--rf",
+                "gaussian",
+                "--gaussian.num-rf",
+                "8",
+                "--les",
+                "--les.sigma",
+                "0.8",
+                "--les.hidden-dim",
+                "(64, 32)",
+                "--les.dl",
+                "2.5",
+                "--les.n-max",
+                "12",
+                "--les.num-cycles",
+                "7",
+            ]
+        )
+        assert config.les is not None
+        assert config.les.sigma == 0.8
+        assert config.les.hidden_dim == (64, 32)
+        assert config.les.dl == 2.5
+        assert config.les.N_max == 12
+        assert isinstance(config.les.num_cycles, HPSearchConfig)
+        assert config.les.num_cycles.get_vals() == [7]
+        assert not hasattr(config, "les_training")
+
+    def test_no_les(self):
+        config = parse_cli(
+            [
+                "--train-path",
+                "/tmp/train.xyz",
+                "--backbone",
+                "mace",
+                "--mace.path-or-id",
+                "mace_mp/small",
+                "--rf",
+                "gaussian",
+                "--gaussian.num-rf",
+                "8",
+            ]
+        )
+        assert config.les is None
 
 
 @patch("franken.autotune.script.DATASET_REGISTRY")
@@ -133,3 +173,10 @@ def test_explicit_dataset_paths_override_registered_dataset_paths(registry):
     assert val_path == Path("/tmp/custom-val.xyz")
     assert test_path is None
     registry.get_path.assert_not_called()
+
+    
+class TestHPGrid:
+    def test_tuple_param_not_in_grid(self):
+        cfg = LESConfig(hidden_dim=(32, 16, 8))
+        param_grid = list(create_outer_hpsearch_grid((cfg, )))
+        assert len(param_grid) == 1

@@ -2,10 +2,18 @@ from abc import ABC
 import ast
 from copy import deepcopy
 from dataclasses import dataclass, field
+import dataclasses
 import logging
-from typing import Any, ClassVar, Literal, Optional, Sequence, Union
+from typing import Any, ClassVar, Literal, Optional, Sequence, Union, Protocol, Mapping
+from typing_extensions import runtime_checkable, Self
 
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.data.base import (
+    ENERGY_TARGET_KEY,
+    FORCES_TARGET_KEY,
+    STRESS_TARGET_KEY,
+    TargetType,
+    all_target_keys,
+)
 
 logger = logging.getLogger("franken")
 
@@ -55,6 +63,23 @@ def asdict_with_classvar(obj) -> dict[str, Any]:
         )
     else:
         return deepcopy(obj)
+
+
+class DataclassInstance(Protocol):
+    """Structural type matched by any dataclass instance."""
+
+    __dataclass_fields__: ClassVar[dict[str, dataclasses.Field[Any]]]
+
+
+@runtime_checkable
+class CheckpointableConfig(Protocol):
+    def to_ckpt(self) -> dict[str, Any]: ...
+
+    @classmethod
+    def from_ckpt(cls, ckpt: Mapping[str, Any]) -> Self: ...
+
+
+class CheckpointableDataclass(DataclassInstance, CheckpointableConfig, Protocol): ...
 
 
 @dataclass
@@ -229,6 +254,79 @@ class PETBackboneConfig(BackboneConfig):
 
 
 @dataclass
+class LESConfig:
+    """Architecture, electrostatics, and optimization settings for LES."""
+
+    n_layers: int = 3
+    hidden_dim: tuple[int, ...] = (32, 16)
+    dl: float = 1.5
+    sigma: float = 1.0
+    les_output_scale: float = 1.0
+    add_linear_nn: bool = True
+    N_max: int = 10
+    """Reciprocal grid extent for periodic structures. N_max * dl must cover the cell."""
+    optimizer: Literal["adam", "lbfgs"] = "lbfgs"
+    """Optimizer. Some params are for adam, some for lbfgs"""
+    num_cycles: HPSearchConfig | list[int] | int = 50
+    """Number of alternating RFF/LES cycles."""
+    adam_epochs_per_cycle: HPSearchConfig | list[int] | int = 50
+    """Adam passes through the complete training set per LES stage."""
+    adam_learning_rate: HPSearchConfig | list[float] | float = 1e-4
+    """Adam learning rate."""
+    adam_batch_size: int | None = None
+    """Batch size for Adam optimizer. If None will use full gradients."""
+    lr_decay: HPSearchConfig | list[float] | float = 1.0
+    """Multiply the learning rate by this factor after each alternating cycle."""
+    lbfgs_max_iter: HPSearchConfig | list[int] | int = 20
+    """Maximum L-BFGS iterations per LES stage (each can evaluate multiple closures)."""
+    lbfgs_max_eval: HPSearchConfig | list[int] | int = 40
+    """Maximum number of closure evaluations for each L-BFGS run (each run consists of `lbfgs_max_iter` iterations)."""
+    lbfgs_learning_rate: HPSearchConfig | list[float] | float = 1.0
+    lbfgs_history_size: HPSearchConfig | list[int] | int = 20
+    lbfgs_tolerance_grad: HPSearchConfig | list[float] | float = 1e-10
+    lbfgs_tolerance_change: HPSearchConfig | list[float] | float = 1e-13
+    """Restore the best combined model across both stages, using validation if available."""
+    mode: Literal["alternating", "variable_projection"] = "variable_projection"
+    """Variable projection refits RFF at every L-BFGS trial point."""
+
+    def __post_init__(self):
+        pass
+        # if self.optimizer not in {"adam", "lbfgs"}:
+        #     raise ValueError("LES optimizer must be 'adam' or 'lbfgs'")
+        # if self.mode not in {"alternating", "variable_projection"}:
+        #     raise ValueError("LES mode must be 'alternating' or 'variable_projection'")
+        # if self.mode == "variable_projection" and self.optimizer != "lbfgs":
+        #     raise ValueError("Variable projection requires optimizer='lbfgs'")
+        # for name in (
+        #     "num_cycles",
+        #     "adam_epochs_per_cycle",
+        #     "lbfgs_max_iter",
+        #     "lbfgs_history_size",
+        # ):
+        #     value = getattr(self, name)
+        #     print(f"{name}={value}")
+        #     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        #         raise ValueError(f"{name} must be a positive integer")
+        # for name in (
+        #     "adam_learning_rate",
+        #     "lbfgs_learning_rate",
+        #     "lr_decay",
+        #     "lbfgs_tolerance_grad",
+        #     "lbfgs_tolerance_change",
+        # ):
+        #     value = getattr(self, name)
+        #     if not 0 < value < float("inf"):
+        #         raise ValueError(f"{name} must be positive and finite")
+
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return LESConfig(**ckpt)
+
+
+@dataclass
 class RFConfig(ABC):
     rf_type: ClassVar[str]
 
@@ -312,6 +410,20 @@ class SolverConfig:
     )
     """Controls the weight of the stress loss term (if stress training is enabled). Weights are normalized to sum to 1."""
 
+    def to_ckpt(self):
+        return dataclasses.asdict(self)
+
+    @staticmethod
+    def from_ckpt(ckpt):
+        return SolverConfig(**ckpt)
+
+    def get_weights(self) -> dict[TargetType, HPSearchConfig | list[float] | float]:
+        return {
+            ENERGY_TARGET_KEY: self.energy_weight,
+            FORCES_TARGET_KEY: self.force_weight,
+            STRESS_TARGET_KEY: self.stress_weight,
+        }
+
 
 @dataclass
 class AutotuneConfig:
@@ -348,6 +460,9 @@ class AutotuneConfig:
 
     rfs: RFConfig
     """Choose the random-feature approximation."""
+
+    les: LESConfig | None
+    """Configure the Latent Ewald Summation module. Can be `None` when the module is not used."""
 
     rf_normalization: Literal["leading_eig"] | None = field(default="leading_eig")
     """Normalization strategy for the covariance matrix."""
@@ -398,3 +513,12 @@ class AutotuneConfig:
         default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
     )
     """Which data labels to train Franken with."""
+
+    def __post_init__(self):
+        # 1. fix solver-config: remove target weights (e.g. stress_weight)
+        #    which are not used because not in training targets
+        for tgt_key in all_target_keys():
+            if tgt_key not in self.train_targets:
+                # set it to a single value so it doesn't interfere with the
+                # hyperparameter search procedures.
+                setattr(self.solver, f"{tgt_key}_weight", 1.0)

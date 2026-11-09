@@ -10,6 +10,7 @@ from franken.data.base import (
     ENERGY_TARGET_KEY,
     FORCES_TARGET_KEY,
     STRESS_TARGET_KEY,
+    LES_CHARGES_TARGET_KEY,
 )
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
@@ -20,16 +21,16 @@ class FrankenCalculator(Calculator):
 
     Attributes:
         implemented_properties:
-            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress".
+            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress", "charges".
     """
 
-    implemented_properties = ["energy", "forces", "stress"]
+    implemented_properties = ["energy", "forces", "stress", "charges"]
     default_parameters = {}
     nolabel = True  # ??
 
     def __init__(
         self,
-        franken_ckpt: Union[FrankenPotential, str, Path],
+        franken_ckpt: Union[torch.nn.Module, str, Path],
         device=None,
         rf_weight_id: int | None = None,
         gnn_config: BackboneConfig | None = None,
@@ -40,6 +41,7 @@ class FrankenCalculator(Calculator):
 
         Args:
             franken_ckpt : Path to the franken model.
+                Standard and LES checkpoints are detected automatically.
                 This class accepts pre-loaded models, as well as jitted models (with `torch.jit`).
             device : PyTorch device specification for where the model should reside
                 (e.g. "cuda:0" for GPU placement or "cpu" for CPU placement).
@@ -62,7 +64,7 @@ class FrankenCalculator(Calculator):
                 'dtype must be None, torch.float32, torch.float64, "float32", or "float64"'
             )
         super().__init__(**calc_kwargs)
-        self.franken: FrankenPotential
+        self.franken: torch.nn.Module
         if isinstance(franken_ckpt, torch.nn.Module):
             self.franken = franken_ckpt
             if device is not None:
@@ -74,7 +76,7 @@ class FrankenCalculator(Calculator):
             except RuntimeError as e:
                 if "PytorchStreamReader" not in str(e):
                     raise
-                self.franken = FrankenPotential.load(  # type: ignore
+                self.franken = FrankenPotential.load(
                     franken_ckpt,
                     map_location=device,
                     rf_weight_id=rf_weight_id,
@@ -125,20 +127,35 @@ class FrankenCalculator(Calculator):
         data = cpu_data.to(device=self.device, dtype=self.dtype)
 
         targets = [ENERGY_TARGET_KEY]
-        if "forces" in properties:
+        if (
+            "forces" in properties
+            and FORCES_TARGET_KEY in self.franken.supported_targets()
+        ):
             targets.append(FORCES_TARGET_KEY)
-        if "stress" in properties:
+        if (
+            "stress" in properties
+            and STRESS_TARGET_KEY in self.franken.supported_targets()
+        ):
             targets.append(STRESS_TARGET_KEY)
-        computed = self.franken(targets, data)
+        if (
+            "charges" in properties
+            and LES_CHARGES_TARGET_KEY in self.franken.supported_targets()
+        ):
+            targets.append(LES_CHARGES_TARGET_KEY)
+        results = self.franken(targets, data)
 
-        self.results["energy"] = computed[ENERGY_TARGET_KEY].item()
-        if "forces" in properties:
+        self.results["energy"] = results[ENERGY_TARGET_KEY].item()
+        if FORCES_TARGET_KEY in results and "forces" in properties:
             self.results["forces"] = (
-                computed[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
+                results[FORCES_TARGET_KEY].squeeze(0).numpy(force=True)
             )
-        if "stress" in properties:
+        if STRESS_TARGET_KEY in results and "stress" in properties:
             self.results["stress"] = (
-                computed[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
+                results[STRESS_TARGET_KEY].squeeze(0).numpy(force=True)
+            )
+        if LES_CHARGES_TARGET_KEY in results and "charges" in properties:
+            self.results["charges"] = (
+                results[LES_CHARGES_TARGET_KEY].squeeze(0).numpy(force=True)
             )
 
 

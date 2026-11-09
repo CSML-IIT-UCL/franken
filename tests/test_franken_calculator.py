@@ -4,6 +4,7 @@ import subprocess
 
 import ase
 import ase.md
+import ase.md.melchionna
 import ase.md.npt
 import numpy as np
 import pytest
@@ -82,7 +83,7 @@ def init_npt_md(calc):
     assert isinstance(init_traj_atoms, ase.Atoms)
     init_traj_atoms.calc = calc
     MaxwellBoltzmannDistribution(init_traj_atoms, temperature_K=300)
-    dyn = ase.md.npt.NPT(
+    dyn = ase.md.melchionna.MelchionnaNPT(
         init_traj_atoms,
         timestep=1.0 * units.fs,
         temperature_K=300,
@@ -132,7 +133,7 @@ def test_calculator_in_md(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)  # random number gen on CPU for consistency
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_langevin_md(calculator)
     md.run(2)
@@ -157,7 +158,7 @@ def test_calculator_in_npt_md(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)  # random number gen on CPU for consistency
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_npt_md(calculator)
     md.run(2)
@@ -181,10 +182,9 @@ def test_calculator_jitscript(device, gnn_cfg):
     # Define the rng_seed and initialize the model
     model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
     num_lin_models = 1  # only a single weight for MD
-    rf_weights = torch.randn(
+    model.rf.weights = torch.nn.Parameter(torch.randn(
         (num_lin_models, model.rf.total_random_features)
-    ).to(device=device)
-    model.rf.weights = rf_weights
+    ).to(device=device))
     jit_model = torch.jit.script(model)
     calculator = FrankenCalculator(
         jit_model, device=device, forces_mode="torch.autograd", gnn_config=gnn_cfg
@@ -218,13 +218,14 @@ def test_calculator_compile(device, gnn_cfg):
     rf_weights = torch.randn(
         (num_lin_models, model.rf.total_random_features)
     ).to(device=device)
-    model.rf.weights = rf_weights
+    model.rf.weights = torch.nn.Parameter(rf_weights)
     model = torch.compile(model)
     calculator = FrankenCalculator(model, device=device, forces_mode="torch.autograd")
     md = init_langevin_md(calculator)
     md.run(2)
     compiled_energy = md.atoms.get_total_energy()
     np.testing.assert_allclose(compiled_energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-1)
+
 
 @pytest.mark.parametrize("dtype", [None, torch.float32, torch.float64, "float32", "float64"])
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
@@ -234,9 +235,9 @@ def test_calculator_precision(dtype, gnn_cfg):
         MultiscaleGaussianRFConfig(num_random_features=16),
     ).to(dtype=torch.float64)
     # Preserve a mixed-precision checkpoint when no conversion is requested.
-    model.rf.weights = torch.randn(
+    model.rf.weights = torch.nn.Parameter(torch.randn(
         (1, model.rf.total_random_features), dtype=torch.float32
-    )
+    ))
     calculator = FrankenCalculator(model, dtype=dtype)
     resolved_dtype = getattr(torch, dtype) if isinstance(dtype, str) else dtype
     expected_dtype = torch.float64 if dtype is None else resolved_dtype

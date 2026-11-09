@@ -112,6 +112,8 @@ class RandomFeaturesTrainer(BaseTrainer):
         }
 
     def on_fit_start(self, model: FrankenPotential):
+        model.to(self.device)
+        dist_utils.sync_module_states(model, [], True)
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
@@ -120,6 +122,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                 self.train_dataloader.dataset.atomic_energies  # type: ignore
             )
         model.gnn.franken_train()
+        model.train()
 
     def patch_e3nn(self):
         if self.device.type == "cuda":
@@ -141,13 +144,13 @@ class RandomFeaturesTrainer(BaseTrainer):
         """
         self.patch_e3nn()
 
-        model = model.to(self.device)
         self.on_fit_start(model)
         model_hash = hashlib.md5(str(model.hyperparameters).encode())
         model_hash = model_hash.hexdigest()
 
         t_cov_coeffs_start = perf_counter()
         covs, coeffs = self._covs_and_coeffs(model, self.train_dataloader)
+        covs, coeffs = self._normalize_covs(covs, coeffs)
         t_cov_coeffs = perf_counter() - t_cov_coeffs_start
 
         solver_grid_size = math.prod([len(v) for v in self.solver_hps.values()])
@@ -159,7 +162,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         )
         solver_iter = throughput(
             params_grid(self.solver_hps, split_distributed=True),
-            desc="least-squares",
+            desc=f"Least-squares (total {solver_grid_size} HPs)",
             units="models",
             device=self.device,
         )
@@ -248,10 +251,11 @@ class RandomFeaturesTrainer(BaseTrainer):
         all_weights: torch.Tensor | None,
     ) -> LogCollection:
         self.patch_e3nn()
+        model.eval()
+        model.gnn.franken_val()
+
         tot_dset_size = len(dataloader.dataset)  # type: ignore
-
         metric_objects: list[BaseMetric] = self.get_metrics()
-
         split_name = dataloader.dataset.split
         try:
             split = DataSplit[split_name.upper()]
@@ -265,7 +269,6 @@ class RandomFeaturesTrainer(BaseTrainer):
             total=tot_dset_size,
             device=self.device,
         )
-        model.gnn.franken_val()
         for i, (data, targets) in enumerate(progress_bar):
             data = data.to(device=self.device)
             targets = targets.to(device=self.device)
@@ -344,21 +347,21 @@ class RandomFeaturesTrainer(BaseTrainer):
         self,
         model: FrankenPotential,
         dataloader: torch.utils.data.DataLoader,
-    ):
+    ) -> tuple[dict[TargetType, Tensor], dict[TargetType, Tensor]]:
         tot_dset_size = len(dataloader.dataset)  # type: ignore
         n_rf = model.rf.total_random_features
 
-        covs = {
+        covs: dict[TargetType, Tensor] = {
             t: torch.zeros((n_rf, n_rf), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-        coeffs = {
+        coeffs: dict[TargetType, Tensor] = {
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-        self.fmaps: dict[TargetType, list[Tensor]] = {
-            t: [] for t in self.training_targets
-        }
+        self.fmaps: dict[TargetType, list[Tensor]] = (
+            {t: [] for t in self.training_targets} if self.save_fmaps else {}
+        )
 
         progress_bar = throughput(
             dataloader,
@@ -396,6 +399,13 @@ class RandomFeaturesTrainer(BaseTrainer):
         for tgt_name in self.training_targets:
             dist_utils.all_sum(covs[tgt_name])
             dist_utils.all_sum(coeffs[tgt_name])
+        return covs, coeffs
+
+    @no_jit()
+    @torch.no_grad()
+    def _normalize_covs(
+        self, covs: dict[TargetType, Tensor], coeffs: dict[TargetType, Tensor]
+    ) -> tuple[dict[TargetType, Tensor], dict[TargetType, Tensor]]:
         # RF normalization
         if self.random_features_normalization == "leading_eig":
             for tgt_name in self.training_targets:

@@ -60,6 +60,11 @@ def mocked_gnn(device, dtype, feature_dim: int = 32, backbone_id: str = "test"):
     def mock_descriptors(data):
         return torch.sin(data.atom_pos) @ fake_gnn_weight
 
+    def forward(self, data):
+        return mock_descriptors(data)
+    
+    gnn.to = MagicMock(return_value=gnn)
+    gnn.__class__.__call__ = forward
     gnn.descriptors = mock_descriptors
 
     def load_checkpoint_patch(*args, **kwargs):

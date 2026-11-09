@@ -8,6 +8,7 @@ from typing import Any, Sequence, cast, get_args
 
 from franken.config import (
     AutotuneConfig,
+    LESConfig,
     MaceBackboneConfig,
     PETBackboneConfig,
     GaussianRFConfig,
@@ -110,6 +111,18 @@ def parse_none_type(f: Any):
     raise TypeError(f)
 
 
+def parse_int_tuple(value: str) -> tuple[int, ...]:
+    try:
+        parsed = ast.literal_eval(value)
+    except (ValueError, SyntaxError) as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected an integer tuple, e.g. '(32, 16)'"
+        ) from exc
+    if not isinstance(parsed, tuple) or any(type(v) is not int for v in parsed):
+        raise argparse.ArgumentTypeError("Expected an integer tuple, e.g. '(32, 16)'")
+    return parsed
+
+
 def parse_literal(t: Any):
     all_allowed_literals = typing.get_args(t)
 
@@ -183,6 +196,8 @@ class Argument:
             type_origin = typing.get_origin(named_field.type)
             if named_field.type in {int, float, str}:
                 arg_kwargs["type"] = named_field.type
+            elif named_field.type == tuple[int, ...]:
+                arg_kwargs["type"] = parse_int_tuple
             elif type_origin == typing.Literal:
                 arg_kwargs["choices"] = typing.get_args(named_field.type)
             elif field_is_optional_literal(named_field.type):
@@ -191,6 +206,8 @@ class Argument:
                 ]
                 arg_kwargs["type"] = parse_optional_literal
             elif named_field.type is bool:
+                # Boolean actions do not parse string defaults through a type.
+                arg_kwargs["default"] = named_field.default
                 if named_field.default is False:
                     arg_kwargs["action"] = "store_true"
                 elif named_field.default is True:
@@ -475,11 +492,109 @@ def get_arg_groups():
         ],
         help_text="Choose the random-feature approximation.",
     )
+    les_group = MutuallyExclusiveArgumentGroup(
+        "les",
+        "LES options",
+        desc="Configure the Latent Ewald Summation model",
+        data_class=LESConfig,
+        arguments=[
+            Argument.from_dataclass(LESConfig, "n_layers", "n-layers"),
+            Argument.from_dataclass(LESConfig, "hidden_dim", "hidden-dim"),
+            Argument.from_dataclass(LESConfig, "dl", "dl"),
+            Argument.from_dataclass(LESConfig, "sigma", "sigma"),
+            Argument.from_dataclass(LESConfig, "les_output_scale", "les-output-scale"),
+            Argument.from_dataclass(
+                LESConfig,
+                "add_linear_nn",
+                "add-linear-nn",
+                opposite_full_name="no-linear-nn",
+            ),
+            Argument.from_dataclass(LESConfig, "N_max", "n-max"),
+            Argument.from_dataclass(LESConfig, "optimizer", "optimizer"),
+            Argument.from_dataclass(
+                LESConfig,
+                "num_cycles",
+                "num-cycles",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "adam_epochs_per_cycle",
+                "adam-epochs-per-cycle",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "adam_learning_rate",
+                "adam-learning-rate",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "adam_batch_size",
+                "adam-batch-size",
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lr_decay",
+                "lr-decay",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_max_iter",
+                "lbfgs-max-iter",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_max_eval",
+                "lbfgs-max-eval",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_learning_rate",
+                "lbfgs-learning-rate",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_history_size",
+                "lbfgs-history-size",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_tolerance_grad",
+                "lbfgs-tolerance-grad",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(
+                LESConfig,
+                "lbfgs_tolerance_change",
+                "lbfgs-tolerance-change",
+                metavar="HYPERPARAMETER",
+                type=HPSearchConfig.from_str,
+            ),
+            Argument.from_dataclass(LESConfig, "mode", "mode"),
+        ],
+    )
     return {
         "solver": solver_arg_group,
         "dataset": dset_arg_group,
         "backbone": bbone_groups,
         "rfs": rf_groups,
+        "les": les_group,
     }
 
 
@@ -567,6 +682,11 @@ def build_parser(return_groups: bool = False):
             "the requested train targets are computed."
         ),
     )
+    parser.add_argument(
+        "--les",
+        action="store_true",
+        help="Train a model with Latent Ewald Summation (LES) contributions.",
+    )
 
     arg_groups = get_arg_groups()
     for g in arg_groups.values():
@@ -595,12 +715,16 @@ def parse_cli(argv):
     rf_config = groups["rfs"].to_dataclass(args)
     solver_config = groups["solver"].to_dataclass(args)
     dset_config = groups["dataset"].to_dataclass(args)
+    les_config = None
+    if args.les:
+        les_config = groups["les"].to_dataclass(args)
 
     # Initialize autotune config
     autotune_cfg = AutotuneConfig(
         dataset=dset_config,
         solver=solver_config,
         backbone=bbone_config,
+        les=les_config,
         rfs=rf_config,
         rf_normalization=args.rf_norm,
         save_every_model=args.save_every_model,
