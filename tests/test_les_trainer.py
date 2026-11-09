@@ -2,7 +2,6 @@
 
 import json
 import math
-from operator import call
 from pathlib import Path
 import tempfile
 import time
