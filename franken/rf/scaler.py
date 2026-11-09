@@ -156,7 +156,6 @@ class FeatureScaler(torch.nn.Module):
             statistics (Statistics): Instance of :class:`franken.rf.scaler.Statistics`
                 from which the feature mean and standard deviation can be fetched.
         """
-        print(f"{self.input_dim=} {statistics.input_dim=}")
         assert self.input_dim == statistics.input_dim
         assert self.input_dim is not None
 
@@ -236,7 +235,6 @@ def compute_dataset_statistics(
     )
     # Iterate over dataset and update stats
     for data, _ in dataset:  # type: ignore
-        print("ITERATING!")
         data = data.to(device=device)
         gnn_features = gnn.descriptors(data)
         gnn_features_stats.update(gnn_features, atomic_numbers=data.atomic_numbers)

@@ -392,7 +392,7 @@ class FrankenPotential(torch.nn.Module):
         else:
             _, energy_fm = self._feature_map_aux(data.atom_pos, None, data)
             out = cast(dict[TargetType, torch.Tensor], energy_fm)
-        # Fix shapes
+        # Fix shapes. F: number features, S: number atoms
         if franken.data.base.ENERGY_TARGET_KEY in out:
             # Sys, F -> F, Sys
             out[franken.data.base.ENERGY_TARGET_KEY] = out[

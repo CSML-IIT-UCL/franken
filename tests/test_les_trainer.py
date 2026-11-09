@@ -1,9 +1,12 @@
 """Small optimizer tests, independent of downloaded backbone checkpoints."""
 
 import json
+import math
+from operator import call
 from pathlib import Path
 import tempfile
-from unittest.mock import Mock, patch
+import time
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 import torch
@@ -24,23 +27,49 @@ from tests.utils import mocked_gnn
 HPS = {"energy_weight": 1.0, "forces_weight": 0.0, "l2_penalty": 1e-6}
 
 
+def init_mock_model(lescfg, efmaps, device, dtype, feature_dim=32):
+    # We need the following from the potential model
+    # - model.rf.total_random_features
+    # - model.grad_feature_map(data)
+    with mocked_gnn(device=device, dtype=dtype, feature_dim=feature_dim):
+        underlying = LESFrankenPotential(
+            les_config=lescfg, 
+            gnn_config=MaceBackboneConfig("invalid"),  # pyright: ignore[reportArgumentType]
+            rf_config=GaussianRFConfig(num_random_features=64, length_scale=1.0),
+            scale_by_Z=False
+        ).to(device=device, dtype=dtype)
+        model = Mock(wraps=underlying)
+        model.rf = MagicMock(spec=underlying.rf)
+        model.rf.weights.shape = underlying.rf.weights.shape
+        model.hyperparameters = underlying.hyperparameters
+        model.training = underlying.training
+        if efmaps is not None:
+            # will iterate through efmap_vals at every call
+            model.grad_feature_map = MagicMock(side_effect=efmaps)
+            model.rf.total_random_features = efmaps[0][FORCES_TARGET_KEY].shape[0]
+        else:
+            model.rf.total_random_features = underlying.rf.total_random_features
+        return model
+
+    
 def make_trainer(
     cfg: LESConfig,
     device="cpu",
     targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
     dtype=torch.float32,
-    save_fmaps=False,
+    save_fmaps=True,
     dataset=None,
-    n=5
+    n=5,
+    log_dir=None,
 ):
     if dataset is None:
         dataset = [(
                 Configuration(
-                    torch.tensor([[float(i), 0, 0]], dtype=torch.float64),
+                    torch.tensor([[float(i), float(i) + math.sin(float(i)), math.cos(i)]], dtype=torch.float64),
                     torch.tensor([1]),
                     torch.tensor([1]),
                 ),
-                Target(torch.tensor([2.0 * i], dtype=torch.float64), torch.ones(1, 3)),
+                Target(torch.tensor([2.0 * i], dtype=torch.float64), torch.ones(1, 3) * i),
             )
             for i in range(1, n + 1)
         ]
@@ -48,7 +77,8 @@ def make_trainer(
     trainer = RandomFeaturesEwaldsTrainer(
         train_dataloader=dloader,
         training_targets=targets,
-        l2_penalty=1e-1,
+        log_dir=log_dir,
+        l2_penalty=1e-5,
         target_weight={ENERGY_TARGET_KEY: 1.0, FORCES_TARGET_KEY: 1.0},
         optimizer=cfg.optimizer,
         num_cycles=cfg.num_cycles, # type: ignore
@@ -69,13 +99,12 @@ def make_trainer(
         dtype=dtype,
         device=device,
     )
-    # trainer._print_eval = Mock()
     return trainer
+    # return Mock(wraps=trainer)
 
 
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 def test_varproj_maxiter(gnn_cfg):
-    """Test for checking save and load methods of FrankenPotential"""
     rf_cfg = GaussianRFConfig(num_random_features=32, length_scale=1.0)
     data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
     dataset = FrankenAtomsDataset(
@@ -121,15 +150,66 @@ def test_varproj_maxiter(gnn_cfg):
     assert not torch.all(torch.isclose(w1, w3))
 
 
+def test_no_save_fmaps():
+    num_sys = 2
+    lescfg = LESConfig(optimizer="lbfgs", mode="variable_projection", num_cycles=3, lbfgs_max_eval=1)
+    with pytest.warns(UserWarning, match="save_fmaps is False. This requires many extra passes"):
+        trainer = make_trainer(lescfg, save_fmaps=False, n=num_sys)
+    model = init_mock_model(lescfg, efmaps=None, device="cpu", dtype=torch.float64)
+    call_count = 0
+    def wait(out, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return out
+    with (
+        patch("franken.trainers.rf_les.torch.cholesky_solve", new=wait),
+        patch("franken.trainers.rf_les.torch.linalg.cholesky", new=lambda x, *args, **kwargs: x),
+    ):
+        trainer.fit(model)
+    # one at start, one in each les solve
+    expected_call_count = 1 + lescfg.num_cycles
+    assert call_count == expected_call_count
+    # the first one + for each cycle one in the closure, one outside
+    assert model.grad_feature_map.call_count == num_sys + num_sys * lescfg.num_cycles * 2
+
+
+@pytest.mark.parametrize("num_cycles", [1, 2])
+def test_time_logs(num_cycles):
+    num_sys = 2
+    lescfg = LESConfig(optimizer="lbfgs", mode="variable_projection", num_cycles=num_cycles, lbfgs_max_eval=1)
+    trainer = make_trainer(
+        lescfg, save_fmaps=True, n=num_sys
+    )
+    model = init_mock_model(lescfg, efmaps=None, device="cpu", dtype=torch.float64)
+    call_count = 0
+    def wait(out, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        time.sleep(0.5)
+        return out
+    with (
+        patch("franken.trainers.rf_les.torch.cholesky_solve", new=wait),
+        patch("franken.trainers.rf_les.torch.linalg.cholesky", new=lambda x, *args, **kwargs: x),
+    ):
+        logc, weights = trainer.fit(model)
+    expected_call_count = 1 + num_cycles  # one at start, one in each les solve
+    assert call_count == expected_call_count
+    times = logc.logs[0].timings
+    for t in times:
+        if t.name == "rff_solve":
+            assert t.value > expected_call_count * 0.5
+    # only called at the beginning.
+    assert model.grad_feature_map.call_count == num_sys
+
+
 class TestLESTrainingHistory():
     def make_trainer(self, log_dir):
-        trainer = make_trainer(LESConfig())
-        trainer.log_dir = log_dir
+        trainer = make_trainer(LESConfig(), log_dir=log_dir, save_fmaps=True)
         trainer.training_history = []
         trainer.train_dataloader = Mock(name="train_loader")
         trainer.val_dataloader = Mock(name="validation_loader")
         trainer.create_log_entry = Mock(
-            side_effect=lambda *args: LogEntry("model123", 0, 0, 0)
+            side_effect=lambda *args: LogEntry("model123", 0)
         )
         trainer.eval_summary = Mock(return_value="evaluation")
 
@@ -148,8 +228,8 @@ class TestLESTrainingHistory():
 
     def test_saving(self):
         with tempfile.TemporaryDirectory() as tmp:
+            model = init_mock_model(LESConfig(), efmaps=None, device="cpu", dtype=torch.float64)
             trainer = self.make_trainer(Path(tmp) / "run")
-            model = Mock()
             path = Path(tmp) / "run" / "training_history.json"
             trainer._print_eval(model, 0, step="rff")
             first = json.loads(path.read_text())
@@ -253,27 +333,6 @@ def test_serialize_best_model(log_collection):
             assert (temp_dir / "best_training_history.json").exists()
             with open(temp_dir / "best_training_history.json", "r") as fh:
                 assert fh.readline() == '"test"'
-
-
-class ToyModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.les = torch.nn.Linear(1, 1, bias=False).double()
-        self.gnn = torch.nn.Linear(1, 1, bias=False).double()
-        self.rf = torch.nn.Module()
-        self.rf.weights = torch.nn.Parameter(torch.zeros(1, 1, dtype=torch.float64))
-        with torch.no_grad():
-            self.les.weight.zero_()
-            self.gnn.weight.fill_(1)
-        self.requested = []
-
-    def predict(self, targets, data, **kwargs):
-        self.requested.append(targets)
-        energy = self.les(self.gnn(data.atom_pos[:, :1])).sum() + self.rf.weights.sum()
-        result = {"energy": energy.reshape(1, 1)}
-        if "forces" in targets:
-            result["forces"] = self.les.weight.expand(1, 3)
-        return result
 
 
 @pytest.mark.parametrize("save_fmaps", [False, True])
