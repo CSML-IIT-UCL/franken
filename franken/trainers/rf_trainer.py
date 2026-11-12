@@ -3,7 +3,7 @@ import logging
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Literal, Mapping
+from typing import Literal, Mapping, cast
 
 import numpy as np
 import torch
@@ -12,7 +12,7 @@ from torch import Tensor
 
 from franken.metrics.base import BaseMetric
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType, is_scalar_target
+from franken.data.base import Configuration, Target, PropertyType, is_scalar_property
 from franken.rf.model import FrankenPotential
 from franken.trainers import BaseTrainer
 from franken.trainers.log_utils import (
@@ -34,16 +34,16 @@ class RandomFeaturesTrainer(BaseTrainer):
     Args:
         train_dataloader (torch.utils.data.DataLoader):
             Dataloader which iterates over the training set.
-        training_targets (list[TargetType]):
+        training_targets (list[PropertyType]):
             The target properties to use for training. For example :code:`["energy", "forces"]`.
         l2_penalty (float or list[float]):
             Regularization parameter for the kernel ridge problem. If multiple parameters
             are specified, a separate model will be solved for each. This allows to
             perform a grid-search for the best parameter.
-        target_weight (dict[TargetType, float | list[float]]):
-            Specify the relative weights of different target-types. Default value for
-            targets without a specified weight is 1.0. Weights are all normalized to sum to
-            one. As with ``l2_penalty``, specify a list of parameters to train a separate
+        target_weight (dict[PropertyType, float | list[float]]):
+            Specify the relative weights of different targets. Default value for targets
+            without a specified weight is 1.0. Weights are all normalized to sum to one.
+            As with ``l2_penalty``, specify a list of parameters to train a separate
             model for each. For example :code:`{"forces": [0.1, 0.5, 0.9]}`.
         random_features_normalization (Literal["leading_eig"] | None):
             How to normalize the covariance matrices formed by random-features. Defaults to "leading_eig".
@@ -77,9 +77,9 @@ class RandomFeaturesTrainer(BaseTrainer):
     def __init__(
         self,
         train_dataloader: torch.utils.data.DataLoader,
-        training_targets: list[TargetType],
+        training_targets: list[PropertyType],
         l2_penalty: float | list[float],
-        target_weight: Mapping[TargetType, float | list[float]],
+        target_weight: Mapping[PropertyType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -215,7 +215,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             metric_names = [
                 metric
                 for tt in self.training_targets
-                for metric in metric_registry.available_metrics_for_target(tt)
+                for metric in metric_registry.available_metrics_for_property(tt)
             ]
         else:
             metric_names = self.metrics
@@ -230,7 +230,7 @@ class RandomFeaturesTrainer(BaseTrainer):
         available = {
             metric
             for tt in self.training_targets
-            for metric in metric_registry.available_metrics_for_target(tt)
+            for metric in metric_registry.available_metrics_for_property(tt)
         }
         unsupported = [metric for metric in self.metrics if metric not in available]
         if unsupported:
@@ -285,12 +285,13 @@ class RandomFeaturesTrainer(BaseTrainer):
                 else:
                     forces_mode = "torch.func"  # FIXME: interaction between torch.func and franken_val is unclear!
                 predictions = model.predict(
-                    targets=self.training_targets,
+                    properties=cast(list[str], self.training_targets),
                     data=data,
                     weights=all_weights,
                     differential_mode=forces_mode,
                     add_energy_shift=(False if split == DataSplit.TRAIN else True),
                 )
+            predictions = cast(dict[PropertyType, Tensor], predictions)
             for tt, val in predictions.items():
                 if torch.any(torch.isnan(val)):
                     logger.warning(
@@ -356,7 +357,7 @@ class RandomFeaturesTrainer(BaseTrainer):
             t: torch.zeros((n_rf,), device=self.device, dtype=self.buffer_dt)
             for t in self.training_targets
         }
-        self.fmaps: dict[TargetType, list[Tensor]] = {
+        self.fmaps: dict[PropertyType, list[Tensor]] = {
             t: [] for t in self.training_targets
         }
 
@@ -384,7 +385,7 @@ class RandomFeaturesTrainer(BaseTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
-                if is_scalar_target(tgt_name):
+                if is_scalar_property(tgt_name):
                     covs[tgt_name].addmm_(fmap, fmap.T)
                     coeffs[tgt_name].add_(fmap.reshape(-1), alpha=tgt_per_atom.item())
                 else:
@@ -409,8 +410,8 @@ class RandomFeaturesTrainer(BaseTrainer):
     @torch.no_grad()
     def solve(
         self,
-        covs: dict[TargetType, Tensor],
-        coeffs: dict[TargetType, Tensor],
+        covs: dict[PropertyType, Tensor],
+        coeffs: dict[PropertyType, Tensor],
         l2_penalty: float = 1e-6,
         return_cho_factor: bool = False,
         **weights,
@@ -433,8 +434,8 @@ class RandomFeaturesTrainer(BaseTrainer):
 
 
 def process_tgt_weights(
-    tgt_weights: Mapping[TargetType, float | list[float]], tgts: list[TargetType]
-) -> dict[TargetType, list[float]]:
+    tgt_weights: Mapping[PropertyType, float | list[float]], tgts: list[PropertyType]
+) -> dict[PropertyType, list[float]]:
     """
     Make sure all weights in tgts are present (default value for
     non-provided weights is 1.0).
