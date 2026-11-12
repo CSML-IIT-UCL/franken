@@ -71,6 +71,7 @@ class AtomicEnergiesShift(torch.nn.Module):
         atomic_numbers: torch.Tensor,
         batch_ids: torch.Tensor | None = None,
         num_systems: int | None = None,
+        per_atom: bool = False,
     ) -> torch.Tensor:
         """
         Calculate the energy shift for a given set of atomic numbers.
@@ -78,9 +79,11 @@ class AtomicEnergiesShift(torch.nn.Module):
         Args:
             atomic_numbers: Atomic numbers for all atoms.
             batch_ids: Optional system index per atom. If provided, returns one
-                shift per system.
+                shift per system. Has no effect if ``per_atom == True``.
             num_systems: Optional number of systems. If omitted, inferred from
                 ``batch_ids``.
+            per_atom: Compute the shift without summing over all atoms. The output
+                will be a tensor of shape ``[n_atoms]`` (the same shape as ``atomic_numbers``).
 
         Returns:
             Scalar shift for single-system inputs, or a tensor of shape
@@ -89,6 +92,15 @@ class AtomicEnergiesShift(torch.nn.Module):
         # Also enforce double accumulation for scripted modules, whose generic
         # conversion methods do not call the Python _apply override.
         atomic_energies = self.atomic_energies.to(dtype=torch.float64)
+        if per_atom:
+            shift = torch.zeros(
+                len(atomic_numbers),
+                dtype=torch.float64,
+                device=self.atomic_energies.device,
+            )
+            for z, atom_ene in zip(self.z_keys, atomic_energies):
+                shift += (atomic_numbers == z) * atom_ene
+            return shift
         if batch_ids is None:
             shift = torch.tensor(
                 0.0,
