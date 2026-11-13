@@ -48,8 +48,14 @@ model = FrankenTorchSimModel(franken, device="cuda", dtype=torch.float32)
 
 For cuEquivariance inference with a MACE backbone, install the matching
 `cueq-cu12` or `cueq-cu13` extra alongside `torch-sim`, then select the backend
-when loading the Franken model:
+directly in the adapter, using either a checkpoint path or a loaded model:
 
+```python
+model = FrankenTorchSimModel(
+    "path/to/best_ckpt.pt", device="cuda", use_cueq=True
+)
+```
+or also:
 ```python
 franken = FrankenPotential.load(
     "path/to/best_ckpt.pt", map_location="cuda", use_cueq=True

@@ -110,6 +110,39 @@ def test_torchsim_model_interface_contract() -> None:
     )
 
 
+@pytest.mark.parametrize("use_cueq", [None, False, True])
+@pytest.mark.parametrize("from_checkpoint", [False, True])
+def test_torchsim_adapter_backend_selection(monkeypatch, use_cueq, from_checkpoint):
+    from unittest.mock import Mock
+
+    model = _build_mock_franken_model("mace")
+    select_backend = Mock()
+    monkeypatch.setattr(model, "enable_cueq", select_backend)
+    load = Mock(return_value=model)
+    monkeypatch.setattr(FrankenPotential, "load", load)
+
+    adapter = FrankenTorchSimModel(
+        "model.pt" if from_checkpoint else model,
+        device="cpu",
+        dtype=torch.float32,
+        rf_weight_id=2,
+        use_cueq=use_cueq,
+    )
+    assert adapter.model is model
+    if from_checkpoint:
+        load.assert_called_once_with(
+            "model.pt",
+            map_location=torch.device("cpu"),
+            rf_weight_id=2,
+            use_cueq=use_cueq,
+        )
+        select_backend.assert_not_called()
+    elif use_cueq is None:
+        select_backend.assert_not_called()
+    else:
+        select_backend.assert_called_once_with(use_cueq)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 def test_torchsim_adapter_cuda_batched_smoke() -> None:
     model = _build_mock_franken_model("mace", device="cuda")

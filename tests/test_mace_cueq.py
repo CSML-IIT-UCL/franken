@@ -137,7 +137,8 @@ def test_fitted_model_cueq_inference_and_reload(model_id, tmp_path):
     not torch.cuda.is_available(), reason="native cuEquivariance requires CUDA"
 )
 @pytest.mark.parametrize("periodic", [False, True])
-def test_torchsim_cueq_batched_inference(periodic):
+@pytest.mark.parametrize("from_checkpoint", [False, True])
+def test_torchsim_cueq_batched_inference(periodic, from_checkpoint, tmp_path):
     ts = pytest.importorskip("torch_sim")
     pytest.importorskip("cuequivariance_torch")
     if torch.cuda.get_device_capability() == (7, 0):
@@ -184,7 +185,13 @@ def test_torchsim_cueq_batched_inference(periodic):
                 atol=1e-4,
                 rtol=3e-4,
             )
-    classic.enable_cueq(True)
+    source = classic
+    if from_checkpoint:
+        source = tmp_path / "model.pt"
+        classic.save(source)
+    adapter = FrankenTorchSimModel(
+        source, device="cuda", compute_stress=periodic, use_cueq=True
+    )
     assert adapter.model.gnn.use_cueq
     for _ in range(2):
         actual = adapter(state)
