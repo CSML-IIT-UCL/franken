@@ -11,16 +11,15 @@ description = "Franken fine-tuning scheme for ML potentials"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE.*"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "torch >= 2.4.0",
+    "torch >= 2.5.0",
+    "mace-torch >= 0.3.17, < 0.4",
     "ase",
     "numpy",
     "tqdm",
-    "psutil",
     "scipy",
     "e3nn",
-    "omegaconf",
     "requests",
     "docstring_parser",
 ]
@@ -28,7 +27,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -57,10 +55,17 @@ develop = [
     "pytest",
     "packaging",
 ]
-mace = ["mace-torch >= 0.3.10"]
-pet = [
-    "metatomic-torch", 
-    "metatrain >= 2026.4",
+# Keep frontend, core and native ops on one MACE-supported release series.
+# CUDA wheels are opt-in because installers cannot inspect torch.version.cuda.
+cueq-cu12 = [
+    "mace-torch[cueq,cueq-cuda-12] >= 0.3.17, < 0.4",
+    "cuequivariance >= 0.10, < 0.11",
+    "cuequivariance-torch >= 0.10, < 0.11",
+]
+cueq-cu13 = [
+    "mace-torch[cueq,cueq-cuda-13] >= 0.3.17, < 0.4",
+    "cuequivariance >= 0.10, < 0.11",
+    "cuequivariance-torch >= 0.10, < 0.11",
 ]
 "torch-sim" = ["torch-sim-atomistic"]
 metatomic = [
@@ -68,7 +73,9 @@ metatomic = [
     "metatrain >= 2026.4",
 ]
 
-cuda = ["cupy"]
+# Require CuPy wheels with the ctk extra for CUDA component installation.
+cupy-cu12 = ["cupy-cuda12x[ctk] >= 14"]
+cupy-cu13 = ["cupy-cuda13x[ctk] >= 14"]
 docs = [
     "ipython",
     "Sphinx",
@@ -82,6 +89,7 @@ docs = [
     "sphinx-argparse",
     "myst-parser",
     "nbsphinx",
+    "sphinx-autobuild>=2025.8.25",
 ]
 
 [build-system]
@@ -116,6 +124,15 @@ exclude = [
     "franken/datasets/split_data.py",
     "franken/datasets/download_and_process_all.sh",
     "franken/datasets/readme",
+]
+
+[tool.uv]
+# Resolve each CUDA family separately; its runtime wheels cannot be mixed.
+conflicts = [
+    [{ extra = "cupy-cu12" }, { extra = "cupy-cu13" }],
+    [{ extra = "cupy-cu12" }, { extra = "cueq-cu13" }],
+    [{ extra = "cueq-cu12" }, { extra = "cupy-cu13" }],
+    [{ extra = "cueq-cu12" }, { extra = "cueq-cu13" }],
 ]
 
 [tool.black]

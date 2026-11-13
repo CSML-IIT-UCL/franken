@@ -25,3 +25,6 @@ stress = atoms.get_stress()
 
 For an end-to-end molecular dynamics workflow, see the
 {doc}`ASE molecular dynamics tutorial <../notebooks/molecular_dynamics>`.
+
+To accelerate MACE inference with native CUDA kernels and compare performance against e3nn, see the
+{doc}`Faster inference with cuEquivariance tutorial <../notebooks/cuequivariance_inference>`.

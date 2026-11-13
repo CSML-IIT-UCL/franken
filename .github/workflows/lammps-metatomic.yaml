@@ -65,7 +65,7 @@ jobs:
         run: |
           eval "$(${{ env.MAMBA_EXE }} shell hook -s bash)"
           micromamba activate ${{ env.ENV_NAME }}
-          python -m pip install .[pet]
+          python -m pip install .[metatomic]
 
       - name: Verify environment
         run: |

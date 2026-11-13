@@ -24,24 +24,42 @@ A full documentation including several examples is available: [https://franken.r
 
 ## Install
 
-To install the latest release of `franken`, you can simply do:
+Python 3.11 or newer is required. The default installation includes the MACE
+backbone, so it can run the training example below:
 
 ```bash
 pip install franken
 ```
 
-Several optional dependencies can be specified, to install packages required for certain operations:
- - `cuda` includes packages which speed up training on GPUs (note that `franken` will work on GPUs even without these dependencies thanks to pytorch).
- - `mace` installs the necessary dependencies to use a specific backbone.
- - `docs` and `develop` are only needed if you wish to build the documentation, or work on extending the library.
-
-They can be installed for example by running
+For a uv project:
 
 ```bash
-pip install franken[mace,cuda]
+uv add franken
 ```
 
-For more details read the [relevant documentation page](https://franken.readthedocs.io/topics/installation.html)
+MACE runs on CPUs and CUDA GPUs through PyTorch. Install a platform-specific
+PyTorch build first if you need a particular CUDA version; CuPy is optional.
+MACE is included in the default installation; no backbone extra is needed.
+
+Optional dependencies include:
+
+- `cueq-cu12` or `cueq-cu13` for cuEquivariance CUDA kernels matching your
+  PyTorch CUDA version. Enable inference with
+  `FrankenCalculator(..., use_cueq=True)`; training always uses e3nn.
+- `metatomic` for PET/UPET backbones through Metatomic/Metatrain.
+- `torch-sim` for the TorchSim inference interface.
+- `cupy-cu12` or `cupy-cu13` for CuPy acceleration of the low-memory solver,
+  matching your PyTorch CUDA family.
+- `docs` and `develop` for documentation and development tools.
+
+For example, with a CUDA 13 PyTorch build:
+
+```bash
+pip install "franken[cueq-cu13]"
+```
+
+See the [installation guide](https://franken.readthedocs.io/topics/intro_installation.html)
+for GPU setup, optional CuPy acceleration, and cuEquivariance requirements.
 
 ## Quickstart
 

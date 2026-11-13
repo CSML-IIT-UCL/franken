@@ -26,7 +26,8 @@ def test_model_atomic_feature_map_uses_scaled_descriptors(device, scale_by_Z):
         atomic_numbers=numbers,
         natoms=torch.tensor(4, device=device),
     )
-    statistics = Statistics(input_dim=4)
+    # Infer the statistics device from the first descriptors, as training does.
+    statistics = Statistics()
     statistics.update(model.gnn.descriptors(config).detach(), numbers)
     model.input_scaler.set_from_statistics(statistics)
     descriptors = model.input_scaler(
