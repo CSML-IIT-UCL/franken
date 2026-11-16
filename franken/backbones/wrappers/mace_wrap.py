@@ -231,24 +231,21 @@ class FrankenMACE(torch.nn.Module):
         edge_index = data.edge_index
         assert edge_index is not None
         edge_index = edge_index.T  # mace expects [2, n_edges]
-        batch_ids = data.batch_ids
+        vectors = data.edge_vectors
 
-        shifts = data.shifts
-        if shifts is None:
-            unit_shifts = data.unit_shifts
-            cell = data.cell
-            assert unit_shifts is not None
-            assert cell is not None
-            if cell.ndim == 2:
-                shifts = unit_shifts.to(cell.dtype) @ cell  # n_edges, 3
-            else:
-                assert batch_ids is not None
-                shifts = torch.einsum(
-                    "ni,nij->nj",
-                    unit_shifts.to(cell.dtype),
-                    cell[batch_ids[edge_index[0]]],
-                )
-        assert shifts is not None
+        if vectors is None:
+            # Standard MACE branch
+            shifts = data.compute_shifts()
+            # for stress calculation, data.atom_pos and shifts need to be
+            # differentiable wrt displacement/strain.
+            vectors, lengths = get_edge_vectors_and_lengths(
+                positions=data.atom_pos,
+                edge_index=edge_index,
+                shifts=shifts,
+            )
+        else:
+            # MLIAP branch
+            lengths = torch.linalg.vector_norm(vectors, dim=1, keepdim=True)
 
         # one-hot embed the atomic numbers in the frame
         node_attrs = atom_numbers_to_node_attrs(
@@ -258,13 +255,7 @@ class FrankenMACE(torch.nn.Module):
         )
         # Embeddings
         node_feats = self.node_embedding(node_attrs)  # type: ignore
-        # for stress calculation, data.atom_pos and shifts need to be
-        # differentiable wrt displacement/strain.
-        vectors, lengths = get_edge_vectors_and_lengths(
-            positions=data.atom_pos,
-            edge_index=edge_index,
-            shifts=shifts,
-        )
+
         edge_attrs = self.spherical_harmonics(vectors)  # type: ignore
         rad_emb = self.radial_embedding(
             lengths, node_attrs, edge_index, self.atomic_numbers
@@ -279,18 +270,27 @@ class FrankenMACE(torch.nn.Module):
             edge_feats, cutoff = rad_emb
 
         # lammps_class, lammps_natoms are only set when using LAMMPS MLIAP
-        # the defaults are used otherwise and set here
-        lammps_class = None
-        lammps_natoms = (0, 0)
+        # the defaults are used otherwise
+        lammps_class: torch.Tensor | None = None
+        lammps_natoms: tuple[int, int] = (0, 0)
+        mliap_data = data.lammps_mliap_data
+        is_lammps = False
+        if mliap_data is not None:
+            lammps_class = mliap_data.class_data
+            lammps_natoms = (mliap_data.natoms, mliap_data.nghosts)
+            is_lammps = True
 
         node_feats_list = []
         for i, (interaction, product) in enumerate(
             zip(self.interactions, self.products)
         ):
+            node_attrs_slice = node_attrs
+            if is_lammps and i > 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
             sc: None | torch.Tensor = None
             if self.is_mace_v3_14:
                 node_feats, sc = interaction(
-                    node_attrs=node_attrs,
+                    node_attrs=node_attrs_slice,
                     node_feats=node_feats,
                     edge_attrs=edge_attrs,
                     edge_feats=edge_feats,
@@ -302,7 +302,7 @@ class FrankenMACE(torch.nn.Module):
                 )  # type: ignore
             elif self.is_mace_v3_13:
                 node_feats, sc = interaction(
-                    node_attrs=node_attrs,
+                    node_attrs=node_attrs_slice,
                     node_feats=node_feats,
                     edge_attrs=edge_attrs,
                     edge_feats=edge_feats,
@@ -313,15 +313,16 @@ class FrankenMACE(torch.nn.Module):
                 )  # type: ignore
             else:
                 node_feats, sc = interaction(
-                    node_attrs=node_attrs,
+                    node_attrs=node_attrs_slice,
                     node_feats=node_feats,
                     edge_attrs=edge_attrs,
                     edge_feats=edge_feats,
                     edge_index=edge_index,
                 )  # type: ignore
-
+            if is_lammps and i == 0:
+                node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
             node_feats = product(
-                node_feats=node_feats, sc=sc, node_attrs=node_attrs
+                node_feats=node_feats, sc=sc, node_attrs=node_attrs_slice
             )  # type: ignore
             # Extract only scalars. Use `irreps_out` attribute to figure out which features correspond to scalars.
             # irreps_out is an `Irreps` object: a 2-tuple of multiplier and `Irrep` objects.
