@@ -106,7 +106,13 @@ class FrankenCalculator(Calculator):
             gnn_config=gnn_config,
         )
         # Retrieve supported properties
-        self.implemented_properties = self.franken.implemented_properties
+        # TorchScript does not expose this Python property as a list.
+        # Scripted models support physical predictions, but not GP uncertainty.
+        self.implemented_properties = (
+            ["energy", "forces", "stress"]
+            if isinstance(self.franken, torch.jit.ScriptModule)
+            else self.franken.implemented_properties
+        )
 
         self.device = (
             device if device is not None else next(self.franken.parameters()).device

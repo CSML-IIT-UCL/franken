@@ -199,6 +199,7 @@ def test_calculator_jitscript(device, gnn_cfg):
     calculator = FrankenCalculator(
         jit_model, device=device, forces_mode="torch.autograd", gnn_config=gnn_cfg
     )
+    assert calculator.implemented_properties == ["energy", "forces", "stress"]
     md = init_langevin_md(calculator)
     md.run(2)
     jit_energy = md.atoms.get_total_energy()
