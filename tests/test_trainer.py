@@ -65,7 +65,7 @@ def gen_data(num_configs, num_atoms, dtype, split="train", gen_stress=True):
 def init_mock_model(efmaps, device, dtype):
     # We need the following from the potential model
     # - model.rf.total_random_features
-    # - model.grad_feature_map(data)
+    # - model.feature_maps(data)
     with mocked_gnn(device=device, dtype=dtype, feature_dim=32):
         underlying = FrankenPotential(
             gnn_config="test",  # pyright: ignore[reportArgumentType]
@@ -75,7 +75,7 @@ def init_mock_model(efmaps, device, dtype):
         model.rf = Mock(wraps=underlying.rf)
         if efmaps is not None:
             # will iterate through efmap_vals at every call
-            model.grad_feature_map = MagicMock(side_effect=efmaps)
+            model.feature_maps = MagicMock(side_effect=efmaps)
             model.rf.total_random_features = efmaps[0][FORCES_KEY].shape[0]
         else:
             model.rf.total_random_features = underlying.rf.total_random_features
@@ -154,7 +154,7 @@ class TestLowMemTrainer:
         torch.testing.assert_close(coeffs[ENERGY_KEY], exp_e_coef)
         torch.testing.assert_close(coeffs[FORCES_KEY], exp_f_coef)
         # Check behavior
-        assert model.grad_feature_map.call_count == self.num_configs
+        assert model.feature_maps.call_count == self.num_configs
 
     def test_covs_and_coeffs_stress(self, device):
         ttype = [STRESS_KEY, FORCES_KEY]
@@ -180,7 +180,7 @@ class TestLowMemTrainer:
         torch.testing.assert_close(coeffs[STRESS_KEY], exp_s_coef)
         torch.testing.assert_close(coeffs[FORCES_KEY], exp_f_coef)
         # Check behavior
-        assert model.grad_feature_map.call_count == self.num_configs
+        assert model.feature_maps.call_count == self.num_configs
 
     def test_solve(self, device):
         # Start by computing covs and coeffs
@@ -280,7 +280,7 @@ class TestTrainer:
             torch.testing.assert_close(covs[tgt], exp_covs[tgt])
             torch.testing.assert_close(coeffs[tgt], exp_coeffs[tgt])
         # Check behavior
-        assert model.grad_feature_map.call_count == self.num_configs
+        assert model.feature_maps.call_count == self.num_configs
 
     def test_solve(self, device):
         # Start by computing covs and coeffs
