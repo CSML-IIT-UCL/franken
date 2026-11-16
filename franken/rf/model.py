@@ -108,6 +108,7 @@ class FrankenPotential(torch.nn.Module):
             franken.data.base.FORCES_KEY,
             franken.data.base.STRESS_KEY,
             franken.data.base.PER_ATOM_ENERGY_KEY,
+            franken.data.base.EDGE_FORCES_KEY,
         ]
 
     def _check_properties(self, requested: list[str]) -> None:
@@ -392,13 +393,14 @@ class FrankenPotential(torch.nn.Module):
         data.edge_vectors = vectors
 
         gnn_descriptors = self.gnn.descriptors(data)
+        atomic_numbers, batch_ids = self._fix_lammps_ghosts(data)
         normalized_descriptors = self.input_scaler(
             gnn_descriptors,
-            atomic_numbers=data.atomic_numbers,
+            atomic_numbers=atomic_numbers,
         )
         random_features = self.rf.feature_map(
             normalized_descriptors,
-            batch_ids=data.batch_ids,
+            batch_ids=batch_ids,
         )
         data.atom_pos = old_atom_pos
         data.edge_vectors = old_vectors
@@ -510,6 +512,7 @@ class FrankenPotential(torch.nn.Module):
         if per_atom:
             assert peratom_energy_fmap is not None
             # num_weights(M), tot_num_atoms(A)
+            peratom_energy_fmap = peratom_energy_fmap.to(dtype=weights.dtype)  # [N, F]
             per_atom_energy = torch.matmul(peratom_energy_fmap, weights.T).T
             return energies.sum(1), [energies, per_atom_energy]
         return energies.sum(1), [energies]
@@ -582,6 +585,18 @@ class FrankenPotential(torch.nn.Module):
             assert isinstance(jac_chunk_size, int)
             return jac_chunk_size
 
+    def _fix_lammps_ghosts(self, data: Configuration):
+        lammps_mliap_data = data.lammps_mliap_data
+        atomic_numbers = data.atomic_numbers
+        batch_ids = data.batch_ids
+        if lammps_mliap_data is not None:
+            # deal with ghosts
+            nlocal = lammps_mliap_data.natoms
+            atomic_numbers = atomic_numbers[:nlocal]
+            if batch_ids is not None:
+                batch_ids = batch_ids[:nlocal]
+        return atomic_numbers, batch_ids
+
     def predict(
         self,
         properties: list[str],
@@ -630,20 +645,21 @@ class FrankenPotential(torch.nn.Module):
         natoms = torch.atleast_1d(data.natoms)
         out = self._predict_efs(weights, data, properties, differential_mode)
 
+        atomic_numbers, batch_ids = self._fix_lammps_ghosts(data)
         if add_energy_shift and franken.data.base.ENERGY_KEY in properties:
             out[franken.data.base.ENERGY_KEY] = out[franken.data.base.ENERGY_KEY].to(
                 dtype=torch.float64
             ) + self.energy_shift(
-                data.atomic_numbers,
-                batch_ids=data.batch_ids,
+                atomic_numbers,
+                batch_ids=batch_ids,
                 num_systems=int(natoms.numel()),
             )
         if add_energy_shift and franken.data.base.PER_ATOM_ENERGY_KEY in properties:
             out[franken.data.base.PER_ATOM_ENERGY_KEY] = out[
                 franken.data.base.PER_ATOM_ENERGY_KEY
             ].to(dtype=torch.float64) + self.energy_shift(
-                data.atomic_numbers,
-                batch_ids=data.batch_ids,
+                atomic_numbers,
+                batch_ids=batch_ids,
                 num_systems=int(natoms.numel()),
                 per_atom=True,
             )

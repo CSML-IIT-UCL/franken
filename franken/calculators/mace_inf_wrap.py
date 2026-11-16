@@ -141,6 +141,38 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
         self.rcutfac = 0.5 * float(model.gnn.r_max)
         self.element_types = [chemical_symbols[s] for s in model.gnn.atomic_numbers]
 
+    def _check_ghost_exchange_support(self, data):
+        """Fail early when the build cannot exchange ghost node features.
+
+        Every interaction layer past the first needs the node features of the
+        ghost atoms, which only LAMMPS can fill in. The call that does it,
+        ``forward_exchange``, exists solely in the KOKKOS coupling
+        (``src/KOKKOS/mliap_unified_couple_kokkos.pyx``); the plain ML-IAP
+        ``MLIAPDataPy`` has no such method, so a stock non-KOKKOS build used
+        to reach the second layer and die there on a bare ``AttributeError``
+        with nothing pointing at the build.
+        """
+        num_interactions = int(self.model.gnn.num_interactions)
+        if num_interactions <= 1 or hasattr(data, "forward_exchange"):
+            return
+        raise RuntimeError(
+            f"This MACE model has {num_interactions} interaction layers, so it "
+            f"needs LAMMPS to exchange ghost-atom features between layers, but "
+            f"{type(data).__module__}.{type(data).__name__} provides no "
+            f"forward_exchange(). That call only exists in LAMMPS's KOKKOS "
+            f"ML-IAP coupling: rebuild LAMMPS with -D PKG_KOKKOS=yes and run "
+            f"it with '-k on -sf kk', or export a single-layer model."
+        )
+
+    @staticmethod
+    def _get_env_bool(var_name: str, default: bool) -> bool:
+        return os.environ.get(var_name, str(default)).lower() in (
+            "true",
+            "1",
+            "t",
+            "yes",
+        )
+
     def _initialize_device(self, data):
         using_kokkos = "kokkos" in data.__class__.__module__.lower()
         if using_kokkos and not self.force_cpu:
@@ -166,6 +198,7 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
 
         if not self.initialized:
             self._initialize_device(data)
+            self._check_ghost_exchange_support(data)
 
         self.step += 1
         if natoms == 0 or npairs <= 1:
@@ -173,11 +206,11 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
         franken_data = self._prepare_batch(data, natoms, nghosts, species)
 
         frk_out = self.model(
-            franken_data,
-            targets=[
+            properties=[
                 franken.data.base.EDGE_FORCES_KEY,
                 franken.data.base.PER_ATOM_ENERGY_KEY,
             ],
+            data=franken_data,
         )
 
         if self.device.type != "cpu":
@@ -193,8 +226,13 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
     def _prepare_batch(self, data, natoms, nghosts, species):
         """Prepare the input batch for the FrankenPotential model."""
         # NOTE: atom_pos is unused here, but we can't set it to None.
+        # a bit messy due to the presence of local atoms and ghost atoms.
+        # the local atoms come first, then the ghosts. The species for ghost
+        # atoms are set to 0.
         return Configuration(
-            atom_pos=torch.zeros(natoms, 3, dtype=self.dtype, device=self.device),
+            atom_pos=torch.zeros(
+                natoms + nghosts, 3, dtype=self.dtype, device=self.device
+            ),
             atomic_numbers=species.to(self.device),
             natoms=torch.as_tensor(natoms, dtype=torch.int32, device=self.device).view(
                 1
@@ -206,7 +244,9 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
                 ],
                 dim=1,
             ),
-            batch_ids=torch.zeros(natoms, dtype=torch.int64, device=self.device),
+            batch_ids=torch.zeros(
+                natoms + nghosts, dtype=torch.int64, device=self.device
+            ),
             edge_vectors=torch.as_tensor(
                 data.rij, dtype=self.dtype, device=self.device
             ),
@@ -217,8 +257,7 @@ class LAMMPSMLIAPInferenceWrapper(MLIAPUnified):
 
     def _update_lammps_data(self, data, atom_energies, pair_forces, natoms):
         """Update LAMMPS data structures with computed energies and forces."""
-        if self.dtype == torch.float32:
-            pair_forces = pair_forces.double()
+        pair_forces = pair_forces.contiguous().double()
         eatoms = torch.as_tensor(data.eatoms)
         atom_energies_real = atom_energies[:natoms].detach()
         eatoms.copy_(atom_energies_real)
@@ -274,6 +313,8 @@ def init_wrapper(
     if mliap:
         # TODO: MACE automatically converts model to cuEquivariance here. We could
         # also do it (conditionally on model type?)
+        # TODO: Silence this warning?
+        # /Users/giacomo/mamba/envs/torch/lib/python3.13/site-packages/lammps/mliap/__init__.py:30: UserWarning: This interpreter is not compatible with python-based MLIAP for LAMMPS. Attempting to activate the MLIAP-python coupling from python may result in undefined behavior.
         lammps_model = LAMMPSMLIAPInferenceWrapper(franken_model)
         save_path = f"{os.path.splitext(model_path)[0]}-mliap_lammps.pt"
         torch.save(lammps_model, save_path)
