@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any, ClassVar, Literal, Optional, Sequence, Union
 
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, TargetType
+from franken.data.base import ENERGY_KEY, FORCES_KEY, PropertyType
 
 logger = logging.getLogger("franken")
 
@@ -394,7 +394,10 @@ class AutotuneConfig:
     If provided, these energies will be subtracted from the prediction during training.
     Format: {atomic_number: energy_value, ...}. Example: {1: -0.5, 8: -75.3}"""
 
-    train_targets: list[TargetType] = field(
-        default_factory=lambda: [ENERGY_TARGET_KEY, FORCES_TARGET_KEY]
+    train_targets: list[PropertyType] = field(
+        default_factory=lambda: [ENERGY_KEY, FORCES_KEY]
     )
     """Which data labels to train Franken with."""
+
+    save_cholesky_factor: bool = True
+    """Whether to save the best model's packed Cholesky factor in its checkpoint."""

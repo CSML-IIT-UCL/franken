@@ -212,29 +212,45 @@ class Configuration:
         return str(self)
 
 
-# NOTE: TargetType should be an enum, but instances of
+# NOTE: PropertyType should be an enum, but instances of
 #       dict[Enum, Any] do not work with torch jit. We
 #       use aliases of strings such that when scripting
 #       str can be used.
-TargetType = Literal["energy", "forces", "stress"]
-"""TargetType describes the range of possible targets for :class:`franken.rf.model.FrankenPotential`"""
-ENERGY_TARGET_KEY: TargetType = "energy"
-FORCES_TARGET_KEY: TargetType = "forces"
-STRESS_TARGET_KEY: TargetType = "stress"
+PropertyType = Literal[
+    "energy",
+    "forces",
+    "stress",
+    "per_atom_energy",
+    "energy_gp_uncertainty",
+    "per_atom_energy_gp_uncertainty",
+    "forces_gp_uncertainty",
+]
+"""PropertyType describes the range of possible properties for :class:`franken.rf.model.FrankenPotential`"""
+ENERGY_KEY: PropertyType = "energy"
+PER_ATOM_ENERGY_KEY: PropertyType = "per_atom_energy"
+FORCES_KEY: PropertyType = "forces"
+STRESS_KEY: PropertyType = "stress"
+ENERGY_GP_UNC_KEY: PropertyType = "energy_gp_uncertainty"
+PER_ATOM_ENERGY_GP_UNC_KEY: PropertyType = "per_atom_energy_gp_uncertainty"
+FORCES_GP_UNC_KEY: PropertyType = "forces_gp_uncertainty"
 
 
-def is_target_key(s: str):
-    return s in get_args(TargetType)
+def is_property(s: str):
+    return s in get_args(PropertyType)
 
 
-def all_target_keys() -> tuple[str]:
-    return get_args(TargetType)
+def all_properties() -> tuple[str]:
+    return get_args(PropertyType)
 
 
-def is_scalar_target(s: str):
-    if not is_target_key(s):
-        raise ValueError(f"{s} is not a valid target type")
-    return s == ENERGY_TARGET_KEY
+def all_targets() -> tuple[str, ...]:
+    return (ENERGY_KEY, FORCES_KEY, STRESS_KEY)
+
+
+def is_scalar_property(s: str):
+    if not is_property(s):
+        raise ValueError(f"'{s}' is not a valid property")
+    return s == ENERGY_KEY
 
 
 @dataclasses.dataclass
@@ -246,13 +262,11 @@ class Target:
     stress: Tensor | None = None
 
     def __getitem__(self, key) -> Tensor:
-        if not is_target_key(key):
-            raise KeyError(key)
-        elif key == ENERGY_TARGET_KEY:
+        if key == ENERGY_KEY:
             val = self.energy
-        elif key == FORCES_TARGET_KEY:
+        elif key == FORCES_KEY:
             val = self.forces
-        elif key == STRESS_TARGET_KEY:
+        elif key == STRESS_KEY:
             val = self.stress
         else:
             raise KeyError(key)
@@ -293,11 +307,11 @@ class Target:
         )
 
     @staticmethod
-    def from_types(tt_dict: dict[TargetType, Tensor]):
+    def from_types(tt_dict: dict[PropertyType, Tensor]):
         return Target(
-            energy=tt_dict.get(ENERGY_TARGET_KEY),
-            forces=tt_dict.get(FORCES_TARGET_KEY),
-            stress=tt_dict.get(STRESS_TARGET_KEY),
+            energy=tt_dict.get(ENERGY_KEY),
+            forces=tt_dict.get(FORCES_KEY),
+            stress=tt_dict.get(STRESS_KEY),
         )
 
     def iter_individual_systems(

@@ -14,7 +14,7 @@ from franken.trainers.rf_lowmem import LowMemRandomFeaturesTrainer, cupy
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 
 
-def time_solver(solver, cov, rhs, warmup, repeats, cho_factor):
+def time_solver(solver, cov, rhs, warmup, repeats, cholesky_factor):
     is_cuda = cov.device.type == "cuda"
     times = []
     for iteration in range(warmup + repeats):
@@ -23,7 +23,7 @@ def time_solver(solver, cov, rhs, warmup, repeats, cho_factor):
         if is_cuda:
             torch.cuda.synchronize(cov.device)
         start = perf_counter()
-        solution = solver(solve_cov, solve_rhs, 1e-3, return_cho_factor=cho_factor)
+        solution = solver(solve_cov, solve_rhs, 1e-3, return_cholesky_factor=cholesky_factor)
         if is_cuda:
             torch.cuda.synchronize(cov.device)
         elapsed = perf_counter() - start
@@ -43,7 +43,7 @@ def main():
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--dtype", choices=["float32", "float64"], default="float32")
-    parser.add_argument("--cho-factor", action="store_true")
+    parser.add_argument("--cholesky-factor", action="store_true")
     args = parser.parse_args()
     if not 0 <= args.min_power <= args.max_power <= 14:
         parser.error("powers must satisfy 0 <= min-power <= max-power <= 14")
@@ -90,11 +90,11 @@ def main():
             cov = (features @ features.T).div_(n)
             del features
             rhs = torch.randn(n, device=device, dtype=dtype, generator=generator)
-            naive_seconds = time_solver(naive, cov, rhs, args.warmup, args.repeats, args.cho_factor)
-            lowmem_seconds = time_solver(lowmem, cov, rhs, args.warmup, args.repeats, args.cho_factor)
+            naive_seconds = time_solver(naive, cov, rhs, args.warmup, args.repeats, args.cholesky_factor)
+            lowmem_seconds = time_solver(lowmem, cov, rhs, args.warmup, args.repeats, args.cholesky_factor)
             print(
                 f"{str(device):>6} "
-                f"{n:>8,} {str(args.cho_factor):>11} {naive_seconds * 1000:>12.3f} "
+                f"{n:>8,} {str(args.cholesky_factor):>11} {naive_seconds * 1000:>12.3f} "
                 f"{lowmem_seconds * 1000:>13.3f} "
                 f"{naive_seconds / lowmem_seconds:>12.2f}x",
                 flush=True,

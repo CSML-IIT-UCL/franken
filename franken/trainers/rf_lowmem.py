@@ -1,5 +1,4 @@
 import logging
-import warnings
 from pathlib import Path
 from typing import Literal, Mapping
 
@@ -9,24 +8,20 @@ from torch import Tensor
 
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
 import franken.utils.distributed as dist_utils
-from franken.data.base import Configuration, Target, TargetType, is_scalar_target
+from franken.data.base import Configuration, Target, PropertyType, is_scalar_property
 from franken.rf.model import FrankenPotential
 from franken.utils.linalg.cov import (
     lowmem_normalize_leading_eig,
     rank1_update,
     rankk_update,
 )
-from franken.utils.linalg.tri import pack_upper, triangular_lerp
+from franken.utils.linalg import (
+    lowmem_psd_solve,
+    pack_upper,
+    triangular_lerp,
+    unpack_upper,
+)
 from franken.utils.misc import no_jit, throughput
-
-try:
-    import cupy.cuda
-    from cupy_backends.cuda.libs import cublas, cusolver
-except ImportError:
-    cupy = None
-    cusolver = None
-    cublas = None
-
 
 logger = logging.getLogger("franken")
 
@@ -44,8 +39,8 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         self,
         train_dataloader: torch.utils.data.DataLoader,
         l2_penalty: float | list[float],
-        training_targets: list[TargetType],
-        target_weight: Mapping[TargetType, float | list[float]],
+        training_targets: list[PropertyType],
+        target_weight: Mapping[PropertyType, float | list[float]],
         random_features_normalization: Literal["leading_eig"] | None = "leading_eig",
         log_dir: Path | None = None,
         save_every_model: bool = True,
@@ -53,6 +48,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         dtype: str | torch.dtype = torch.float32,
         save_fmaps: bool = True,
         metrics: list[str] | None = None,
+        save_cholesky_factor: bool = True,
     ):
         if len(training_targets) != 2:
             raise ValueError(
@@ -72,137 +68,72 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             dtype=dtype,
             save_fmaps=save_fmaps,
             metrics=metrics,
+            save_cholesky_factor=save_cholesky_factor,
         )
 
-    def psd_solve(
-        self,
-        cov: torch.Tensor,
-        rhs: torch.Tensor,
-        penalty: float,
-        return_cho_factor: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        r"""Solve ridge regression with the low-memory CUDA solver when available.
-
-        Multiple right-hand sides are supported.
-        Instead of providing the data matrix (commonly :math:`X` in ridge-regression notation),
-        and labels (commonly :math:`y`), we are given directly :math:`\text{cov} = X^{\top} X`
-        and :math:`\text{rhs} = X^{\top} y`.
-        Since :attr:`cov` is symmetric only its **upper triangle** will be accessed.
-
-        To limit memory usage, the :attr:`cov` matrix **may be overwritten**, and :math:`rhs`
-        may also be overwritten (depending on its memory layout).
-
-        Args:
-            cov (Tensor): covariance of the linear system
-            rhs (Tensor): right hand side (one or more) of the linear system
-            penalty (float): Tikhonov l2 penalty
-            return_cho_factor (bool): Also return the packed upper Cholesky factor.
-
-        Returns:
-            The ridge regression coefficients, or (coefficients, packed factor)
-            when return_cho_factor is True.
-        """
-        if cupy is None or cov.device.type != "cuda":
-            if cov.device.type == "cuda":
-                warnings.warn(
-                    "low-memory solver cannot be used because `cupy` is not available. "
-                    "Install `cupy` if you encounter memory problems."
-                )
-            return super().psd_solve(cov, rhs, penalty, return_cho_factor)
-
-        assert cusolver is not None and cublas is not None and cupy is not None
-        assert cov.device.type == "cuda"
-        dtype = cov.dtype
-        n = cov.shape[0]
-
-        # Add diagonal without copies
-        cov.diagonal().add_(penalty)
-
-        if dtype == torch.float32:
-            potrf = cusolver.spotrf
-            potrf_bufferSize = cusolver.spotrf_bufferSize
-            potrs = cusolver.spotrs
-        elif dtype == torch.float64:
-            potrf = cusolver.dpotrf
-            potrf_bufferSize = cusolver.dpotrf_bufferSize
-            potrs = cusolver.dpotrs
-        else:
-            raise ValueError(dtype)
-
-        # cov must be f-contiguous (column-contiguous, stride is (1, n))
-        assert cov.dim() == 2
-        assert cov.shape[0] == cov.shape[1]
-        transpose = False
-        if n != 1:
-            if cov.stride(0) != 1:
-                cov = cov.T
-                transpose = True
-        assert cov.stride(0) == 1
-        cov_cp = cupy.asarray(cov)
-
-        # save rhs shape to restore it later on.
-        rhs_shape = rhs.shape
-        rhs = rhs.reshape(n, -1)
-        n_rhs = rhs.shape[1]
-        if rhs.stride(0) != 1:  # force rhs to be f-contiguous
-            # `contiguous` causes a copy
-            rhs = rhs.T.contiguous().T
-        assert rhs.stride(0) == 1
-        rhs_cp = cupy.asarray(rhs)
-
-        handle = cupy.cuda.device.get_cusolver_handle()
-        uplo = (
-            cublas.CUBLAS_FILL_MODE_LOWER
-            if transpose
-            else cublas.CUBLAS_FILL_MODE_UPPER
+    def _cache_covs(self, covs, coeffs):
+        """Cache both covariance triangles, their diagonals, and coefficients on CPU."""
+        covariance = next(iter(covs.values()))[0].detach().to("cpu")
+        packed_upper = pack_upper(covariance)
+        packed_lower = pack_upper(covariance.T)
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: (packed_upper, packed_lower, diagonal.detach().to("cpu"), upper)
+                for target, (_, diagonal, upper) in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
         )
-        dev_info = torch.empty(
-            1, dtype=torch.int32
-        )  # don't allocate with cupy as it uses a separate mem pool
-        dev_info_cp = cupy.asarray(dev_info)
 
-        worksize = potrf_bufferSize(handle, uplo, n, cov_cp.data.ptr, n)
-        workspace = torch.empty(worksize, dtype=dtype)
-        workspace_cp = cupy.asarray(workspace)
-
-        # Cholesky factorization
-        potrf(
-            handle,
-            uplo,
-            n,
-            cov_cp.data.ptr,
-            n,
-            workspace_cp.data.ptr,
-            worksize,
-            dev_info_cp.data.ptr,
+    def _restore_covs(self, n_features: int):
+        """Restore the shared covariance layout and coefficients on the trainer device."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        packed_upper, packed_lower, _, _ = next(iter(self._covs_cache.values()))
+        covariance = unpack_upper(packed_upper, n_features).to(self.device)
+        covariance.add_(unpack_upper(packed_lower, n_features).T.to(self.device))
+        covariance.diagonal().zero_()
+        return (
+            {
+                target: (covariance, diagonal.to(self.device), upper)
+                for target, (_, _, diagonal, upper) in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
         )
-        if (dev_info_cp != 0).any():
-            raise torch.linalg.LinAlgError(
-                f"Error reported by {potrf.__name__} in cuSOLVER. devInfo = {dev_info_cp}."
-            )
 
-        # Solve: A * X = B
-        potrs(
-            handle,
-            uplo,
-            n,
-            n_rhs,
-            cov_cp.data.ptr,
-            n,
-            rhs_cp.data.ptr,
-            n,
-            dev_info_cp.data.ptr,
+    def _offload_covs_and_coeffs(self, covs, coeffs):
+        """Cache both covariance triangles, their diagonals, and coefficients on CPU."""
+        covariance = next(iter(covs.values()))[0].detach().to("cpu")
+        packed_upper = pack_upper(covariance)
+        packed_lower = pack_upper(covariance.T)
+        self._covs_cache, self._coeffs_cache = (
+            {
+                target: (packed_upper, packed_lower, diagonal.detach().to("cpu"), upper)
+                for target, (_, diagonal, upper) in covs.items()
+            },
+            {target: coeff.detach().to("cpu") for target, coeff in coeffs.items()},
         )
-        if (dev_info_cp != 0).any():
-            raise torch.linalg.LinAlgError(
-                f"Error reported by {potrf.__name__} in cuSOLVER. devInfo = {dev_info_cp}."
-            )
 
-        solution = torch.as_tensor(rhs).reshape(rhs_shape)
-        if return_cho_factor:
-            # Restore the input orientation: its upper triangle now holds the factor.
-            return solution, pack_upper(cov.T if transpose else cov).detach()
-        return solution
+    def _restore_covs_and_coeffs(self, n_features: int):
+        """Restore the shared covariance layout and coefficients on the trainer device."""
+        if self._covs_cache is None or self._coeffs_cache is None:
+            raise RuntimeError("Covariance and coefficient caches are not available")
+        packed_upper, packed_lower, _, _ = next(iter(self._covs_cache.values()))
+        covariance = unpack_upper(packed_upper, n_features).to(self.device)
+        covariance.add_(unpack_upper(packed_lower, n_features).T.to(self.device))
+        covariance.diagonal().zero_()
+        return (
+            {
+                target: (covariance, diagonal.to(self.device), upper)
+                for target, (_, _, diagonal, upper) in self._covs_cache.items()
+            },
+            {
+                target: coeff.to(self.device)
+                for target, coeff in self._coeffs_cache.items()
+            },
+        )
 
     @no_jit()
     @torch.no_grad()
@@ -229,7 +160,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         #       They can only used correctly by iterating through the
         #       same dataloader as here, using the same method. Otherwise
         #       they may not be in the correct order
-        self.fmaps: dict[TargetType, list[Tensor]] = {
+        self.fmaps: dict[PropertyType, list[Tensor]] = {
             t: [] for t in self.training_targets
         }
         progress_bar = throughput(
@@ -257,7 +188,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
                     )
                 tgt_per_atom = (tgt / data.natoms).to(dtype=self.buffer_dt)
                 fmap = target_fmaps[tgt_name].to(self.buffer_dt)
-                if is_scalar_target(tgt_name):
+                if is_scalar_property(tgt_name):
                     rank1_update(
                         covariance, diags[j], fmap.reshape(-1), upper=cov_upper[j]
                     )
@@ -299,10 +230,10 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
     @torch.no_grad()
     def solve(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
-        covs: dict[TargetType, tuple[Tensor, Tensor, bool]],
-        coeffs: dict[TargetType, Tensor],
+        covs: dict[PropertyType, tuple[Tensor, Tensor, bool]],
+        coeffs: dict[PropertyType, Tensor],
         l2_penalty: float = 1e-6,
-        return_cho_factor: bool = False,
+        return_cholesky_factor: bool = False,
         **weights,
     ) -> Tensor | tuple[Tensor, Tensor]:
         target_weight = {}
@@ -340,4 +271,4 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
         )
         lerped_cov.diagonal().copy_(lerped_diag)
         rhs = torch.lerp(coeff_upper, coeff_lower, weight_lower)
-        return self.psd_solve(lerped_cov, rhs, l2_penalty, return_cho_factor)
+        return lowmem_psd_solve(lerped_cov, rhs, l2_penalty, return_cholesky_factor)

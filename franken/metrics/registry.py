@@ -1,7 +1,7 @@
 import torch
 
 from franken.metrics.base import BaseMetric
-from franken.data.base import TargetType
+from franken.data.base import PropertyType
 
 
 class Singleton(type):
@@ -45,17 +45,17 @@ class MetricRegistry(metaclass=Singleton):
 
     @property
     def available_metrics(self) -> list[str]:
-        return self.available_metrics_for_target()
+        return self.available_metrics_for_property()
 
-    def available_metrics_for_target(
-        self, target_type: TargetType | None = None
+    def available_metrics_for_property(
+        self, property_type: PropertyType | None = None
     ) -> list[str]:
         all_metric_names = []
         for metric_name, metric_cls in self._metrics.items():
-            if target_type is None:
+            if property_type is None:
                 all_metric_names.append(metric_name)
             else:
-                if metric_cls.target_type == target_type:
+                if metric_cls.property_type == property_type:
                     all_metric_names.append(metric_name)
         return all_metric_names
 

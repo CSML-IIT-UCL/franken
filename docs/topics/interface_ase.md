@@ -25,3 +25,30 @@ stress = atoms.get_stress()
 
 For an end-to-end molecular dynamics workflow, see the
 {doc}`ASE molecular dynamics tutorial <../notebooks/molecular_dynamics>`.
+
+## GP uncertainty
+
+GP uncertainty can be computed for energy and forces.
+It requires to have saved the training Cholesky factor.
+
+The supported outputs are `energy_gp_uncertainty` (scalar),
+`per_atom_energy_gp_uncertainty` (shape `(natoms,)`), and
+`forces_gp_uncertainty` (shape `(natoms, 3)`,).
+
+```python
+calc = atoms.calc
+calc.calculate(
+    atoms,
+    properties=["energy", "forces", "per_atom_energy_gp_uncertainty"],
+)
+atomic_scores = calc.results["per_atom_energy_gp_uncertainty"]
+
+# Request one property through ASE's cache-aware interface.
+energy_score = calc.get_property("energy_gp_uncertainty", atoms)
+```
+
+Notes: 
+* They are dimensionless posterior/prior standard-deviation ratios in `[0, 1]`,
+not calibrated errors in energy or force units. 
+* Force uncertainty requires feature Jacobians and can be expensive. 
+* They are not calculated by default by `calculate(atoms, properties=None)`, only if requested.

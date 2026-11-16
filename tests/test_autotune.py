@@ -1,37 +1,29 @@
-from copy import deepcopy
 from pathlib import Path
 import os
 
-from tests.test_franken_calculator import GNN_CONFIGS
 
 os.environ["OMP_NUM_THREADS"] = "8"
-from unittest.mock import DEFAULT, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-import torch
 
 from franken.trainers.log_utils import LogCollection
 from franken.config import GaussianRFConfig, HPSearchConfig, MultiscaleGaussianRFConfig
-from franken.calculators.ase_calc import FrankenCalculator
 from franken.autotune.cli import parse_cli
 from franken.autotune.script import get_dataset_paths, init_loaders, run_autotune
-from franken.data import FrankenAtomsDataset
-from franken.data.base import ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY, Configuration, TargetType
-from franken.rf.model import FrankenPotential
-from franken.rf.scaler import Statistics
+from franken.data.base import ENERGY_KEY, FORCES_KEY, STRESS_KEY, PropertyType
 from franken.trainers.rf_trainer import RandomFeaturesTrainer
-from franken.utils.misc import garbage_collection_cuda
 from franken.datasets.registry import DATASET_REGISTRY
 
 from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
-from .utils import are_dicts_close, cleanup_dir, create_temp_dir, mocked_gnn
+from .utils import cleanup_dir, create_temp_dir
 
 RF_PARAMETRIZE = [
     GaussianRFConfig(num_random_features=128, length_scale=1.0),
     MultiscaleGaussianRFConfig(num_random_features=128),
 ]
-ALL_TARGETS: list[TargetType] = [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+ALL_TARGETS: list[PropertyType] = [ENERGY_KEY, FORCES_KEY, STRESS_KEY]
 
 
 
@@ -59,8 +51,8 @@ def test_integration(gnn_cfg, device, atomic_energies):
             log_dir=temp_dir,
             save_every_model=False,
             l2_penalty=[1e-4],
-            target_weight={FORCES_TARGET_KEY: np.linspace(0.1, 0.9, 2).tolist()},
-            training_targets=[ENERGY_TARGET_KEY, FORCES_TARGET_KEY],
+            target_weight={FORCES_KEY: np.linspace(0.1, 0.9, 2).tolist()},
+            training_targets=[ENERGY_KEY, FORCES_KEY],
             device=device,
         )
         run_autotune(
@@ -84,7 +76,8 @@ def test_integration(gnn_cfg, device, atomic_energies):
             cleanup_dir(str(temp_dir))
 
 
-def test_parse_cli_supports_stress_weight_and_metrics():
+@pytest.mark.parametrize("save_cholesky_factor", [True, False])
+def test_parse_cli_supports_stress_weight_and_metrics(save_cholesky_factor):
     cfg = parse_cli([
         "--train-path",
         "/tmp/train.xyz",
@@ -112,9 +105,11 @@ def test_parse_cli_supports_stress_weight_and_metrics():
         "stress_MAE",
         "--run-dir",
         ".",
+        *([] if save_cholesky_factor else ["--no-save-cholesky-factor"]),
     ])
 
-    assert cfg.train_targets == [ENERGY_TARGET_KEY, FORCES_TARGET_KEY, STRESS_TARGET_KEY]
+    assert cfg.train_targets == [ENERGY_KEY, FORCES_KEY, STRESS_KEY]
+    assert cfg.save_cholesky_factor == save_cholesky_factor
     assert cfg.metrics == ["energy_MAE", "forces_MAE", "stress_MAE"]
     assert cfg.solver.stress_weight == HPSearchConfig(start=0.1, stop=0.9, num=2, scale="linear")
 

@@ -91,6 +91,10 @@ def test_wrap_compile(rf_cfg, device, backbone):
             model.input_scaler.set_from_statistics(gnn_features_stats)
             garbage_collection_cuda()
 
+        n_rf = model.rf.total_random_features
+        model._cholesky_factor = torch.ones(n_rf * (n_rf + 1) // 2, device=device)
+        model._l2_penalty = 0.1
+
         # Step 2: Save the model to the temporary directory
         model_save_path = os.path.join(temp_dir, "model_checkpoint.pth")
         model.save(model_save_path)
@@ -101,6 +105,12 @@ def test_wrap_compile(rf_cfg, device, backbone):
 
         # Step 4: Load saved model
         comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
+
+        torch.testing.assert_close(
+            comp_model.model._cholesky_factor, model._cholesky_factor.double()
+        )
+
+        assert comp_model.model._l2_penalty == model._l2_penalty
 
         # Step 4: Compare rf.state_dict between the original and loaded models
         with pytest.raises(RuntimeError) as exc:

@@ -4,12 +4,12 @@ import numpy as np
 import torch
 
 from franken.data.base import (
-    ENERGY_TARGET_KEY,
-    FORCES_TARGET_KEY,
-    STRESS_TARGET_KEY,
+    ENERGY_KEY,
+    FORCES_KEY,
+    STRESS_KEY,
     Configuration,
     Target,
-    TargetType,
+    PropertyType,
 )
 from franken.metrics.base import BaseMetric
 from franken.metrics.registry import metric_registry
@@ -29,9 +29,9 @@ __all__ = [
 ]
 
 
-def get_tgt_pred(targets: Target, predictions: Target, target_type: TargetType):
-    pred_t = predictions[target_type]
-    tgt_t = targets[target_type]
+def get_tgt_pred(targets: Target, predictions: Target, property_type: PropertyType):
+    pred_t = predictions[property_type]
+    tgt_t = targets[property_type]
     if pred_t.ndim == tgt_t.ndim:
         pred_t = pred_t.unsqueeze(0)
     tgt_t = tgt_t.reshape(-1)
@@ -58,7 +58,7 @@ class MAEPerAtomMetric(BaseMetric):
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         n_sys = check_single_system(data)
         num_atoms = torch.atleast_1d(data.natoms)
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         error = (1000 * torch.abs(tgt_t[None, :] - pred_t) / num_atoms[None, :]).mean(
             1
         ) * n_sys
@@ -77,7 +77,7 @@ class RMSEPerAtomMetric(BaseMetric):
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         n_sys = check_single_system(data)
         num_atoms = torch.atleast_1d(data.natoms)
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         error = (
             torch.square((tgt_t[None, :] - pred_t) / num_atoms[None, :]).mean(1) * n_sys
         )
@@ -101,7 +101,7 @@ class MAEMetric(BaseMetric):
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         n_sys = check_single_system(data)
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         error = 1000 * torch.abs(tgt_t[None, :] - pred_t).mean(1) * n_sys
         self.buffer_add(error, num_samples=n_sys)
 
@@ -112,7 +112,7 @@ class RMSEMetric(BaseMetric):
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         n_sys = check_single_system(data)
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         error = torch.square(tgt_t[None, :] - pred_t).mean(1) * n_sys
         self.buffer_add(error, num_samples=n_sys)
 
@@ -136,7 +136,7 @@ class CosineSimilarityMetric(BaseMetric):
         pred_systems = predictions.iter_individual_systems(data)
         tgt_systems = targets.iter_individual_systems(data)
         for pred_sys, tgt_sys in zip(pred_systems, tgt_systems):
-            tgt_t, pred_t = get_tgt_pred(tgt_sys, pred_sys, self.target_type)
+            tgt_t, pred_t = get_tgt_pred(tgt_sys, pred_sys, self.property_type)
             cos_similarity = torch.nn.functional.cosine_similarity(
                 pred_t, tgt_t[None, ...], dim=-1
             )
@@ -159,7 +159,7 @@ class PerSpeciesMAEMetric(BaseMetric):
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
         check_single_system(data)
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         atomic_numbers = data.atomic_numbers.to(dtype=torch.int64)  # A
         assert atomic_numbers.max() <= self.Z_MAX
         n_models = pred_t.shape[0]
@@ -216,7 +216,7 @@ class PerSpeciesRMSEMetric(BaseMetric):
         )
 
     def update(self, predictions: Target, targets: Target, data: Configuration) -> None:
-        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.target_type)
+        tgt_t, pred_t = get_tgt_pred(targets, predictions, self.property_type)
         atomic_numbers = data.atomic_numbers
         assert atomic_numbers.max() <= self.Z_MAX
         n_models = pred_t.shape[0]
@@ -263,7 +263,7 @@ class PerSpeciesRMSEMetric(BaseMetric):
 
 @metric_registry.register()
 class EnergyPerAtomMAE(MAEPerAtomMetric):
-    target_type: typing.ClassVar[TargetType] = ENERGY_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = ENERGY_KEY
     name: typing.ClassVar[str] = "energy_MAE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -272,7 +272,7 @@ class EnergyPerAtomMAE(MAEPerAtomMetric):
 
 @metric_registry.register()
 class EnergyPerAtomRMSE(RMSEPerAtomMetric):
-    target_type: typing.ClassVar[TargetType] = ENERGY_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = ENERGY_KEY
     name: typing.ClassVar[str] = "energy_RMSE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -284,7 +284,7 @@ class EnergyPerAtomRMSE(RMSEPerAtomMetric):
 
 @metric_registry.register()
 class ForceMAE(MAEMetric):
-    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = FORCES_KEY
     name: typing.ClassVar[str] = "forces_MAE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -293,7 +293,7 @@ class ForceMAE(MAEMetric):
 
 @metric_registry.register()
 class ForcePerSpeciesMAE(PerSpeciesMAEMetric):
-    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = FORCES_KEY
     name: typing.ClassVar[str] = "forces_MAE_species"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -302,7 +302,7 @@ class ForcePerSpeciesMAE(PerSpeciesMAEMetric):
 
 @metric_registry.register()
 class ForceRMSE(RMSEMetric):
-    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = FORCES_KEY
     name: typing.ClassVar[str] = "forces_RMSE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -311,7 +311,7 @@ class ForceRMSE(RMSEMetric):
 
 @metric_registry.register()
 class ForcePerSpeciesRMSE(PerSpeciesRMSEMetric):
-    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = FORCES_KEY
     name: typing.ClassVar[str] = "forces_RMSE_species"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -320,7 +320,7 @@ class ForcePerSpeciesRMSE(PerSpeciesRMSEMetric):
 
 @metric_registry.register()
 class ForceCosineSimilarity(CosineSimilarityMetric):
-    target_type: typing.ClassVar[TargetType] = FORCES_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = FORCES_KEY
     name: typing.ClassVar[str] = "forces_cosim"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -332,7 +332,7 @@ class ForceCosineSimilarity(CosineSimilarityMetric):
 
 @metric_registry.register()
 class StressMAE(MAEMetric):
-    target_type: typing.ClassVar[TargetType] = STRESS_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = STRESS_KEY
     name: typing.ClassVar[str] = "stress_MAE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
@@ -341,7 +341,7 @@ class StressMAE(MAEMetric):
 
 @metric_registry.register()
 class StressRMSE(RMSEMetric):
-    target_type: typing.ClassVar[TargetType] = STRESS_TARGET_KEY
+    property_type: typing.ClassVar[PropertyType] = STRESS_KEY
     name: typing.ClassVar[str] = "stress_RMSE"
 
     def __init__(self, device: torch.device, dtype: torch.dtype = torch.float32):
