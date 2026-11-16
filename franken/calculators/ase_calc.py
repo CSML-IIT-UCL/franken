@@ -53,9 +53,7 @@ class FrankenCalculator(Calculator):
             dtype : Inference precision, either ``"float32"|torch.float32`` or ``"float64"|torch.float64``.
                 ``None`` preserves the model's precision and uses the backbone's
                 precision for inputs.
-            use_cueq : Enable or disable cuEquivariance for an eager MACE model.
-                ``None`` preserves the choice saved in the checkpoint. Training
-                remains on e3nn; this option changes only the frozen inference backbone.
+            use_cueq : Enable or disable cuEquivariance (for MACE backbones).
         """
         if isinstance(dtype, str):
             dtype = {"float32": torch.float32, "float64": torch.float64}.get(
