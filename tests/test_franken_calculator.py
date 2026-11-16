@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import subprocess
+from unittest.mock import patch
 
 import ase
 import ase.md
@@ -9,16 +10,25 @@ import numpy as np
 import pytest
 import torch
 from ase import units
+from ase.calculators.calculator import PropertyNotImplementedError
 from ase.io import read
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
-from franken.config import MaceBackboneConfig, MultiscaleGaussianRFConfig, PETBackboneConfig
+from franken.config import (
+    GaussianRFConfig,
+    MaceBackboneConfig,
+    MultiscaleGaussianRFConfig,
+    PETBackboneConfig,
+)
 from franken.calculators.ase_calc import FrankenCalculator
 from franken.rf.model import FrankenPotential
+from franken.data.base import Configuration
+from franken.utils.linalg.tri import pack_upper
 from franken.datasets.registry import DATASET_REGISTRY
 
-from .conftest import DEVICES
+from .conftest import DEFAULT_GNN_CONFIGS, DEVICES
+from .utils import mocked_gnn
 
 
 def has_module(name):
@@ -138,7 +148,7 @@ def test_calculator_in_md(device, gnn_cfg):
     md.run(2)
     energy = md.atoms.get_total_energy()
     np.testing.assert_allclose(energy, EXPECTED_ENERGIES[gnn_cfg.path_or_id], rtol=1e-1)
-    
+
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
@@ -163,7 +173,7 @@ def test_calculator_in_npt_md(device, gnn_cfg):
     md.run(2)
     energy = md.atoms.get_total_energy()
     np.testing.assert_allclose(energy, EXPECTED_ENERGIES_NPT[gnn_cfg.path_or_id], rtol=1e-1)
-    
+
 
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("gnn_cfg", GNN_CONFIGS)
@@ -256,3 +266,95 @@ def test_calculator_precision(dtype, gnn_cfg):
 def test_calculator_invalid_precision(dtype):
     with pytest.raises(ValueError, match="dtype must be"):
         FrankenCalculator("unused.pt", dtype=dtype)
+
+
+@pytest.fixture
+def gp_calculator():
+    with mocked_gnn("cpu", torch.float32):
+        model = FrankenPotential(
+            DEFAULT_GNN_CONFIGS[0],
+            GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+        )
+    model._cholesky_factor = pack_upper(torch.eye(8) * 2)
+    model._l2_penalty = 1.0
+    model.gnn.parameters.return_value = [torch.zeros(1)]
+    model.gnn.buffers.return_value = []
+    with patch("franken.calculators.ase_calc.FrankenAtomsDataset"):
+        calc = FrankenCalculator(model, device="cpu")
+
+    def configuration(index, no_targets=True):
+        return Configuration(
+            atom_pos=torch.tensor(calc.atoms.positions, dtype=torch.float32),
+            atomic_numbers=torch.tensor(calc.atoms.numbers),
+            natoms=torch.tensor(len(calc.atoms)),
+            cell=torch.tensor(calc.atoms.cell.array, dtype=torch.float32),
+        )
+
+    calc.dataset.__getitem__.side_effect = configuration
+    return calc
+
+
+def test_gp_requests_and_cache(gp_calculator):
+    calc = gp_calculator
+    atoms = ase.Atoms("H2", positions=[[0, 0, 0], [0.8, 0.2, 0.1]], cell=[4, 4, 4])
+    props = [
+        "energy_gp_uncertainty",
+        "per_atom_energy_gp_uncertainty",
+        "forces_gp_uncertainty",
+    ]
+    with patch.object(calc.franken, "forward", wraps=calc.franken.forward) as forward:
+        calc.calculate(atoms, properties=["energy", "forces", *props])
+        assert forward.call_count == 1
+        data = calc.dataset.__getitem__(0, no_targets=True)
+        expected = calc.franken.predict(["energy", "forces", *props], data)
+        for prop in ["energy", "forces", *props]:
+            np.testing.assert_allclose(
+                calc.results[prop], expected[prop].squeeze(0).detach().numpy(),
+                rtol=1e-5, atol=1e-6,
+            )
+        assert isinstance(calc.results[props[0]], float)
+        assert calc.results[props[1]].shape == (2,)
+        assert calc.results[props[2]].shape == (2, 3)
+        calls = forward.call_count
+        calc.get_property(props[0], atoms)
+        assert forward.call_count == calls
+        atoms.positions[1, 0] += 0.1
+        calc.get_property(props[0], atoms)
+        assert forward.call_count == calls + 1
+        assert props[1] not in calc.results
+        assert set(calc.results) == {props[0]}
+        assert forward.call_args.args[0] == [props[0]]
+
+    calc.reset()
+    calc.get_property("energy", atoms)
+    assert not any(prop in calc.results for prop in props)
+    calc.get_property(props[1], atoms)
+    assert props[1] in calc.results
+    atoms.positions[1, 0] += 0.1
+    calc.calculate(atoms, properties=["energy"])
+    assert set(calc.results) == {"energy"}
+
+@pytest.mark.parametrize("missing", ["factor", "penalty"])
+def test_unavailable_gp(gp_calculator, missing):
+    model = gp_calculator.franken
+    if missing == "factor":
+        model._cholesky_factor = None
+    else:
+        model._l2_penalty = None
+    with patch("franken.calculators.ase_calc.FrankenAtomsDataset"):
+        calc = FrankenCalculator(model, device="cpu")
+    assert "energy_gp_uncertainty" not in model.implemented_properties
+    assert "energy_gp_uncertainty" not in calc.implemented_properties
+    with pytest.raises(PropertyNotImplementedError):
+        calc.get_property("energy_gp_uncertainty", ase.Atoms("H"))
+
+
+@pytest.mark.parametrize("penalty", [0.0, -1.0, float("inf"), float("nan")])
+def test_invalid_gp_penalty(gp_calculator, penalty):
+    gp_calculator.franken._l2_penalty = penalty
+    with pytest.raises(ValueError, match="finite positive l2_penalty"):
+        gp_calculator.calculate(
+            ase.Atoms("H", cell=[4, 4, 4]),
+            properties=["energy_gp_uncertainty"],
+        )

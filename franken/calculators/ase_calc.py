@@ -10,6 +10,7 @@ from franken.data.base import (
     ENERGY_KEY,
     FORCES_KEY,
     STRESS_KEY,
+    ENERGY_GP_UNC_KEY,
 )
 from franken.rf.model import FrankenPotential
 from franken.utils.misc import get_device_name
@@ -20,7 +21,8 @@ class FrankenCalculator(Calculator):
 
     Attributes:
         implemented_properties:
-            Lists properties which can be asked from this calculator, notably "energy", "forces", "stress".
+            Lists supported physical properties, notably "energy", "forces", "stress"
+            and the GP uncertainties if supported.
     """
 
     implemented_properties = ["energy", "forces", "stress"]
@@ -103,6 +105,9 @@ class FrankenCalculator(Calculator):
             split="md",
             gnn_config=gnn_config,
         )
+        # Retrieve supported properties
+        self.implemented_properties = self.franken.implemented_properties
+
         self.device = (
             device if device is not None else next(self.franken.parameters()).device
         )
@@ -114,9 +119,10 @@ class FrankenCalculator(Calculator):
         system_changes=all_changes,
     ):
         if properties is None:
-            properties = self.implemented_properties
+            properties = ["energy", "forces"]
 
         super().calculate(atoms, properties, system_changes)
+        self.results = {}
 
         # self.atoms is set in the super() call. Unclear why it should be preferred over `atoms`
         config_idx = self.dataset.add_configuration(self.atoms)  # type: ignore
@@ -124,18 +130,21 @@ class FrankenCalculator(Calculator):
         assert isinstance(cpu_data, Configuration)
         data = cpu_data.to(device=self.device, dtype=self.dtype)
 
-        targets = [ENERGY_KEY]
-        if "forces" in properties:
-            targets.append(FORCES_KEY)
-        if "stress" in properties:
-            targets.append(STRESS_KEY)
+        property_keys = {
+            "energy": ENERGY_KEY,
+            "forces": FORCES_KEY,
+            "stress": STRESS_KEY,
+        }
+        targets = [property_keys.get(prop, prop) for prop in properties]
         computed = self.franken(targets, data)
 
-        self.results["energy"] = computed[ENERGY_KEY].item()
-        if "forces" in properties:
-            self.results["forces"] = computed[FORCES_KEY].squeeze(0).numpy(force=True)
-        if "stress" in properties:
-            self.results["stress"] = computed[STRESS_KEY].squeeze(0).numpy(force=True)
+        for prop in properties:
+            value = computed[property_keys.get(prop, prop)]
+            self.results[prop] = (
+                value.item()
+                if prop in (ENERGY_KEY, ENERGY_GP_UNC_KEY)
+                else value.squeeze(0).numpy(force=True)
+            )
 
 
 def calculator_throughput(
