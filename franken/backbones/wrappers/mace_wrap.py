@@ -172,8 +172,10 @@ def atom_numbers_to_node_attrs(
     matches = frame_nums.unsqueeze(1) == all_nums.unsqueeze(0)  # (N, M)
 
     # Check that every frame_num appears at least once in all_nums
-    if not torch.all(matches.any(dim=1)):
-        raise ValueError("frame_nums contains values not present in all_nums")
+    # NOTE: This is disabled in MLIAP because ghost atoms will not match
+    # and all their 1-hot features will be zeros.
+    # if not torch.all(matches.any(dim=1)):
+    #     raise ValueError(f"frame_nums contains values not present in all_nums. {frame_nums=} {all_nums=}")
 
     return matches.to(dtype)
 
@@ -286,6 +288,7 @@ class FrankenMACE(torch.nn.Module):
         ):
             node_attrs_slice = node_attrs
             if is_lammps and i > 0:
+                # ghost atom interactions only at first layer.
                 node_attrs_slice = node_attrs_slice[: lammps_natoms[0]]
             sc: None | torch.Tensor = None
             if self.is_mace_v3_14:
