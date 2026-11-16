@@ -773,8 +773,8 @@ class TestEdgeForces:
             gnn_config=gnn_cfg,
         )
         data, _ = dataset[0]  # type: ignore
-        out_edge = model.grad_feature_map((data), [EDGE_FORCES_KEY, FORCES_KEY])
-        out_no_edge = model.grad_feature_map((data), [FORCES_KEY])
+        out_edge = model.feature_maps((data), [EDGE_FORCES_KEY, FORCES_KEY])
+        out_no_edge = model.feature_maps((data), [FORCES_KEY])
         torch.testing.assert_close(out_edge[FORCES_KEY], out_no_edge[FORCES_KEY], rtol=1e-5, atol=1e-5)
 
     @pytest.mark.parametrize("multiweights", [True, False])
