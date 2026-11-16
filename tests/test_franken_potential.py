@@ -309,9 +309,9 @@ def test_fmap_batched(rf_cfg, device):
     cfg2 = random_cfg(num_atoms, dtype, device)
     cfg_batched = Configuration.concatenate([cfg1, cfg2])
 
-    out1 = model.grad_feature_map(cfg1, ALL_TARGETS)
-    out2 = model.grad_feature_map(cfg2, ALL_TARGETS)
-    out_batched = model.grad_feature_map(cfg_batched, ALL_TARGETS)
+    out1 = model.feature_maps(cfg1, ALL_TARGETS)
+    out2 = model.feature_maps(cfg2, ALL_TARGETS)
+    out_batched = model.feature_maps(cfg_batched, ALL_TARGETS)
     out = {tt: torch.cat([out1[tt], out2[tt]], dim=1) for tt in ALL_TARGETS}
     for tt in ALL_TARGETS:
         torch.testing.assert_close(out_batched[tt], out[tt], rtol=1e-3, atol=1e-3, 
@@ -332,7 +332,7 @@ def test_fmap_shapes(num_systems):
     data = Configuration.concatenate([
         random_cfg(num_atoms, dtype, "cpu") for _ in range(num_systems)
     ])
-    out_fmap = model.grad_feature_map(data, ALL_TARGETS)
+    out_fmap = model.feature_maps(data, ALL_TARGETS)
     for k, v in out_fmap.items():
         if k == ENERGY_KEY:
             assert v.shape == (RF_PARAMETRIZE[0].num_random_features, num_systems)
@@ -513,7 +513,7 @@ def test_atomic_fmap(device, scale_by_Z):
         model.gnn.descriptors(config), atomic_numbers=numbers
     )
     expected = model.rf.atomic_feature_map(descriptors).T
-    actual = model.grad_feature_map(config, [PER_ATOM_ENERGY_KEY])[PER_ATOM_ENERGY_KEY]
+    actual = model.feature_maps(config, [PER_ATOM_ENERGY_KEY])[PER_ATOM_ENERGY_KEY]
     torch.testing.assert_close(actual, expected)
     assert actual.shape == (8, 4)
     assert actual.device == config.atom_pos.device
@@ -580,7 +580,7 @@ class TestEnergyShift:
         )
 
         data = random_cfg(self.num_atoms, self.dtype, device, atomic_numbers=self.atomic_nums)
-        fmaps = model.grad_feature_map(data, ALL_TARGETS)
+        fmaps = model.feature_maps(data, ALL_TARGETS)
         # ffmap = ffmap.view(ffmap.shape[0], -1)
         out_from_fmaps = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=False)
         out_from_fmaps_shift = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=True)
@@ -686,7 +686,7 @@ class TestEnergyShift:
             out_fn[PER_ATOM_ENERGY_KEY].sum(1, keepdim=True), out_ag[ENERGY_KEY]
         )
         # Test with feature maps
-        fmaps = model.grad_feature_map(data, targets)
+        fmaps = model.feature_maps(data, targets)
         out_from_fmaps = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=False)
         out_from_fmaps_shift = model.predict_from_fmaps(data, fmaps, weights, add_energy_shift=True)
         torch.testing.assert_close(

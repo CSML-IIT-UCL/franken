@@ -25,7 +25,7 @@ class FrankenPotential(torch.nn.Module):
     """Maps atomic configurations into high-dimensional vectors through a neural network and random features.
 
     This class provides both functions to map atom configurations with GNN + random features through methods
-    :meth:`~franken.rf.model.FrankenPotential.feature_map` and :meth:`~franken.rf.model.FrankenPotential.grad_feature_map`,
+    :meth:`~franken.rf.model.FrankenPotential.feature_map` and :meth:`~franken.rf.model.FrankenPotential.feature_maps`,
     and to perform inference on the potential function of atom configurations given a learned
     linear model (:meth:`~franken.rf.model.FrankenPotential.energy_and_forces`).
 
@@ -342,7 +342,7 @@ class FrankenPotential(torch.nn.Module):
         return random_features.sum(0), [random_features]
 
     @torch.jit.unused
-    def grad_feature_map(
+    def feature_maps(
         self,
         data: Configuration,
         properties: list[PropertyType],

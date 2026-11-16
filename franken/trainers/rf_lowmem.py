@@ -244,7 +244,7 @@ class LowMemRandomFeaturesTrainer(RandomFeaturesTrainer):
             assert data.natoms.numel() == 1, "Batched training is not supported"
             targets: Target = targets.to(device=self.device)
 
-            target_fmaps = model.grad_feature_map(data, self.training_targets)
+            target_fmaps = model.feature_maps(data, self.training_targets)
             if self.save_fmaps and i == 0:
                 self.warn_save_fmaps(list(target_fmaps.values()), len(dataloader))
 

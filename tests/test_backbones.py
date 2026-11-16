@@ -136,6 +136,6 @@ def test_force_maps(model_name):
     data = dataset_el[0].to(device)
     with torch.no_grad(), no_jit():
         # Need to call this multiple times to make sure test passes!
-        fmaps = model.grad_feature_map(data, properties=[ENERGY_KEY, FORCES_KEY])
-        fmaps = model.grad_feature_map(data, properties=[ENERGY_KEY, FORCES_KEY])
-        fmaps = model.grad_feature_map(data, properties=[ENERGY_KEY, FORCES_KEY])
+        fmaps = model.feature_maps(data, properties=[ENERGY_KEY, FORCES_KEY])
+        fmaps = model.feature_maps(data, properties=[ENERGY_KEY, FORCES_KEY])
+        fmaps = model.feature_maps(data, properties=[ENERGY_KEY, FORCES_KEY])
