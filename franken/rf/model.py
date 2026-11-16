@@ -91,6 +91,7 @@ class FrankenPotential(torch.nn.Module):
             num_species=num_species, atomic_energies=atomic_energies
         )
         self.force_func_grad = False
+        self._warned_cueq_autograd = False
 
     @property
     @torch.jit.unused
@@ -482,6 +483,14 @@ class FrankenPotential(torch.nn.Module):
         if getattr(self.gnn, "use_cueq", False) and mode == "torch.func":
             # Native kernels support reverse autograd, but not forward AD.
             # Multiple inference heads can use ordinary backward one at a time.
+            if not torch.jit.is_scripting():
+                if not self._warned_cueq_autograd:
+                    logger.warning(
+                        "cuEquivariance native kernels do not support forward-mode "
+                        "automatic differentiation. Switching from torch.func to "
+                        "torch.autograd for inference."
+                    )
+                    self._warned_cueq_autograd = True
             mode = "torch.autograd"
         compute_force = franken.data.base.FORCES_TARGET_KEY in targets
         compute_stress = franken.data.base.STRESS_TARGET_KEY in targets
