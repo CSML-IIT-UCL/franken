@@ -8,6 +8,8 @@ import os
 import pytest
 import torch
 
+from franken.calculators import mace_inf_wrap
+
 pytest.importorskip("mace")
 
 from franken.backbones.wrappers.common_patches import unpatch_e3nn
@@ -97,7 +99,7 @@ def test_wrap_compile(rf_cfg, device, backbone):
 
         # Step 3: Run create_lammps_model
         unpatch_e3nn()  # needed in case some previous test ran the patching code
-        comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
+        comp_model_path = mace_inf_wrap.init_wrapper(model_path=model_save_path, rf_weight_id=None)
 
         # Step 4: Load saved model
         comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
@@ -180,7 +182,7 @@ def test_wrap_asemd(rf_cfg, device, backbone):
 
         # Step 3: Initialize MACE LAMMPS inference wrapper and re-load it
         unpatch_e3nn()  # needed in case some previous test ran the patching code
-        comp_model_path = MaceInferenceWrapper.init_wrapper(model_path=model_save_path, rf_weight_id=None)
+        comp_model_path = mace_inf_wrap.init_wrapper(model_path=model_save_path, rf_weight_id=None)
         comp_model = torch.jit.load(comp_model_path, map_location="cpu").to(device=device)
 
         # Step 4: run compiled model for the training dataset.
