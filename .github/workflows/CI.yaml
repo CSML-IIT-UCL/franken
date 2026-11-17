@@ -96,6 +96,8 @@ jobs:
 
   build:
     name: Bump version and build package with hatch
+    permissions:
+      content write
     needs: test  # This ensures 'publish' only runs if 'test' passes
     runs-on: ubuntu-latest
     if: |
