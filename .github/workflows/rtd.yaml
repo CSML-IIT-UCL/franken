@@ -19,9 +19,11 @@ concurrency:
 
 jobs:
   docs:
-    environment:
+    permissions:
+      contents: write  # Required to push the built docs to the rtd branch
+    environment:  # for deployment to pages only!
       name: ghpg
-      url: https://franken.readthedocs.io/
+      url: ${{ steps.deployment.outputs.page_url }}
     env:
       ENV_NAME: readthedocs
       PYTHON_VERSION: "3.12"
