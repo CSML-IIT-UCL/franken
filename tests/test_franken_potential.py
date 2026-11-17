@@ -11,7 +11,7 @@ import torch
 from franken.config import GaussianRFConfig, MultiscaleGaussianRFConfig
 from franken.calculators.ase_calc import FrankenCalculator
 from franken.data import FrankenAtomsDataset
-from franken.data.base import ENERGY_KEY, FORCES_KEY, PER_ATOM_ENERGY_KEY, STRESS_KEY, Configuration, PropertyType
+from franken.data.base import EDGE_FORCES_KEY, ENERGY_KEY, FORCES_KEY, PER_ATOM_ENERGY_KEY, STRESS_KEY, Configuration, PropertyType
 from franken.rf.model import FrankenPotential
 from franken.rf.scaler import Statistics
 from franken.utils.misc import garbage_collection_cuda
@@ -278,19 +278,23 @@ def test_inference_force_mode(rf_cfg, device, multiweights: bool):
             )
 
 
-def random_cfg(num_atoms, dtype, device, atomic_numbers=None):
+def random_cfg(num_atoms, dtype, device, atomic_numbers=None, include_vectors: bool = False):
     if atomic_numbers is not None:
         num_atoms = atomic_numbers.shape[0]
     else:
         atomic_numbers = torch.randint(1, 100, (num_atoms,))
     num_edges = num_atoms * 2
+    vectors = None
+    if include_vectors:
+        vectors = torch.randn((num_edges, 3), dtype=dtype)
     return Configuration(
         torch.randn(num_atoms, 3, dtype=dtype),
         atomic_numbers=atomic_numbers,
         natoms=torch.tensor(num_atoms),
         edge_index=torch.randint(0, num_atoms, (num_edges, 2), dtype=torch.int32),
         unit_shifts=torch.randint(1, 5, (num_edges, 3), dtype=torch.int32),
-        cell=torch.randn((3, 3), dtype=dtype)
+        cell=torch.randn((3, 3), dtype=dtype),
+        edge_vectors=vectors,
     ).to(device)
 
 
@@ -422,7 +426,7 @@ class TestModelGradients:
         weights = torch.randn(
             (num_lin_models, model.rf.total_random_features), device=device
         )
-        cfgs = [random_cfg(num_atoms, dtype, device) for _ in range(2)]
+        cfgs = [random_cfg(num_atoms, dtype, device, include_vectors=EDGE_FORCES_KEY in targets) for _ in range(2)]
         cfg_batched = Configuration.concatenate(cfgs)
         out_ag_indiv = [model._predict_efs(weights, cfg, targets, mode="torch.autograd") for cfg in cfgs]
         out_ag = {tt: torch.cat([out[tt] for out in out_ag_indiv], dim=1) for tt in targets}
@@ -462,6 +466,7 @@ class TestModelGradients:
     [ENERGY_KEY, FORCES_KEY, STRESS_KEY], 
     [ENERGY_KEY, FORCES_KEY], 
     [ENERGY_KEY, FORCES_KEY, PER_ATOM_ENERGY_KEY], 
+    [EDGE_FORCES_KEY]
 ])
 @pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
 def test_jitted_model(device, targets, gnn_cfg):
@@ -473,7 +478,7 @@ def test_jitted_model(device, targets, gnn_cfg):
     weights = torch.randn(
         (num_lin_models, model.rf.total_random_features), device=device
     )
-    data_path = DATASET_REGISTRY.get_path("test", "test", None, False)
+    data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
     dataset = FrankenAtomsDataset(
         data_path=data_path,
         split="train",
@@ -739,3 +744,81 @@ class TestStatistics:
         torch.testing.assert_close(
             st.statistics[5]["std"], atom5_std.double(), rtol=1e-2, atol=1e-2
         )
+
+
+@pytest.mark.parametrize("rf_cfg", RF_PARAMETRIZE)
+@pytest.mark.parametrize("gnn_cfg", DEFAULT_GNN_CONFIGS)
+class TestEdgeForces:
+    @pytest.mark.parametrize("mode", ["torch.func", "torch.autograd"])
+    def test_forces_from_edge_forces(self, rf_cfg, gnn_cfg, mode):
+        model = FrankenPotential(gnn_cfg, rf_cfg)
+        weights = torch.randn((1, model.rf.total_random_features))
+        data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path=data_path,
+            split="train",
+            gnn_config=gnn_cfg,
+        )
+        data, _ = dataset[0]  # type: ignore
+        out_edge = model._predict_efs(weights, data, [EDGE_FORCES_KEY, FORCES_KEY], mode=mode)
+        out_no_edge = model._predict_efs(weights, data, [FORCES_KEY], mode=mode)
+        torch.testing.assert_close(out_edge[FORCES_KEY], out_no_edge[FORCES_KEY], rtol=1e-5, atol=1e-5)
+
+    def test_forces_from_edge_forces_fmaps(self, rf_cfg, gnn_cfg):
+        model = FrankenPotential(gnn_cfg, rf_cfg)
+        data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path=data_path,
+            split="train",
+            gnn_config=gnn_cfg,
+        )
+        data, _ = dataset[0]  # type: ignore
+        out_edge = model.feature_maps((data), [EDGE_FORCES_KEY, FORCES_KEY])
+        out_no_edge = model.feature_maps((data), [FORCES_KEY])
+        torch.testing.assert_close(out_edge[FORCES_KEY], out_no_edge[FORCES_KEY], rtol=1e-5, atol=1e-5)
+
+    @pytest.mark.parametrize("multiweights", [True, False])
+    @pytest.mark.parametrize("device", DEVICES)
+    def test_gradients(self, rf_cfg, device, multiweights: bool, gnn_cfg):
+        targets = [EDGE_FORCES_KEY, FORCES_KEY]
+        model = FrankenPotential(gnn_cfg, rf_cfg).to(device)
+
+        num_lin_models = 10 if multiweights else 1
+        weights = torch.randn(
+            (num_lin_models, model.rf.total_random_features), device=device
+        )
+        data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path=data_path,
+            split="train",
+            gnn_config=gnn_cfg,
+        )
+        data, _ = dataset[0]  # type: ignore
+        data = data.to(device)
+        out_ag = model._predict_efs(weights, data, targets, mode="torch.autograd")
+        out_func = model._predict_efs(weights, data, targets, mode="torch.func")
+        for tt in targets:
+            torch.testing.assert_close(out_func[tt], out_ag[tt], rtol=1e-5, atol=1e-5, 
+                                        msg=f"Func-Autograd equality failed on target {tt}")
+
+    def test_given_vecs(self, rf_cfg, gnn_cfg):
+        # If vectors are provided, cannot compute FORCES_KEY due to broken graph from positions to energy.
+        model = FrankenPotential(gnn_cfg, rf_cfg)
+        weights = torch.randn((1, model.rf.total_random_features))
+        data_path = DATASET_REGISTRY.get_path("test", "train", None, False)
+        dataset = FrankenAtomsDataset(
+            data_path=data_path,
+            split="train",
+            gnn_config=gnn_cfg,
+        )
+        data, _ = dataset[0]  # type: ignore
+        data.compute_edge_vectors(set_self=True)
+        # 1.
+        out_edge = model._predict_efs(weights, data, [EDGE_FORCES_KEY, FORCES_KEY], mode="torch.autograd")
+        with pytest.raises(RuntimeError, match="One of the differentiated Tensors appears to not have been used in the graph"):
+            out_no_edge = model._predict_efs(weights, data, [FORCES_KEY], mode="torch.autograd")
+        # 2.
+        out_edge = model._predict_efs(weights, data, [EDGE_FORCES_KEY, FORCES_KEY], mode="torch.func")
+        out_no_edge = model._predict_efs(weights, data, [FORCES_KEY], mode="torch.func")
+        with pytest.raises(AssertionError, match="Tensor-likes are not close"):
+            torch.testing.assert_close(out_edge[FORCES_KEY], out_no_edge[FORCES_KEY], rtol=1e-5, atol=1e-5)

@@ -10,6 +10,29 @@ logger = logging.getLogger("franken")
 
 
 @torch.jit.script
+class LAMMPSMLIAPData:
+    def __init__(
+        self,
+        natoms: int,
+        nghosts: int,
+        class_data: Tensor,
+    ):
+        self.natoms = natoms
+        self.nghosts = nghosts
+        self.class_data = class_data
+
+    def to(
+        self, device: torch.device | None = None, dtype: torch.dtype | None = None
+    ) -> "LAMMPSMLIAPData":
+        class_data = self.class_data.to(device=device, dtype=dtype)
+        return LAMMPSMLIAPData(
+            natoms=self.natoms,
+            nghosts=self.nghosts,
+            class_data=class_data,
+        )
+
+
+@torch.jit.script
 class Configuration:
     """Container for a single configuration (molecule or crystal).
 
@@ -28,6 +51,8 @@ class Configuration:
         cell: Optional[Tensor] = None,
         batch_ids: Optional[Tensor] = None,
         pbc: Optional[Tensor] = None,
+        edge_vectors: Optional[Tensor] = None,
+        lammps_mliap_data: Optional[LAMMPSMLIAPData] = None,
     ):
         assert (
             atom_pos.dim() == 2 and atom_pos.shape[1] == 3
@@ -71,6 +96,12 @@ class Configuration:
             ), f"Incorrect batch_ids shape {batch_ids.shape}"
         self.batch_ids = batch_ids
         self.pbc = pbc
+        if edge_vectors is not None:
+            assert (
+                edge_vectors.dim() == 2 and edge_vectors.shape[1] == 3
+            ), f"Incorrect vectors shape {edge_vectors.shape}"
+        self.edge_vectors = edge_vectors
+        self.lammps_mliap_data = lammps_mliap_data
 
     def to(
         self, device: torch.device | None = None, dtype: torch.dtype | None = None
@@ -94,6 +125,12 @@ class Configuration:
         pbc = self.pbc
         if pbc is not None:
             pbc = pbc.to(device=device)
+        edge_vectors = self.edge_vectors
+        if edge_vectors is not None:
+            edge_vectors = edge_vectors.to(device=device, dtype=dtype)
+        lammps_mliap_data = self.lammps_mliap_data
+        if lammps_mliap_data is not None:
+            lammps_mliap_data = lammps_mliap_data.to(device=device, dtype=dtype)
         return Configuration(
             atom_pos=self.atom_pos.to(device=device, dtype=dtype),
             atomic_numbers=self.atomic_numbers.to(device=device),
@@ -104,6 +141,8 @@ class Configuration:
             cell=cell,
             batch_ids=batch_ids,
             pbc=pbc,
+            edge_vectors=edge_vectors,
+            lammps_mliap_data=lammps_mliap_data,
         )
 
     @staticmethod
@@ -115,6 +154,7 @@ class Configuration:
         shifts: list[torch.Tensor] = []
         cells: list[torch.Tensor] = []
         all_batch_ids: list[torch.Tensor] = []
+        edge_vectors: list[torch.Tensor] = []
         pbc: torch.Tensor | None = None
         node_counter = 0
 
@@ -134,6 +174,16 @@ class Configuration:
         cell_none = np.asarray([c.cell is None for c in configs])
         if not np.all(cell_none == cell_none[0]):
             raise ValueError("Cell inconsistent")
+        edge_vectors_none = np.asarray([c.edge_vectors is None for c in configs])
+        if not np.all(edge_vectors_none == edge_vectors_none[0]):
+            raise ValueError("Edge vectors inconsistent")
+        lammps_mliap_data_none = np.asarray(
+            [c.lammps_mliap_data is None for c in configs]
+        )
+        if not np.all(lammps_mliap_data_none):
+            raise ValueError(
+                "Cannot concatenate configurations with LAMMPS MLIAP data."
+            )
 
         for i, config in enumerate(configs):
             system_size = len(config.atom_pos)
@@ -153,6 +203,8 @@ class Configuration:
                 cells.append(config.cell)
             if config.shifts is not None:
                 shifts.append(config.shifts)
+            if config.edge_vectors is not None:
+                edge_vectors.append(config.edge_vectors)
             # Check batch IDs: they must not be present in the input configurations
             if config.batch_ids is not None:
                 assert len(torch.unique(config.batch_ids)) == 1
@@ -174,7 +226,56 @@ class Configuration:
             shifts=torch.cat(shifts) if len(shifts) > 0 else None,
             batch_ids=batch_ids,
             pbc=pbc,
+            edge_vectors=torch.cat(edge_vectors) if len(edge_vectors) > 0 else None,
+            lammps_mliap_data=None,
         )
+
+    def compute_edge_vectors(self, set_self: bool = False) -> Tensor:
+        edge_vectors = self.edge_vectors
+        if edge_vectors is not None:
+            return edge_vectors
+        edge_index = self.edge_index
+        shifts = self.shifts
+        pos = self.atom_pos
+        if edge_index is None:
+            raise ValueError("Cannot compute edge vectors: configuration has no edges.")
+        if shifts is None:
+            shifts = self.compute_shifts()
+        sender = edge_index[:, 0]
+        receiver = edge_index[:, 1]
+        vectors = pos[receiver] - pos[sender] + shifts  # [n_edges, 3]
+        if set_self:
+            self.edge_vectors = vectors
+        return vectors
+
+    def compute_shifts(self) -> Tensor:
+        shifts = self.shifts
+        if shifts is not None:
+            return shifts
+        cell = self.cell
+        unit_shifts = self.unit_shifts
+        batch_ids = self.batch_ids
+        edge_index = self.edge_index
+        if cell is None:
+            raise ValueError("Cannot compute shifts: configuration has no cell.")
+        if unit_shifts is None:
+            raise ValueError("Cannot compute shifts: configuration has no unit shifts.")
+
+        if cell.ndim == 2:
+            shifts = unit_shifts.to(cell.dtype) @ cell  # n_edges, 3
+        else:
+            assert batch_ids is not None
+            if edge_index is None:
+                raise ValueError(
+                    "Cannot compute batched shifts: configuration has no edge index."
+                )
+            shifts = torch.einsum(
+                "ni,nij->nj",
+                unit_shifts.to(cell.dtype),
+                cell[batch_ids[edge_index[0]]],
+            )
+        self.shifts = shifts
+        return shifts
 
     @torch.jit.unused
     def __str__(self) -> str:
@@ -188,6 +289,7 @@ class Configuration:
             "cell": self.cell,
             "batch_ids": self.batch_ids,
             "pbc": self.pbc,
+            "edge_vectors": self.edge_vectors,
         }
 
         def fmt(value):
@@ -216,12 +318,13 @@ class Configuration:
 #       dict[Enum, Any] do not work with torch jit. We
 #       use aliases of strings such that when scripting
 #       str can be used.
-PropertyType = Literal["energy", "forces", "stress", "per_atom_energy"]
+PropertyType = Literal["energy", "forces", "stress", "per_atom_energy", "edge_forces"]
 """PropertyType describes the range of possible properties for :class:`franken.rf.model.FrankenPotential`"""
 ENERGY_KEY: PropertyType = "energy"
 FORCES_KEY: PropertyType = "forces"
 STRESS_KEY: PropertyType = "stress"
 PER_ATOM_ENERGY_KEY: PropertyType = "per_atom_energy"
+EDGE_FORCES_KEY: PropertyType = "edge_forces"
 
 
 def is_property(s: str):
@@ -379,3 +482,24 @@ class Target:
                 torch.cat(s_lst, 1 if s_has_batch else 0) if len(s_lst) > 0 else None
             ),
         )
+
+
+def forces_from_edge_forces(
+    edge_forces: Tensor, edge_index: Tensor, num_atoms: int
+) -> Tensor:
+    """Convert edge forces to atom forces"""
+    # edge_forces: [n_sols, n_edges, 3]
+    # forces: [n_sols, n_atoms, 3]
+    sender = edge_index[:, 0].view(1, -1, 1).expand_as(edge_forces)
+    receiver = edge_index[:, 1].view(1, -1, 1).expand_as(edge_forces)
+    forces = torch.zeros(
+        edge_forces.shape[0],
+        num_atoms,
+        3,
+        dtype=edge_forces.dtype,
+        device=edge_forces.device,
+    )
+    # Negative of the creation of edge forces due to convention in model.py of negating gradient?
+    forces.scatter_add_(1, sender, -edge_forces)
+    forces.scatter_add_(1, receiver, edge_forces)
+    return forces
