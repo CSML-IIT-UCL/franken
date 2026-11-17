@@ -240,11 +240,7 @@ class FrankenPotential(torch.nn.Module):
                 func, argnums=(0, 1), has_aux=True, chunk_size=jac_chunk_size
             )
             self.jac_cache[cache_key] = jacfn
-        old_pos, old_shifts = data.atom_pos, data.shifts
-        try:
-            (force_fm, virial_fm), energy_fm = jacfn(*args)
-        finally:
-            data.atom_pos, data.shifts = old_pos, old_shifts
+        (force_fm, virial_fm), energy_fm = jacfn(*args)
         stress_fm = virial_to_stress(-virial_fm, data)
         return {
             franken.data.base.FORCES_TARGET_KEY: -force_fm,
@@ -270,11 +266,7 @@ class FrankenPotential(torch.nn.Module):
             jac_chunk_size = self._get_jacobian_chunk_size(func, args, argnums=0)
             jacfn = jacfwd(func, argnums=0, has_aux=True, chunk_size=jac_chunk_size)
             self.jac_cache[cache_key] = jacfn
-        old_pos, old_shifts = data.atom_pos, data.shifts
-        try:
-            force_fm, energy_fm = jacfn(*args)
-        finally:
-            data.atom_pos, data.shifts = old_pos, old_shifts
+        force_fm, energy_fm = jacfn(*args)
         return {
             franken.data.base.FORCES_TARGET_KEY: -force_fm,
             franken.data.base.ENERGY_TARGET_KEY: energy_fm,
