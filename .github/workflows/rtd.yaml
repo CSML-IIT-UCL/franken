@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   docs:
+    permissions:
+      contents: write  # Required to push the built docs to the rtd branch
     environment:  # for deployment to pages only!
       name: ghpg
       url: ${{ steps.deployment.outputs.page_url }}
