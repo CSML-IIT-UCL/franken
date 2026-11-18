@@ -11,6 +11,44 @@ from franken.config import GaussianRFConfig, MaceBackboneConfig
 from franken.data import Configuration
 from franken.rf.model import FrankenPotential
 from franken.trainers import RandomFeaturesTrainer
+from tests.utils import mocked_gnn
+
+
+
+@pytest.mark.parametrize("per_atom", [False, True])
+def test_cueq_fallback_after_derivative_refactor(per_atom, caplog):
+    with mocked_gnn(device="cpu", dtype=torch.float32, feature_dim=4):
+        model = FrankenPotential(
+            MaceBackboneConfig("mace_mp/small"),
+            GaussianRFConfig(num_random_features=8, length_scale=1.0),
+            scale_by_Z=False,
+        )
+    data = Configuration(
+        atom_pos=torch.randn(4, 3),
+        atomic_numbers=torch.ones(4, dtype=torch.long),
+        natoms=torch.tensor([4]),
+    )
+    weights = torch.randn(2, 8)
+    properties = ["energy", "forces"]
+    if per_atom:
+        properties.append("per_atom_energy")
+    reference = model.predict(
+        properties, data, weights=weights, differential_mode="torch.autograd"
+    )
+    model.gnn.use_cueq = True
+    with caplog.at_level("WARNING", logger="franken"):
+        for _ in range(2):
+            actual = model.predict(
+                properties, data, weights=weights, differential_mode="torch.func"
+            )
+            assert set(actual) == set(reference)
+            for key in reference:
+                torch.testing.assert_close(actual[key], reference[key])
+    messages = [r.message for r in caplog.records if r.name == "franken"]
+    assert len(messages) == 1
+    assert "Switching from torch.func to torch.autograd" in messages[0]
+    with pytest.raises(ValueError, match="inference-only"):
+        model.feature_maps(data, properties)
 
 
 def graph(atoms, model):
@@ -81,7 +119,7 @@ def test_fitted_model_cueq_inference_and_reload(model_id, tmp_path):
                 multiple[key][:1], actual[key], atol=3e-5, rtol=3e-4
             )
     with pytest.raises(ValueError, match="inference-only"):
-        native.grad_feature_map(graph(atoms, native), ["energy", "forces"])
+        native.feature_maps(graph(atoms, native), ["energy", "forces"])
     trainer = RandomFeaturesTrainer(
         None,
         training_targets=["energy", "forces"],
@@ -120,7 +158,7 @@ def test_fitted_model_cueq_inference_and_reload(model_id, tmp_path):
     )
     classic.enable_cueq(False)
     assert not classic.gnn.use_cueq
-    maps = classic.grad_feature_map(graph(atoms, classic), ["energy", "forces"])
+    maps = classic.feature_maps(graph(atoms, classic), ["energy", "forces"])
     assert maps["forces"].norm() > 1e-5
     # A normal fitted checkpoint can also select cuEquivariance directly in ASE.
     calculator = FrankenCalculator(checkpoint, device="cuda", use_cueq=True)

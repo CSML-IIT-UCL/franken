@@ -87,7 +87,7 @@ The trained model can be used as a ASE (Atomistic Simulations Environment) calcu
 ```python
 from franken.calculators import FrankenCalculator
 calc = FrankenCalculator('best_model.ckpt', device='cuda:0')
-atoms.calc = calc
+atoms.calc = calc 
 ```
 
 See the [MD tutorial](.https://franken.readthedocs.io/notebooks/molecular_dynamics.html) for a complete example about running molecular dynamics, while for deploying it to LAMMPS see the dedicated [page](https://franken.readthedocs.io/topics/lammps.html).

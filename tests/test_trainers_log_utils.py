@@ -1,4 +1,5 @@
 import copy
+import warnings
 
 import pytest
 import torch
@@ -10,7 +11,7 @@ from franken.trainers.log_utils import DataSplit, HyperParameterGroup, LogCollec
 def dummy_log_dict():
     return {
         "checkpoint": {"hash": "rand_uuid", "rf_weight_id": 0},
-        "timings": {"cov_coeffs": 1.0, "solve": 1.0},
+        "timings": {"cov_coeffs": 1.0, "solve": 1.0, "random": 10.0},
         "metrics": {
             "train": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
             "validation": {"energy_MAE": 1.0, "forces_MAE": 1.0, "forces_cosim": 1.0},
@@ -150,3 +151,28 @@ class TestBestModel:
         log_collection = self.log_collection(log_entries, dummy_log_dict)
         with pytest.raises(KeyError, match="Unknown metric='missing'"):
             log_collection.get_best_model(["missing", "forces"], split=DataSplit.VAL)
+
+
+def test_deprecated_timings():
+    with pytest.warns(DeprecationWarning, match="'timings_solve' is deprecated"):
+        le1 = LogEntry(
+            checkpoint_hash="abc", 
+            checkpoint_rf_weight_id=0, 
+            timings_solve=10.0,
+            metrics=[MetricLog(DataSplit.VAL, "forces", 0.0)],
+        )
+    with pytest.warns(DeprecationWarning, match="'timings_cov_coeffs' is deprecated"):
+        le2 = LogEntry(
+            checkpoint_hash="abc", 
+            checkpoint_rf_weight_id=0, 
+            timings_cov_coeffs=10.0,
+            metrics=[MetricLog(DataSplit.VAL, "forces", 0.0)],
+        )
+    # The round-trip eliminates the warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        le1_rt = LogEntry.from_dict(le1.to_dict())
+        le2_rt = LogEntry.from_dict(le2.to_dict())
+    # But the dictionaries stay the same
+    assert le1_rt.to_dict() == le1.to_dict()
+    assert le2_rt.to_dict() == le2.to_dict()

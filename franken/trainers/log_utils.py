@@ -1,10 +1,11 @@
 import json
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 from typing import Any, Union
+import warnings
 
 import numpy as np
 import torch
@@ -26,6 +27,12 @@ class DataSplit(Enum):
 @dataclass(frozen=True)
 class MetricLog:
     split: DataSplit
+    name: str
+    value: float
+
+
+@dataclass(frozen=True)
+class TimingLog:
     name: str
     value: float
 
@@ -53,10 +60,25 @@ class HyperParameterGroup:
 class LogEntry:
     checkpoint_hash: str
     checkpoint_rf_weight_id: int
-    timings_cov_coeffs: float
-    timings_solve: float
+    timings_cov_coeffs: float | None = field(
+        metadata={"deprecated": "use the 'timings' field instead."}, default=None
+    )
+    timings_solve: float | None = field(
+        metadata={"deprecated": "use the 'timings' field instead."}, default=None
+    )
     metrics: list[MetricLog] = field(default_factory=list)
+    timings: list[TimingLog] = field(default_factory=list)
     hyperparameters: list[HyperParameterGroup] = field(default_factory=list)
+
+    def __post_init__(self):
+        for f in fields(self):
+            reason = f.metadata.get("deprecated")
+            if reason and getattr(self, f.name) != f.default:
+                warnings.warn(
+                    f"'{f.name}' is deprecated: {reason}",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
 
     @classmethod
     def from_dict(cls, data: dict) -> "LogEntry":
@@ -67,8 +89,9 @@ class LogEntry:
         checkpoint_rf_weight_id = data["checkpoint"]["rf_weight_id"]
 
         # Parse timings
-        timings_cov_coeffs = data["timings"]["cov_coeffs"]
-        timings_solve = data["timings"]["solve"]
+        timings = []
+        for time_name, time_secs in data["timings"].items():
+            timings.append(TimingLog(time_name, time_secs))
 
         # Parse metrics
         metrics = []
@@ -90,8 +113,7 @@ class LogEntry:
         return cls(
             checkpoint_hash=checkpoint_hash,
             checkpoint_rf_weight_id=checkpoint_rf_weight_id,
-            timings_cov_coeffs=timings_cov_coeffs,
-            timings_solve=timings_solve,
+            timings=timings,
             metrics=metrics,
             hyperparameters=hyperparameters,
         )
@@ -103,6 +125,15 @@ class LogEntry:
         metrics_dict = defaultdict(dict)
         for metric in self.metrics:
             metrics_dict[metric.split.name.lower()][metric.name] = metric.value
+
+        # Convert timings to the expected format
+        timings_dict: dict[str, float] = {}
+        if self.timings_cov_coeffs is not None:
+            timings_dict["cov_coeffs"] = self.timings_cov_coeffs
+        if self.timings_solve is not None:
+            timings_dict["solve"] = self.timings_solve
+        for timing in self.timings:
+            timings_dict[timing.name] = timing.value
 
         # Convert hyperparameters to the expected format
         hyperparams_dict = {}
@@ -117,10 +148,7 @@ class LogEntry:
                 "hash": self.checkpoint_hash,
                 "rf_weight_id": self.checkpoint_rf_weight_id,
             },
-            "timings": {
-                "cov_coeffs": self.timings_cov_coeffs,
-                "solve": self.timings_solve,
-            },
+            "timings": timings_dict,
             "metrics": metrics_dict,
             "hyperparameters": hyperparams_dict,
         }
@@ -159,6 +187,22 @@ class LogEntry:
                 f"Multiple hyperparameters with {group=} and {name=} found."
             )
 
+    def get_timing(self, name: str) -> float:
+        if name == "cov_coeffs" and self.timings_cov_coeffs is not None:
+            return self.timings_cov_coeffs
+        if name == "solve" and self.timings_solve is not None:
+            return self.timings_solve
+        matches = []
+        for timing in self.timings:
+            if timing.name == name:
+                matches.append(timing)
+        if len(matches) == 0:
+            raise KeyError(f"Unable to find timing {name=}")
+        elif len(matches) == 1:
+            return matches[0].value
+        else:
+            raise NameError(f"Multiple timings with {name=} found.")
+
     def add_metric(self, name: str, value: float, split: Union[DataSplit, str]):
         if isinstance(split, str):
             try:
@@ -173,6 +217,14 @@ class LogEntry:
         except KeyError:
             pass
         self.metrics.append(MetricLog(split=split, name=name, value=value))
+
+    def add_timing(self, name: str, value: float) -> None:
+        try:
+            self.get_timing(name)
+            raise ValueError(f"A timing with the same {name=} already exists.")
+        except KeyError:
+            pass
+            self.timings.append(TimingLog(name, value))
 
     def __eq__(self, other) -> bool:
         try:
