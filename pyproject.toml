@@ -71,6 +71,8 @@ cueq-cu13 = [
 metatomic = [
     "metatomic-torch", 
     "metatrain >= 2026.4",
+    # blosc2 4.16.0 ships only a macOS x86_64 wheel (no sdist); keep Linux installs on 4.14.x.
+    "blosc2 >= 4.14, < 4.16",
 ]
 
 # Require CuPy wheels with the ctk extra for CUDA component installation.
