@@ -113,11 +113,11 @@ python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     "franken[metatomic,torch-sim]"
 ```
 
-CUDA 12.8 with optional cuEquivariance and binary CuPy:
+CUDA 12.6 with optional cuEquivariance and binary CuPy:
 
 ```bash
-python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    "torch==2.11.0+cu128" "franken[cueq-cu12,cupy-cu12]"
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu126 \
+    "torch==2.14.1+cu126" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 CUDA 13.0:
@@ -154,7 +154,7 @@ For CPU-only use:
 uv add "torch>=2.5" "franken[metatomic,torch-sim]"
 ```
 
-For CUDA 12.8, change the URL to `https://download.pytorch.org/whl/cu128` and run:
+For CUDA 12.6, change the URL to `https://download.pytorch.org/whl/cu126` and run:
 
 ```bash
 uv add "torch>=2.5" "franken[cueq-cu12,cupy-cu12]"

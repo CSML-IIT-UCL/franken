@@ -1,6 +1,6 @@
 (installation)=
 # Installation
-Franken requires Python 3.11 or newer, [MACE](https://github.com/acesuit/mace) support is included in the default
+Franken requires Python 3.11 or newer. [MACE](https://github.com/acesuit/mace) support is included in the default
 installation.
 ```{raw} html
 <button type="button" class="agent-onboarding__copy" data-agent-guide="../agent-setup.md" aria-live="polite">
@@ -37,7 +37,7 @@ uv add franken
 In an existing environment or uv project, only the last command is needed.
 The installer will choose a PyTorch build automatically; if you prefer choosing your own, see {ref}`Choosing a PyTorch build <choosing-a-pytorch-build>`.
 
-With `conda` , use:
+With `conda`, use:
 
 ```bash
 conda create -n franken python=3.13 pip
@@ -97,11 +97,11 @@ python -m pip install --extra-index-url https://download.pytorch.org/whl/cpu \
     "franken[metatomic,torch-sim]"
 ```
 
-For CUDA 12.8 with cuEquivariance and binary CuPy:
+For CUDA 12.6 with cuEquivariance and binary CuPy:
 
 ```bash
-python -m pip install --extra-index-url https://download.pytorch.org/whl/cu128 \
-    "torch==2.11.0+cu128" "franken[cueq-cu12,cupy-cu12]"
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu126 \
+    "torch==2.14.1+cu126" "franken[cueq-cu12,cupy-cu12]"
 ```
 
 For CUDA 13.0:
@@ -134,8 +134,8 @@ Then install the CPU-only build and your extras together:
 uv add "torch>=2.5" "franken[metatomic,torch-sim]"
 ```
 
-For CUDA 12.8, change the index URL to
-`https://download.pytorch.org/whl/cu128` and run:
+For CUDA 12.6, change the index URL to
+`https://download.pytorch.org/whl/cu126` and run:
 
 ```bash
 uv add "torch>=2.5" "franken[cueq-cu12,cupy-cu12]"
@@ -162,8 +162,8 @@ In uv, prefix this command with `uv run`. `torch.version.cuda` is `None` for a
 CPU-only build, `12.x` for a CUDA 12 build, and `13.x` for a CUDA 13 build.
 `torch.cuda.is_available()` must be true to execute on the GPU. Installing a
 cuEquivariance extra does not turn a CPU-only PyTorch into a CUDA build.
-  
-## Supported Accelerators
+
+## Supported accelerators
 
 (cupy-for-the-low-memory-solver)=
 ### CuPy for the low-memory solver
@@ -190,7 +190,8 @@ the same Python module. Combine extras only within the same CUDA family, such as
 ### Enable cuEquivariance for inference
 
 After installing the matching CUDA build and `cueq-cu12` or `cueq-cu13` extra,
-request cuEquivariance explicitly when loading a fitted MACE model:
+request cuEquivariance explicitly when loading a fitted MACE model. cuEquivariance
+is used for inference only: training always runs on the `e3nn` backend.
 
 ```python
 from franken.calculators import FrankenCalculator
@@ -212,4 +213,28 @@ model = FrankenPotential.load(
     "path/to/run/best_ckpt.pt", map_location="cuda", use_cueq=True
 )
 ```
+
+For inference through [TorchSim](https://torchsim.github.io/torch-sim/) (requires the `torch-sim` extra):
+
+```python
+from franken.calculators.torchsim_inf_wrap import FrankenTorchSimModel
+
+model = FrankenTorchSimModel(
+    "path/to/run/best_ckpt.pt", device="cuda", use_cueq=True
+)
+```
+
+`FrankenTorchSimModel` also accepts an already loaded `FrankenPotential`; in that
+case `use_cueq` overrides its backend. With the default `use_cueq=None`, the
+backend of the supplied model or checkpoint is preserved.
+
 The first evaluation can compile kernels, so benchmark after warmup. Smaller systems may be faster with `use_cueq=False`.
+
+### NVIDIA Warp and CUDA 12 drivers
+
+The `torch-sim` extra installs [NVIDIA Warp](https://github.com/NVIDIA/warp)
+(`warp-lang`) as an indirect dependency. Recent `warp-lang` wheels on PyPI are
+built for CUDA 13 and require a matching NVIDIA driver. If Warp reports an
+insufficient CUDA driver version on a machine with a CUDA 12.x driver, install
+the `+cu12` build of the same `warp-lang` version from the
+[Warp GitHub releases](https://github.com/NVIDIA/warp/releases).
