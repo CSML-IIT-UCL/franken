@@ -1,0 +1,86 @@
+/* Scoped to override Sphinx Awesome's #content prose defaults. */
+#content .agent-onboarding__copy {
+    --agent-border: #d8e1eb;
+    --agent-foreground: #172033;
+    --agent-background: #fff;
+    --agent-hover: #edf3fa;
+    --agent-accent: #2563eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+    box-sizing: border-box;
+    width: 20rem;
+    max-width: 100%;
+    margin: 1.75rem auto;
+    padding: .8rem 1.25rem;
+    border: 1px solid var(--agent-border);
+    border-radius: 999px;
+    background: var(--agent-background);
+    color: var(--agent-foreground);
+    box-shadow: 0 1px 2px #00000008;
+    font: inherit;
+    font-size: .875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+
+html.dark #content .agent-onboarding__copy {
+    --agent-border: #354155;
+    --agent-foreground: #f1f5f9;
+    --agent-background: #202b3b;
+    --agent-hover: #2a384b;
+    --agent-accent: #93b8ff;
+}
+
+#content .agent-onboarding__copy:hover {
+    border-color: var(--agent-accent);
+    background: var(--agent-hover);
+}
+
+#content .agent-onboarding__copy:focus-visible {
+    outline: 2px solid var(--agent-accent);
+    outline-offset: 4px;
+}
+
+#content .agent-onboarding__icons {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: .35rem;
+}
+
+#content .agent-onboarding__icons img {
+    display: block;
+    width: 1.2rem;
+    height: 1.2rem;
+    margin: 0;
+}
+
+html.dark #content .agent-onboarding__adaptive-icon {
+    filter: invert(1);
+}
+
+#content .agent-onboarding__copy > svg {
+    display: block;
+    flex-shrink: 0;
+}
+
+#content .agent-onboarding__copy [data-copy-label] {
+    white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+    #content .agent-onboarding__copy {
+        gap: .5rem;
+        padding-inline: .75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #content .agent-onboarding__copy {
+        transition: none;
+    }
+}

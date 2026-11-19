@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import gc
 import inspect
+import json
 import logging
 import os
 import sys
@@ -11,7 +12,6 @@ from collections.abc import Sequence, Mapping, Callable, Generator
 from typing import Generic, Iterable, Optional, TypeVar
 
 import torch
-from omegaconf import DictConfig, ListConfig, OmegaConf
 
 import franken.utils.distributed as dist_utils
 
@@ -319,24 +319,8 @@ def get_logger_stdout_level(log: logging.Logger):
 
 
 def pprint_config(cfg: dict):
-    tl_keys = sorted(list(cfg.keys()))
-    tl_leaf_keys = [
-        k
-        for k in tl_keys
-        if not isinstance(cfg[k], (DictConfig, dict, list, ListConfig))
-    ]
-    tl_struct_keys = [k for k in tl_keys if k not in tl_leaf_keys]
-    s = ""
-    for k in tl_leaf_keys:
-        s += f"{k}: {str(cfg[k])}\n"
-    yaml_content: dict[str, str] = {}
-    for key in tl_struct_keys:
-        yaml_content[key] = OmegaConf.to_yaml(cfg[key], resolve=True, sort_keys=True)
-    for key, content in yaml_content.items():
-        s += f"{key}:\n"
-        aligned_content = [f"    {line}" for line in content.splitlines(True)]
-        s += f"{''.join(aligned_content)}"
-    s = s.replace("\n\n", "\n")
+    """Log the plain-dict configuration in the same format as configs.json."""
+    s = json.dumps(cfg, indent=4, sort_keys=True)
     # Output
     logger.debug(s, extra={"rank0": True})
     # If logger has output the string to stdout then we don't print it

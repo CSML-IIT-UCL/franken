@@ -2,3 +2,13 @@
     background-color: transparent;
     font-size: 1rem;
 }
+
+/* Theme-dependent image/figure visibility */
+html.dark .only-light {
+    display: none !important;
+}
+
+html:not(.dark) .only-dark {
+    display: none !important;
+}
+

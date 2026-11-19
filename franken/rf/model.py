@@ -2,11 +2,12 @@
 
 import logging
 import os
+from dataclasses import replace
 from typing import Callable, Literal, Mapping, Union, cast
 
 import torch
 
-from franken.config import BackboneConfig, RFConfig
+from franken.config import BackboneConfig, MaceBackboneConfig, RFConfig
 from franken.backbones.utils import load_checkpoint
 from franken.data import Configuration
 
@@ -90,6 +91,7 @@ class FrankenPotential(torch.nn.Module):
             num_species=num_species, atomic_energies=atomic_energies
         )
         self.force_func_grad = False
+        self._warned_cueq_autograd = False
 
     @property
     @torch.jit.unused
@@ -157,11 +159,20 @@ class FrankenPotential(torch.nn.Module):
         map_location=None,
         rf_weight_id: int | None = None,
         backbone_path_or_id: str | None = None,
+        use_cueq: bool | None = None,
     ):
         ckpt = torch.load(path, map_location=map_location, weights_only=False)
 
         rf_cfg = RFConfig.from_ckpt(ckpt["rf"]["config"])
         gnn_cfg = BackboneConfig.from_ckpt(ckpt["gnn"]["config"])
+        if use_cueq is not None:
+            if not isinstance(gnn_cfg, MaceBackboneConfig):
+                if use_cueq:
+                    raise ValueError(
+                        "cuEquivariance inference is only supported for MACE."
+                    )
+            else:
+                gnn_cfg.use_cueq = use_cueq
         if backbone_path_or_id is not None:
             logger.warning(
                 f"The backbone path/id changed from {gnn_cfg.path_or_id} to {backbone_path_or_id}. If this refers to a different backbone, unexpected results may occur."
@@ -193,6 +204,33 @@ class FrankenPotential(torch.nn.Module):
             return model.to(map_location)
         else:
             return model
+
+    @torch.jit.unused
+    def enable_cueq(self, enabled: bool = True):
+        """Select a MACE inference backend without changing the fitted RF head.
+
+        Rebuilds the frozen backbone from its original checkpoint. Training
+        feature maps require the e3nn backend; use ``enabled=False`` to return
+        to it. A CUDA GPU and matching native kernels are required to enable.
+        """
+        if not isinstance(self.gnn_config, MaceBackboneConfig):
+            raise ValueError("cuEquivariance inference is only supported for MACE.")
+        if getattr(self.gnn, "use_cueq", False) == enabled:
+            return self
+        config = replace(self.gnn_config, use_cueq=enabled)
+        backbone_tensor = next(self.gnn.parameters())
+        backbone = load_checkpoint(config).to(
+            device=backbone_tensor.device, dtype=backbone_tensor.dtype
+        )
+        if getattr(backbone, "use_cueq", False) != enabled:
+            raise ValueError(
+                "Use the original e3nn backbone checkpoint to disable cuEquivariance."
+            )
+        backbone.train(self.gnn.training)
+        self.gnn = backbone
+        self.gnn_config = config
+        self.jac_cache.clear()
+        return self
 
     @torch.jit.unused
     @torch.no_grad
@@ -361,6 +399,11 @@ class FrankenPotential(torch.nn.Module):
             All feature maps have a first dimension of size `num_random_features`
             followed by the dimensions of the respective feature map.
         """
+        if getattr(self.gnn, "use_cueq", False):
+            raise ValueError(
+                "cuEquivariance is inference-only. Load with use_cueq=False "
+                "or call enable_cueq(False) before computing training feature maps."
+            )
         compute_force = franken.data.base.FORCES_KEY in properties
         compute_stress = franken.data.base.STRESS_KEY in properties
         per_atom = franken.data.base.PER_ATOM_ENERGY_KEY in properties
@@ -440,6 +483,18 @@ class FrankenPotential(torch.nn.Module):
         properties: list[str],
         mode: str,
     ) -> dict[str, torch.Tensor]:
+        if getattr(self.gnn, "use_cueq", False) and mode == "torch.func":
+            # Native kernels support reverse autograd, but not forward AD.
+            # Multiple inference heads can use ordinary backward one at a time.
+            if not torch.jit.is_scripting():
+                if not self._warned_cueq_autograd:
+                    logger.warning(
+                        "cuEquivariance native kernels do not support forward-mode "
+                        "automatic differentiation. Switching from torch.func to "
+                        "torch.autograd for inference."
+                    )
+                    self._warned_cueq_autograd = True
+            mode = "torch.autograd"
         compute_force = franken.data.base.FORCES_KEY in properties
         compute_stress = franken.data.base.STRESS_KEY in properties
         per_atom = franken.data.base.PER_ATOM_ENERGY_KEY in properties

@@ -4,6 +4,11 @@
 In franken, the input descriptors for learning the potential energy surface are extracted from a pre-trained graph neural network (GNN).
 This GNN can be either one of the many general-purpose models or a custom one (at the present, we support MACE and PET architectures).
 
+MACE is installed by default. PET/UPET backbones are supported after installing
+the `metatomic` extra with `python -m pip install "franken[metatomic]"` or
+`uv add "franken[metatomic]"`. The backbone name in configurations and CLI
+commands remains `pet`.
+
 ### General-purpose models
 
 The available pre-trained GNNs can be listed by running `franken.backbones list`:

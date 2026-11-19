@@ -45,6 +45,8 @@ def are_dicts_close(dict1, dict2, rtol=1e-4, atol=1e-6, verbose=False):
 def mocked_gnn(device, dtype, feature_dim: int = 32, backbone_id: str = "test"):
     # A bunch of code to initialize a mock for the GNN
     gnn = MagicMock()
+    # This training mock uses ordinary descriptors, not native cuEquivariance.
+    gnn.use_cueq = False
     gnn.feature_dim = MagicMock(return_value=feature_dim)
     gnn.cutoff_radius = MagicMock(return_value=6.0)
     gnn.num_interaction_layers = MagicMock(return_value=2)

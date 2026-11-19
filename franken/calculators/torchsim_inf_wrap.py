@@ -40,6 +40,9 @@ else:
 
         The dtype controls inference precision, either ``"float32"|torch.float32`` or ``"float64"|torch.float64``.
         By default ``None`` preserves the model's precision and uses the backbone's precision for inputs.
+
+        ``use_cueq`` enables or disables cuEquivariance for MACE inference.
+        By default it preserves the backend of the supplied model or checkpoint.
         """
 
         def __init__(
@@ -49,6 +52,7 @@ else:
             device: torch.device | str,
             dtype: torch.dtype | str | None = None,
             rf_weight_id: int | None = None,
+            use_cueq: bool | None = None,
             neighbor_list_fn: Callable = torchsim_nl,
             compute_forces: bool = True,
             compute_stress: bool = False,
@@ -76,9 +80,12 @@ else:
                     franken_model,
                     map_location=self._device,
                     rf_weight_id=rf_weight_id,
+                    use_cueq=use_cueq,
                 )
             else:
                 self.model = franken_model
+                if use_cueq is not None:
+                    self.model.enable_cueq(use_cueq)
 
             if not isinstance(self.model.gnn, AtomisticModelWrapper):
                 raise NotImplementedError(

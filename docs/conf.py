@@ -6,8 +6,10 @@
 
 
 import os
-import sys
 import re
+import sys
+from pathlib import Path
+
 from docutils import nodes
 from sphinxawesome_theme.postprocess import Icons
 
@@ -38,6 +40,7 @@ exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
     "requirements.txt",
+    "agent-setup.md",
     "notebooks/autotune.ipynb",
     "notebooks/getting_started.ipynb",
 ]
@@ -94,13 +97,15 @@ source_suffix = {
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 html_theme = "sphinxawesome_theme"
 html_static_path = ["_static"]
-html_css_files = ["css/mystyle.css"]
+html_css_files = ["css/mystyle.css", "css/agent-onboarding.css"]
+html_js_files = ["js/agent-onboarding.js"]
+html_extra_path = ["agent-setup.md"]
 templates_path = ["_templates"]
 # Favicon configuration
 # html_favicon = '_static/favicon.ico'
 # Configure syntax highlighting for Awesome Sphinx Theme
-pygments_style = "sphinx"
-pygments_dark_style = "monokai"
+pygments_style = "colorful"
+pygments_style_dark = "one-dark"
 html_title = "franken"
 # Additional theme configuration
 html_theme_options = {
@@ -121,7 +126,9 @@ html_theme_options = {
 }
 
 ## Teletype role
-tt_re = re.compile('^:tt:`(.*)`$')
+tt_re = re.compile("^:tt:`(.*)`$")
+
+
 def tt_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
     """
     Can be used as :tt:`SOME_TEXT_HERE`,
@@ -130,10 +137,27 @@ def tt_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
     m = tt_re.search(rawtext)
     if m:
         arg = m.group(1)
-        result = [nodes.literal('', arg)]
-        result[0]['classes'].append('literal-no-code')
-    return result,[]
+        result = [nodes.literal("", arg)]
+        result[0]["classes"].append("literal-no-code")
+    return result, []
+
+
+def write_theme_highlighting(app, exception):
+    """Follow Awesome's theme toggle instead of the OS color preference."""
+    if exception is not None or app.builder.format != "html":
+        return
+    builder = app.builder
+    light = builder.highlighter.get_formatter().get_style_defs(
+        "html:not(.dark) .highlight"
+    )
+    dark = builder.dark_highlighter.get_formatter().get_style_defs(
+        "html.dark .highlight"
+    )
+    (Path(app.outdir) / "_static" / "pygments.css").write_text(
+        light + "\n" + dark + "\n", encoding="utf-8"
+    )
 
 
 def setup(app):
-    app.add_role('tt', tt_role)
+    app.add_role("tt", tt_role)
+    app.connect("build-finished", write_theme_highlighting)

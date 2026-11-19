@@ -112,6 +112,11 @@ class RandomFeaturesTrainer(BaseTrainer):
         }
 
     def on_fit_start(self, model: FrankenPotential):
+        if getattr(model.gnn, "use_cueq", False):
+            raise ValueError(
+                "cuEquivariance is inference-only. Train with the e3nn backend "
+                "and enable cuEquivariance after fitting."
+            )
         # initialize input scaler based on statistics property
         model.input_scaler.set_from_statistics(self.get_statistics(model)[0])
         # initialize energy shift based on atomic energies
